@@ -28,6 +28,9 @@ const ACCOUNT_KEY_ENV = {
   // houstonmounting.com's — instead of each getting its own. Only one account
   // entry exists; all four slugs resolve to it via LEGACY_SLUG_ACCOUNT below.
   houstonmounting: 'HOUSTONMOUNTING_STRIPE_SECRET_KEY',
+  // Los Angeles brand: its OWN Stripe account (owner is creating it). Unstaffed
+  // LA takes requests, not cards, so nothing charges here until it is staffed.
+  tvmountinglosangeles: 'TVMOUNTINGLOSANGELES_STRIPE_SECRET_KEY',
 };
 
 // Legacy slug -> account for bookings made BEFORE per-booking stamping: Handy
@@ -56,6 +59,7 @@ const LEGACY_SLUG_ACCOUNT = {
   atxtvmount:              'austin',
   austinmountingpros:      'austin',
   austintvinstall:         'austin',
+  tvmountinglosangeles:    'tvmountinglosangeles',
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)

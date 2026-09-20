@@ -156,16 +156,27 @@ export function emailConfig(slug) {
       from:   process.env.AUSTINTVINSTALL_EMAIL_FROM || 'contact@austintvinstall.com',
     };
   }
-  // LA trio (tvmountinglosangeles / latvpro / lainstall) — real, active
-  // business rows, but unstaffed demand-gauging funnels with no Resend sender
-  // of their own. Without this branch they fell through to the Handy Andy
-  // default below and would have emailed an LA customer from Handy Andy's
-  // account: the precise cross-brand mistake every comment in this file warns
-  // about. Returning no key makes sendEmail() skip with a logged reason
-  // instead. The launch checklist hides the email item for these three to
-  // match (LAUNCH_NO_EMAIL_SLUGS in public/admin.html) — give one a verified
-  // sender and it must be removed from BOTH places.
-  if (slug === 'tvmountinglosangeles' || slug === 'latvpro' || slug === 'lainstall') {
+  // tvmountinglosangeles — now a real, emailing brand (2026-09-20): same
+  // per-brand-key-wins / shared-account-fallback pattern as the Houston and
+  // Denver micro-brands above, and never Handy Andy's account. Its own domain is
+  // not verified in Resend, so TVMOUNTINGLOSANGELES_EMAIL_FROM carries the
+  // brand name over an already-verified address ("TV Mounting Los Angeles
+  // <contact@houstonmounting.com>"); the literal default only works once
+  // tvmountinglosangeles.com itself is verified.
+  if (slug === 'tvmountinglosangeles') {
+    return {
+      apiKey: process.env.TVMOUNTINGLOSANGELES_RESEND_API_KEY || process.env.HOUSTONMOUNTING_RESEND_API_KEY,
+      from:   process.env.TVMOUNTINGLOSANGELES_EMAIL_FROM || 'contact@tvmountinglosangeles.com',
+    };
+  }
+  // The other two LA brands (latvpro / lainstall) are still unstaffed
+  // demand-gauging funnels with no sender of their own. Without this branch they
+  // fall through to the Handy Andy default below and would email an LA customer
+  // from Handy Andy's account — the cross-brand mistake this file exists to
+  // prevent. No key makes sendEmail() skip with a logged reason instead, and
+  // the launch checklist hides their email item (LAUNCH_NO_EMAIL_SLUGS in
+  // public/admin.html); give one a verified sender and remove it from BOTH.
+  if (slug === 'latvpro' || slug === 'lainstall') {
     return { apiKey: null, from: null };
   }
   return {
@@ -197,7 +208,64 @@ export const EMAIL_BRANDS = {
   'atxtvmount':         { slug: 'atxtvmount',         name: 'ATX TV Mounting',        accent: '#1E56E0', website: 'atxtvmount.com' },
   'austinmountingpros': { slug: 'austinmountingpros', name: 'Austin Mounting Pros',   accent: '#8A6A2C', website: 'austinmountingpros.com' },
   'austintvinstall':    { slug: 'austintvinstall',    name: 'Austin TV Installation', accent: '#0D7A68', website: 'austintvinstall.com' },
+  // Accent = the site's own green (--color-lagoon in tvmountinglosangeles-site).
+  'tvmountinglosangeles': { slug: 'tvmountinglosangeles', name: 'TV Mounting Los Angeles', accent: '#2E7D32', website: 'tvmountinglosangeles.com' },
 };
+// ── Request received (unstaffed-area request flow) ──────────────────────────
+// Sent to the CUSTOMER right after they submit the booking widget's request
+// form in an area with no technicians yet (currently tvmountinglosangeles).
+// It promises only what actually happens next — the office reviews the request
+// and texts a written quote — and never a time slot, a price or an arrival
+// window. Same table/inline-style construction as the other templates here so it
+// renders in every mail client.
+export function requestReceivedEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) {
+  const b = brand || EMAIL_BRANDS['handy-andy'];
+  const accent = b.accent;
+  const rgb = hexRgb(accent);
+  const firstName = String(details.firstName || '').trim();
+  const serviceLabel = String(details.serviceLabel || '').trim();
+  const items = (Array.isArray(details.lineItems) ? details.lineItems : [])
+    .map(it => String((it && it.description) || '').trim())
+    .filter(d => d && !isDefaultTypeLabel(d))
+    .slice(0, 8);
+  const windows = (Array.isArray(details.preferredSlots) ? details.preferredSlots : [])
+    .map(s => [s && s.date, s && s.label].filter(Boolean).join(' · '))
+    .filter(Boolean)
+    .slice(0, 5);
+  const where = [details.address, [details.city, details.state, details.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const subject = `We got your request | ${b.name}`;
+
+  const row = (label, html) => html
+    ? `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#6b7280;width:120px;vertical-align:top;">${label}</td><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:15px;color:#11181c;line-height:1.5;">${html}</td></tr>`
+    : '';
+  const list = a => a.map(x => esc(x)).join('<br>');
+  const summary = [
+    row('Service', serviceLabel ? esc(serviceLabel) : ''),
+    row('Details', items.length ? list(items) : ''),
+    row('Preferred times', windows.length ? list(windows) : ''),
+    row('Location', where ? esc(where) : ''),
+  ].join('');
+  const step = (n, title, body) => `<tr><td style="padding:0 0 14px;vertical-align:top;width:34px;"><div style="width:26px;height:26px;border-radius:13px;background:${accent};color:#fff;font-size:13px;font-weight:800;text-align:center;line-height:26px;">${n}</div></td><td style="padding:0 0 14px;vertical-align:top;"><div style="font-size:15px;font-weight:800;color:#11181c;">${title}</div><div style="font-size:14px;color:#4b5563;line-height:1.5;margin-top:2px;">${body}</div></td></tr>`;
+
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px;"><tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;font-family:Segoe UI,Arial,Helvetica,sans-serif;">
+<tr><td style="background:${accent};padding:22px 28px;"><div style="font-size:19px;font-weight:800;color:#ffffff;letter-spacing:-.01em;">${esc(b.name)}</div></td></tr>
+<tr><td style="padding:28px 28px 8px;">
+<div style="font-size:24px;font-weight:800;color:#11181c;letter-spacing:-.02em;">We got your request${firstName ? ', ' + esc(firstName) : ''}.</div>
+<div style="font-size:15px;color:#4b5563;line-height:1.6;margin-top:8px;">Thanks for reaching out. Nothing is booked yet: we look over what you sent, then text you a written quote and the first open date.</div>
+</td></tr>
+<tr><td style="padding:18px 28px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+${step(1, 'We review your request', 'We read the details and the wall you described.')}
+${step(2, 'You get a written quote by text', 'It arrives at the number you gave us, with the first open date.')}
+${step(3, 'You pick the date', 'Say yes and we lock it in. No sales visit and no obligation.')}
+</table></td></tr>
+${summary ? `<tr><td style="padding:6px 28px 8px;"><div style="font-size:13px;font-weight:800;color:#11181c;margin-bottom:4px;">What you sent us</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:rgba(${rgb},0.05);border-radius:12px;padding:4px 16px;">${summary}</table></td></tr>` : ''}
+<tr><td style="padding:16px 28px 26px;"><div style="font-size:12.5px;color:#6b7280;line-height:1.6;">You are receiving this because you asked for a quote at ${esc(b.website)}. Reply to the text we send you if anything changes.</div></td></tr>
+</table></td></tr></table></body></html>`;
+  return { subject, html };
+}
+
 // An unknown slug used to fall back to Handy Andy, which meant a new business
 // would send Handy-Andy-branded email to its own customers and look, to the
 // reader, like the wrong company. Warn loudly; the fallback stays so a branding

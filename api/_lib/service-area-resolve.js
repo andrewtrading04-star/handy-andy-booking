@@ -27,6 +27,11 @@ export function zip5(raw) {
 // seeded and they take precedence over this fallback on the line above.
 const CA_ZIP_RE = /^9(?:[0-5]\d{3}|6[01]\d{2})$/;
 
+// Businesses that own an unstaffed California ("Los Angeles") service area and
+// so get the CA-range fallback. Handy Andy's LA area serves the ihandyandy.com
+// pages; tvmountinglosangeles has its own row for its own site.
+export const LA_FALLBACK_SLUGS = new Set(['handy-andy', 'tvmountinglosangeles']);
+
 // Resolves a zip to { id, name, state, timezone, unstaffed } for one business,
 // or null when the zip is not covered. Pure lookup: no HTTP, no res.
 export async function resolveServiceArea(db, businessId, businessSlug, rawZip) {
@@ -47,7 +52,7 @@ export async function resolveServiceArea(db, businessId, businessSlug, rawZip) {
 
   // No per-zip row. Only handy-andy has the unstaffed LA area, and only a CA
   // zip may fall back to it.
-  if (businessSlug === 'handy-andy' && CA_ZIP_RE.test(zip)) {
+  if (LA_FALLBACK_SLUGS.has(businessSlug) && CA_ZIP_RE.test(zip)) {
     const { data: la } = await db.from('service_areas')
       .select('id, name, state, timezone, unstaffed')
       .eq('business_id', businessId).eq('state', 'CA').eq('active', true).maybeSingle();
@@ -83,7 +88,7 @@ export async function unstaffedZipMatcher(db, businessId, businessSlug) {
     if (!zip) return false;
     if (zipToArea.has(zip)) return unstaffedIds.has(zipToArea.get(zip));
     // No per-zip row: LA fallback only, and only for handy-andy.
-    return businessSlug === 'handy-andy' && laUnstaffed && CA_ZIP_RE.test(zip);
+    return LA_FALLBACK_SLUGS.has(businessSlug) && laUnstaffed && CA_ZIP_RE.test(zip);
   };
 }
 

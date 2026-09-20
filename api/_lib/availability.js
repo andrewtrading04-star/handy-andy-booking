@@ -141,6 +141,8 @@ const PARTNER_SLUG = {
   'atxtvmount':            { slug: 'handy-andy', metro: /austin/i },
   'austinmountingpros':    { slug: 'handy-andy', metro: /austin/i },
   'austintvinstall':       { slug: 'handy-andy', metro: /austin/i },
+  // No LA techs exist yet; when they do, they belong to handy-andy's LA roster.
+  'tvmountinglosangeles':  { slug: 'handy-andy', metro: /los angeles/i },
 };
 
 // ── Sole-technician lock ─────────────────────────────────────────────────────

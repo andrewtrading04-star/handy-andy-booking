@@ -43,6 +43,13 @@ export const NATIVE_BUSINESS = {
   'atxtvmount':         { name: 'ATX TV Mounting',         legalName: 'ATX TV Mounting' },
   'austinmountingpros': { name: 'Austin Mounting Pros',    legalName: 'Austin Mounting Pros' },
   'austintvinstall':    { name: 'Austin TV Installation',  legalName: 'Austin TV Installation' },
+  // Los Angeles micro-brand (tvmountinglosangeles.com). No techs of its own and
+  // none anywhere in LA yet, so its own Los Angeles service area is `unstaffed`
+  // and the widget runs the REQUEST flow (owner texted, customer acknowledged by
+  // text + email) instead of a slot booking. To make it a real booking flow:
+  // seed LA techs + zips and flip that area to staffed. Stripe/Resend keys are
+  // its own (TVMOUNTINGLOSANGELES_*), never Handy Andy's.
+  'tvmountinglosangeles': { name: 'TV Mounting Los Angeles', legalName: 'TV Mounting Los Angeles' },
 };
 
 export const NATIVE_SLUGS = Object.keys(NATIVE_BUSINESS);

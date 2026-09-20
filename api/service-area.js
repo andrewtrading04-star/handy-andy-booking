@@ -5,6 +5,7 @@
 // here calls out to it.
 import { serviceClient } from './_lib/supabase.js';
 import { NATIVE_SLUGS } from './_lib/native-businesses.js';
+import { LA_FALLBACK_SLUGS } from './_lib/service-area-resolve.js';
 
 // The table stores bare 5-digit zips; callers sometimes send a ZIP+4
 // ("80220-1032", office form, Jul 2026), which the exact-match lookup missed,
@@ -82,7 +83,7 @@ async function nativeServiceArea(req, res, slug) {
       // thousands of service_area_zips rows; a real LA launch later just seeds
       // real zips + techs and flips unstaffed off, and per-zip rows would then
       // take precedence over this fallback anyway.
-      if (slug === 'handy-andy' && /^9(?:[0-5]\d{3}|6[01]\d{2})$/.test(zip)) {
+      if (LA_FALLBACK_SLUGS.has(slug) && /^9(?:[0-5]\d{3}|6[01]\d{2})$/.test(zip)) {
         const { data: la } = await db.from('service_areas')
           .select('id, name, state, timezone, unstaffed')
           .eq('business_id', biz.id).eq('state', 'CA').eq('active', true).maybeSingle();

@@ -7126,16 +7126,15 @@ function launchEffective(b, key){
 // of excluded — mile-high already was.
 const LAUNCH_NO_GBP_SLUGS = new Set(['houstonmounting','houstontvinstallation','tvhanginghouston','htvmounting','tvmountingdenver','austinmountingpros','atxtvmount','atxmountpros','austintvinstall','latvpro','lainstall','tvmountinglosangeles']);
 // Businesses that deliberately have NO confirmation email, given the same hard
-// exclusion as the no-GBP set above. The three LA brands are unstaffed
+// exclusion as the no-GBP set above. latvpro and lainstall are unstaffed
 // demand-gauging funnels (see the CA-range fallback in api/service-area.js).
-// They had no entry in emailConfig() at all, so they fell through to its final
-// default and would have emailed an LA customer from Handy Andy's account —
-// the exact mistake that whole per-business system exists to prevent.
-// api/_lib/email.js now returns no key for them, so nothing sends, and the
+// api/_lib/email.js returns no key for them, so nothing sends, and the
 // checklist item is removed to match rather than sitting permanently red for
-// something nobody intends to set up. Give one a real verified sender and it
-// should come off this list.
-const LAUNCH_NO_EMAIL_SLUGS = new Set(['latvpro','lainstall','tvmountinglosangeles']);
+// something nobody intends to set up. tvmountinglosangeles came OFF this list
+// 2026-09-20: it now sends a request-received text + email to customers and has
+// its own EMAIL_BRANDS entry, so the email item counts for it like any other
+// brand. Give latvpro/lainstall a real verified sender and they come off too.
+const LAUNCH_NO_EMAIL_SLUGS = new Set(['latvpro','lainstall']);
 // City grouping for the Launch monitoring board. No `city` column exists on
 // the business record, so this is a plain slug lookup maintained by hand —
 // add new slugs here as they're onboarded, or they fall into "Other".

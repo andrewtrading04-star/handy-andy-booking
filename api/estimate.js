@@ -16,8 +16,16 @@ import { smsNotificationsOn } from './_lib/notify.js';
 import { sendSMS, toE164, textConsentFor } from './_lib/sms.js';
 import { sendOwnerEstimateAlert } from './_lib/owner-notify.js';
 import { ALL_BUSINESS_SLUGS } from './_lib/native-businesses.js';
+import { sendEmail, requestReceivedEmail, brandFor } from './_lib/email.js';
 
 const ALLOWED = new Set(ALL_BUSINESS_SLUGS);
+
+// Brands whose CUSTOMERS get an acknowledgement (text + email) the moment an
+// unstaffed-area request lands. The ihandyandy.com LA/DFW/Phoenix/San Antonio
+// pages keep their owner-only behavior; only brands listed here promise the
+// customer a follow-up in writing. Add a slug once its Resend key/from-address
+// exist (sendEmail skips loudly, never falls back to another brand's account).
+const REQUEST_ACK_SLUGS = new Set(['tvmountinglosangeles']);
 
 // Mirrors the estimates.tax_rate column default. Only used to compute the
 // "Value:" figure in the notification text when the caller didn't send its own
@@ -357,6 +365,29 @@ async function submit(req, res, db) {
     zip, serviceLabel: service_label, description,
     preferredSlots: preferred_slots, photoUrl: photo_url,
   }).catch(e => console.warn('[estimate] owner email failed:', e.message)));
+
+  // Customer acknowledgement for brands that promise one. A phone number IS the
+  // opt-in (see sms_consent above), so the text goes unless the number has a
+  // prior STOP. The email only goes when the customer gave an address.
+  if (isUnstaffedRequest && REQUEST_ACK_SLUGS.has(biz.slug)) {
+    const brand = brandFor(biz.slug);
+    const first = name.split(/\s+/)[0] || '';
+    if (estimateInsert.sms_consent) {
+      const ackText = `${brand.name}: thanks${first ? ', ' + first : ''}, we got your request. We'll text you a written quote and the first open date. Reply STOP to opt out.`;
+      notifications.push(sendSMS(phone, ackText).catch(e => console.error('[estimate] customer ack sms failed:', e.message)));
+    } else {
+      console.warn(`[estimate] ${biz.slug}: customer ack text skipped (no SMS consent on file)`);
+    }
+    const custEmail = (customer.email || '').toString().trim();
+    if (custEmail) {
+      const { subject, html } = requestReceivedEmail({
+        firstName: first, serviceLabel: service_label, lineItems: line_items,
+        preferredSlots: preferred_slots, address, city, state, zip,
+      }, brand);
+      notifications.push(sendEmail({ slug: biz.slug, to: custEmail, subject, html })
+        .catch(e => console.warn('[estimate] customer ack email failed:', e.message)));
+    }
+  }
 
   // A notification failure must never lose the request — it's already stored.
   await Promise.allSettled(notifications);

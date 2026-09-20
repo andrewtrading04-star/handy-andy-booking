@@ -141,6 +141,7 @@ const PARTNER_SLUG = {
   // with no open dates in a real zip its own service_area_zips covers fine).
   'tvmountingdenver': 'handy-andy',
   'houstonmounting': 'handy-andy', 'houstontvinstallation': 'handy-andy', 'tvhanginghouston': 'handy-andy', 'htvmounting': 'handy-andy',
+  'tvmountinglosangeles': 'handy-andy',
 };
 
 // The partner business row for a host slug, or null when there isn't one.

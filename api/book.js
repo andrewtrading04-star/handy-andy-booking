@@ -141,6 +141,8 @@ const STRIPE_PK_ENV = {
   atxtvmount:             'AUSTIN_STRIPE_PUBLISHABLE_KEY',
   austinmountingpros:     'AUSTIN_STRIPE_PUBLISHABLE_KEY',
   austintvinstall:        'AUSTIN_STRIPE_PUBLISHABLE_KEY',
+  // Own account, keys still to come from the owner.
+  tvmountinglosangeles:   'TVMOUNTINGLOSANGELES_STRIPE_PUBLISHABLE_KEY',
 };
 function stripePublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
@@ -244,7 +246,7 @@ async function payStatusPublic(req, res) {
 // Same purpose as stripe_config above: surface a missing key before a real
 // customer's confirmation email silently fails to send.
 const EMAIL_BUSINESSES = new Set(['handy-andy', 'doms', 'mile-high', 'austin', 'precision',
-  'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall']);
+  'atxmountpros', 'atxtvmount', 'austinmountingpros', 'austintvinstall', 'tvmountinglosangeles']);
 function emailPublicConfig(req, res) {
   const business = ((req.query || {}).business || 'handy-andy').toString().trim();
   if (!EMAIL_BUSINESSES.has(business)) return res.status(400).json({ error: `Unknown business "${business}"` });
