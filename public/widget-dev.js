@@ -624,7 +624,7 @@
     // Running total on every step except 'zip' (service area/pricing profile
     // isn't known yet) and 'customer' (bCustomer() already shows its own full
     // itemized breakdown, so a second total would be redundant there).
-    const footer=(key==='zip'||key==='customer')?'':S.footerBar(Math.round(footerTotal()*100)/100);
+    const footer='';
     root.innerHTML=prog+body+footer;
     wire(root);
     // Mount Stripe card element after DOM is ready
@@ -638,8 +638,7 @@
   function bZip(){
     return `
       <div style="text-align:center!important;">
-        <h1 style="${S.h1};font-size:26px!important;text-align:center!important;">Do we service your area?</h1>
-        <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see.</p>
+        <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see if we service your area</p>
         <input type="text" id="ha-zip" style="${S.input}" placeholder="e.g. 77001" maxlength="5" inputmode="numeric">
         <div style="text-align:center!important;">
           <button id="btn-zip" style="${S.btnPri};padding:12px 36px!important;font-size:16px!important;">Check Area →</button>

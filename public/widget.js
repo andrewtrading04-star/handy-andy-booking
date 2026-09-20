@@ -1053,7 +1053,7 @@
     // the whole unstaffed-area request flow — no technician is confirmed for
     // this area, so no price is ever shown anywhere in that flow (owner,
     // 2026-09-18), not just on the final summary step.
-    const footer=(key==='zip'||key==='customer'||nativeUnstaffed)?'':S.footerBar(Math.round(footerTotal()*100)/100);
+    const footer='';
     root.innerHTML=prog+body+footer;
     wire(root);
     // Mount Stripe card element after DOM is ready
@@ -1156,8 +1156,7 @@
   function bZip(){
     return `
       <div style="text-align:center!important;">
-        <h1 style="${S.h1};font-size:26px!important;text-align:center!important;">Do we service your area?</h1>
-        <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see.</p>
+        <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see if we service your area</p>
         <input type="text" id="ha-zip" style="${S.input}" placeholder="e.g. 77001" maxlength="5" inputmode="numeric" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)">
         <div style="text-align:center!important;">
           <button id="btn-zip" style="${S.btnPri};padding:12px 36px!important;font-size:16px!important;">Check Area →</button>
