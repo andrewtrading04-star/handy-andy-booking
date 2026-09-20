@@ -1102,7 +1102,7 @@ async function summary(req, res, db, auth) {
       revenue.week_range_label = `${fmtMD(weekStart)} – ${fmtMD(lastDay)}`;
     } catch (e) { console.warn('[admin] weekly revenue-by-business failed:', e.message); }
 
-    // Each secretary's booking rate for the SAME week, shown beside revenue.
+    // Each secretary's booking rate for the last 7 days, shown beside revenue.
     // Same definition as the Call Performance page: live (script-taken) calls
     // that were actually worked (moved past the greeting or ended somewhere);
     // booked = a booking was made. Every business is combined because a
@@ -1112,17 +1112,21 @@ async function summary(req, res, db, auth) {
     try {
       // Pull the last 4 weeks so anyone who has taken calls recently is listed
       // even on a Sunday with no calls yet ("No calls yet" beats a vanished box).
-      const rosterSince = new Date(weekStart.getTime() - 28 * 24 * 60 * 60 * 1000);
+      // The numbers are the LAST 7 DAYS (today plus the 6 days before it, in
+      // the business's own time zone), the same window as the 7-day
+      // Conversion card, not the Sun-Sat revenue week.
+      const last7Start = localDayStartUTC(tz, -6);
+      const rosterSince = new Date(last7Start.getTime() - 28 * 24 * 60 * 60 * 1000);
       const { data: cRows } = await db.from('calls')
         .select('handled_by, booking_id, resolution, reached_step, occurred_at')
         .eq('kind', 'live')
-        .gte('occurred_at', rosterSince.toISOString()).lt('occurred_at', weekEnd.toISOString());
+        .gte('occurred_at', rosterSince.toISOString());
       const by = {};
       for (const c of (cRows || [])) {
         const who = (c.handled_by || '').trim();
         if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
         const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
-        if (new Date(c.occurred_at) < weekStart) continue;   // roster only
+        if (new Date(c.occurred_at) < last7Start) continue;   // roster only
         if (!(c.booking_id || c.resolution || (c.reached_step && c.reached_step !== 'greet'))) continue;
         p.calls++;
         if (c.booking_id || c.resolution === 'booked') p.booked++;

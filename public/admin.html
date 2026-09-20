@@ -15327,10 +15327,10 @@ function greetStatsHtml(){
   // Each secretary's booking rate this week (owner-only data; empty for staff).
   const secs=Array.isArray(r.week_secretaries)?r.week_secretaries:[];
   const secHtml=secs.length?(
-    `<div class="rev-sec"><div class="rev-sec-h">Booking rate · this week</div>`+
+    `<div class="rev-sec"><div class="rev-sec-h">Booking rate · last 7 days</div>`+
     secs.map(p=>`<div class="rev-sec-row"><div class="rev-sec-top"><span>${esc(p.person)}</span><b>${p.calls?(Math.round(p.conversion*10)/10).toString().replace(/\.0$/,'')+'%':'&ndash;'}</b></div>`+
       `<div class="rev-sec-bar"><i style="width:${Math.max(0,Math.min(100,p.conversion))}%"></i></div>`+
-      `<div class="rev-sec-sub">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls yet this week'}</div></div>`).join('')+
+      `<div class="rev-sec-sub">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls in the last 7 days'}</div></div>`).join('')+
     `</div>`):'';
   return `<div class="greet-stats">`+
     `<div class="gstat gstat-rev"><div class="rev-split${secs.length?' has-sec':''}"><div class="rev-left"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
