@@ -208,8 +208,8 @@ export const EMAIL_BRANDS = {
   'atxtvmount':         { slug: 'atxtvmount',         name: 'ATX TV Mounting',        accent: '#1E56E0', website: 'atxtvmount.com' },
   'austinmountingpros': { slug: 'austinmountingpros', name: 'Austin Mounting Pros',   accent: '#8A6A2C', website: 'austinmountingpros.com' },
   'austintvinstall':    { slug: 'austintvinstall',    name: 'Austin TV Installation', accent: '#0D7A68', website: 'austintvinstall.com' },
-  // Accent = the site's own green (--color-lagoon in tvmountinglosangeles-site).
-  'tvmountinglosangeles': { slug: 'tvmountinglosangeles', name: 'TV Mounting Los Angeles', accent: '#2E7D32', website: 'tvmountinglosangeles.com' },
+  // Accent = the site's own blue (Tailwind blue-600, same as the site's buttons).
+  'tvmountinglosangeles': { slug: 'tvmountinglosangeles', name: 'TV Mounting Los Angeles', accent: '#155DFC', website: 'tvmountinglosangeles.com' },
 };
 // ── Request received (unstaffed-area request flow) ──────────────────────────
 // Sent to the CUSTOMER right after they submit the booking widget's request
