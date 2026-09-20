@@ -1333,7 +1333,20 @@
   /* Plain revenue/predicted boxes: center the label+figure vertically so the
      sparse content fills the (equal-height) box instead of floating at the top,
      and keep the figure on one line. */
-  .gstat-rev{justify-content:center;align-items:center;text-align:center;}
+  .gstat-rev{justify-content:center;align-items:center;text-align:center;container-type:inline-size;}
+  /* Revenue on the left, each secretary's booking rate on the right. Side by
+     side only when the box is wide enough; otherwise the rates stack below. */
+  .rev-split{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;width:100%;align-items:center;}
+  .rev-left{display:flex;flex-direction:column;align-items:center;}
+  .rev-sec{text-align:left;width:100%;}
+  .rev-sec-h{font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;margin:0 0 6px;}
+  .rev-sec-row{margin:0 0 8px;}
+  .rev-sec-top{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;font-weight:800;}
+  .rev-sec-top b{color:#4ade80;font-variant-numeric:tabular-nums;}
+  .rev-sec-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);margin-top:4px;overflow:hidden;}
+  .rev-sec-bar i{display:block;height:100%;background:#4ade80;border-radius:3px;}
+  .rev-sec-sub{font-size:11px;opacity:.7;margin-top:2px;}
+  @container (min-width:400px){ .rev-split.has-sec{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;} }
   .gstat-rev .gstat-v{white-space:nowrap;font-variant-numeric:tabular-nums;}
   /* Today/Yesterday toggle inside the Net Daily Profit stat card */
   .ndp-seg{display:inline-flex;background:rgba(0,0,0,.28);border-radius:8px;padding:2px;}
@@ -15311,8 +15324,16 @@ function greetStatsHtml(){
   // breakdown isn't present.
   const revBySlug=r.week_by_slug||null;
   const revTotal=(r.week_total!=null)?r.week_total:(r.week||0);
+  // Each secretary's booking rate this week (owner-only data; empty for staff).
+  const secs=Array.isArray(r.week_secretaries)?r.week_secretaries:[];
+  const secHtml=secs.length?(
+    `<div class="rev-sec"><div class="rev-sec-h">Booking rate · this week</div>`+
+    secs.map(p=>`<div class="rev-sec-row"><div class="rev-sec-top"><span>${esc(p.person)}</span><b>${(Math.round(p.conversion*10)/10).toString().replace(/\.0$/,'')}%</b></div>`+
+      `<div class="rev-sec-bar"><i style="width:${Math.max(0,Math.min(100,p.conversion))}%"></i></div>`+
+      `<div class="rev-sec-sub">${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}</div></div>`).join('')+
+    `</div>`):'';
   return `<div class="greet-stats">`+
-    `<div class="gstat gstat-rev"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
+    `<div class="gstat gstat-rev"><div class="rev-split${secs.length?' has-sec':''}"><div class="rev-left"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
       (revBySlug ? (
         `<div style="width:70%;height:1px;background:rgba(255,255,255,.18);margin:8px 0 6px;"></div>`+
         `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;">Completed jobs · Sat–Fri</span>`+
@@ -15323,7 +15344,7 @@ function greetStatsHtml(){
             `<div style="font-size:15px;font-weight:850;color:#FF8A5C;line-height:1.1;">${money(revBySlug['handy-andy']||0)}</div></div>`+
         `</div>`
       ) : '')+
-    `</div>`+
+    `</div>`+secHtml+`</div></div>`+
     `<div class="gstat gstat-rev"><span class="gstat-l">Predicted income</span><span class="gstat-v">${money((pf&&pf.week_predicted)||0)}</span><span class="gstat-s">for the week — if every job is paid</span>`+
       ((pf&&pf.week_predicted_by_slug) ? (
         `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.7;font-weight:800;margin-top:2px;">Active jobs · this week</span>`+

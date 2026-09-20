@@ -1101,6 +1101,32 @@ async function summary(req, res, db, auth) {
       revenue.week_total = Math.round(Object.values(bySlug).reduce((a, b) => a + b, 0) * 100) / 100;
       revenue.week_range_label = `${fmtMD(weekStart)} – ${fmtMD(lastDay)}`;
     } catch (e) { console.warn('[admin] weekly revenue-by-business failed:', e.message); }
+
+    // Each secretary's booking rate for the SAME week, shown beside revenue.
+    // Same definition as the Call Performance page: live (script-taken) calls
+    // that were actually worked (moved past the greeting or ended somewhere);
+    // booked = a booking was made. Every business is combined because a
+    // secretary can take calls for more than one brand. The owner's own
+    // clean-up entries are not a secretary and are left out.
+    revenue.week_secretaries = [];
+    try {
+      const { data: cRows } = await db.from('calls')
+        .select('handled_by, booking_id, resolution, reached_step')
+        .eq('kind', 'live')
+        .gte('occurred_at', weekStart.toISOString()).lt('occurred_at', weekEnd.toISOString());
+      const by = {};
+      for (const c of (cRows || [])) {
+        const who = (c.handled_by || '').trim();
+        if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
+        if (!(c.booking_id || c.resolution || (c.reached_step && c.reached_step !== 'greet'))) continue;
+        const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
+        p.calls++;
+        if (c.booking_id || c.resolution === 'booked') p.booked++;
+      }
+      revenue.week_secretaries = Object.values(by)
+        .map(p => ({ ...p, conversion: p.calls ? Math.round((p.booked / p.calls) * 1000) / 10 : 0 }))
+        .sort((a, b) => b.calls - a.calls);
+    } catch (e) { console.warn('[admin] weekly secretary conversion failed:', e.message); }
   }
 
   // Photos "To Post" + address alerts are independent — fetch them concurrently.
