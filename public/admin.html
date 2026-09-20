@@ -217,6 +217,61 @@
   body.doms .job.xco-secondary .xco-secondary-tag{background:#4d8dff;color:#fff;}
   .dayempty{height:6px;}
 
+  /* Schedule > Jobs > Day: one column per tech, one row per arrival window */
+  .dgrid-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .dgrid{display:grid;min-width:min-content;}
+  .dg-cell{border-right:1px solid var(--line);border-bottom:1px solid var(--line2);padding:8px;min-width:0;display:flex;flex-direction:column;gap:8px;}
+  .dg-head{position:sticky;top:0;z-index:2;background:#fafbfc;font-weight:800;font-size:13.5px;color:var(--ink);flex-direction:row;align-items:center;gap:8px;padding:10px;border-bottom:1px solid var(--line);}
+  .dg-head .dg-tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+  .dg-head .dg-cnt{margin-left:auto;flex:none;font-size:11px;color:var(--mute);font-weight:700;}
+  .dg-slot{background:#fafbfc;font-size:13px;font-weight:800;color:var(--ink-2);gap:1px;}
+  .dg-slot small{font-weight:600;color:var(--mute);font-size:11px;}
+  .dg-cell.today-col{background:#fbfdff;}
+  .dg-j .evt{cursor:pointer;}
+  .dg-j .evt:not(.overdue){border-left:4px solid var(--tc,#cbd3dd);}
+  .dg-helper{font-size:10px;font-weight:800;color:var(--mute);letter-spacing:.4px;margin:0 0 3px 2px;text-transform:uppercase;}
+  .dg-empty{padding:40px 18px;color:var(--mute);font-weight:600;}
+
+  /* Schedule > Jobs > List: agenda cards (big time left, price right, tech color edge) */
+  .ag-day{display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;font-size:16px;font-weight:800;color:var(--ink);}
+  .ag-day:first-child{margin-top:4px;}
+  .ag-day.today{color:var(--accent);}
+  .ag-day span{font-size:12.5px;font-weight:700;color:var(--mute);}
+  .job.ag{border-left:5px solid var(--tc,#cbd3dd);padding:12px 16px;}
+  .job.ag:hover{box-shadow:0 4px 12px rgba(20,30,50,.10);}
+  .ag-row{display:flex;gap:16px;align-items:center;}
+  .ag-time{width:86px;flex:none;font-weight:800;font-size:16px;color:var(--ink);line-height:1.25;}
+  .ag-time span{display:block;font-weight:600;font-size:12px;color:var(--mute);}
+  .ag-main{flex:1;min-width:0;}
+  .ag-price{flex:none;font-weight:800;font-size:17px;color:var(--ink);}
+  @media (max-width:560px){ .ag-row{gap:10px;} .ag-time{width:68px;font-size:14px;} .ag-price{font-size:15px;} }
+
+  /* Schedule > Availability: dispatch timeline (techs as rows) under the week board */
+  .tl-wrap{margin-top:26px;}
+  .tl-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
+  .tl-title{font-size:15px;font-weight:800;color:var(--ink);margin-right:8px;}
+  .tl-day{background:#fff;border:1px solid var(--line);color:var(--ink-2);font-weight:700;font-size:12.5px;padding:7px 12px;border-radius:999px;cursor:pointer;}
+  .tl-day:hover{border-color:var(--accent);}
+  .tl-day.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tl-sum{margin-left:auto;font-size:12.5px;color:var(--mute);font-weight:700;}
+  .tl-board{min-width:920px;}
+  .tl-row{display:grid;grid-template-columns:180px 1fr;border-bottom:1px solid var(--line2);}
+  .tl-row:last-child{border-bottom:none;}
+  .tl-name{padding:10px 9px;display:flex;align-items:center;gap:9px;border-right:1px solid var(--line2);min-width:0;}
+  .tl-track{position:relative;height:60px;}
+  .tl-row:nth-child(odd) .tl-track{background:#fafbfc;}
+  .tl-axis .tl-track{height:28px;background:#fafbfc;}
+  .tl-axis .tl-name{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);}
+  .tl-hr{position:absolute;top:0;bottom:0;border-left:1px solid var(--line2);font-size:10.5px;color:var(--mute);padding:7px 0 0 4px;font-weight:700;}
+  .tl-blk{position:absolute;top:7px;bottom:7px;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:700;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;line-height:1.3;}
+  .tl-blk small{display:block;font-weight:600;opacity:.88;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;}
+  .tl-blk.bk{color:#fff;box-shadow:0 1px 2px rgba(20,30,50,.15);}
+  .tl-blk.bk[data-id]{cursor:pointer;}
+  .tl-blk.bk[data-id]:hover{filter:brightness(1.08);}
+  .tl-blk.open{border:1.5px dashed #86c99a;background:#f0faf3;color:#2f8a4c;}
+  .tl-off .tl-track{background:repeating-linear-gradient(135deg,#f6f7f9,#f6f7f9 8px,#fbfbfc 8px,#fbfbfc 16px) !important;}
+  .tl-offlbl{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:12px;font-weight:800;color:#b91c1c;}
+
   /* availability board (technician × day, with time-slot pills) */
   /* Business toggle pills — view your own company's availability, or check another's */
   .avb-bizbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:16px 18px 0;max-width:1100px;}
@@ -3153,10 +3208,77 @@ function dayColumn(ds){
     <div class="daybody">${items.map(evtCard).join('')}${ghosts.map(ghostEvtCard).join('')}${(!items.length&&!ghosts.length)?'<div class="dayempty"></div>':''}</div>
   </div>`;
 }
+// Day view: one column per tech, one row per arrival window, so a dispatcher
+// sees the whole day at once: who is where, and which windows are still empty.
+// Cards are the same evtCard() the week uses (lights, price, pay, profit).
+const DAY_SLOTS=[
+  {t:'8:00 AM', a:480,  z:600,  big:'8 AM',  sub:'to 10 AM'},
+  {t:'11:00 AM',a:660,  z:780,  big:'11 AM', sub:'to 1 PM'},
+  {t:'2:00 PM', a:840,  z:960,  big:'2 PM',  sub:'to 4 PM'},
+  {t:'5:00 PM', a:1020, z:1200, big:'5 PM',  sub:'to 8 PM'},
+  {t:'8:00 PM', a:1200, z:1350, big:'8 PM',  sub:'to 10:30 PM'},
+];
+function localMinutesOf(iso){
+  try{
+    const p=new Intl.DateTimeFormat('en-US',{timeZone:tz(),hour12:false,hour:'2-digit',minute:'2-digit'}).formatToParts(new Date(iso)).reduce((a,x)=>(a[x.type]=x.value,a),{});
+    return (p.hour==='24'?0:Number(p.hour))*60+Number(p.minute);
+  }catch{ return -1; }
+}
+// Row index for a job: the server's slot label wins (it is worked out in the
+// job's own metro timezone); the clock is only the fallback. -1 = "Other times".
+function daySlotIdx(slotTime, iso){
+  let i=DAY_SLOTS.findIndex(s=>s.t===slotTime);
+  if(i>=0) return i;
+  const m=localMinutesOf(iso);
+  i=DAY_SLOTS.findIndex(s=>m>=s.a && m<s.z);
+  return i;
+}
+function dayGrid(ds){
+  const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b))
+                         .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  const ghosts=ghostBookings.filter(g=>localDateOf(g.scheduled_at)===ds
+    && (filterTech==='all' || filterTech===g.technician_id) && !jobSearchQuery);
+  // Columns: the roster (narrowed by the sidebar filter), then anyone working a
+  // job today who is not on this roster (a partner-company helper), then
+  // Unassigned when there is something in it.
+  let cols = filterTech==='unassigned' ? [] : techCache.filter(t=>filterTech==='all'||filterTech===t.id);
+  if(filterArea || jobSearchQuery) cols=cols.filter(t=>items.some(b=>b.technician_id===t.id||b.secondary_technician_id===t.id));
+  const have=new Set(cols.map(t=>t.id));
+  if(filterTech==='all') items.forEach(b=>[b.technician,b.secondary_technician].forEach(t=>{ if(t&&t.id&&!have.has(t.id)){ have.add(t.id); cols.push(t); } }));
+  if(filterTech==='all') ghosts.forEach(g=>{ if(g.technician_id&&!have.has(g.technician_id)){ have.add(g.technician_id); cols.push({id:g.technician_id,name:g.tech_name||'Tech'}); } });
+  const unassigned=items.filter(b=>!b.technician_id);
+  if(unassigned.length || filterTech==='unassigned') cols=cols.concat([{id:'__un',name:'Unassigned',un:true}]);
+  if(!cols.length) return '<div class="dg-empty">No jobs for this day.</div>';
+
+  const rowOf=new Map(items.map(b=>[b.id, daySlotIdx(b.slot_time,b.scheduled_at)]));
+  const rows=DAY_SLOTS.map((s,i)=>({i,big:s.big,sub:s.sub}));
+  if(items.some(b=>rowOf.get(b.id)<0) || ghosts.some(g=>daySlotIdx(null,g.scheduled_at)<0)) rows.push({i:-1,big:'Other',sub:'off-window times'});
+
+  const mine=(t,b)=> t.un ? !b.technician_id : (b.technician_id===t.id || b.secondary_technician_id===t.id);
+  let html=`<div class="dgrid-scroll"><div class="dgrid" style="grid-template-columns:92px repeat(${cols.length},minmax(200px,1fr))">`;
+  html+='<div class="dg-cell dg-head"></div>';
+  cols.forEach(t=>{
+    const n=items.filter(b=>mine(t,b)).length;
+    html+=`<div class="dg-cell dg-head">${t.un?'<span class="av sm av-un">?</span>':avatar(t,true)}<span class="dg-tn">${esc(t.name)}</span><span class="dg-cnt">${n} job${n===1?'':'s'}</span></div>`;
+  });
+  rows.forEach(r=>{
+    html+=`<div class="dg-cell dg-slot">${r.big}<small>${r.sub}</small></div>`;
+    cols.forEach(t=>{
+      const js=items.filter(b=>mine(t,b) && rowOf.get(b.id)===r.i);
+      const gs=t.un?[]:ghosts.filter(g=>g.technician_id===t.id && daySlotIdx(null,g.scheduled_at)===r.i);
+      html+=`<div class="dg-cell">`+
+        js.map(b=>`<div class="dg-j" style="--tc:${t.un?'#cbd3dd':techColor(t)}">${(!t.un&&b.secondary_technician_id===t.id&&b.technician_id!==t.id)?'<div class="dg-helper">Helping as 2nd tech</div>':''}${evtCard(b)}</div>`).join('')+
+        gs.map(ghostEvtCard).join('')+
+      `</div>`;
+    });
+  });
+  html+='</div></div>';
+  return html;
+}
 function renderJobsView(dates){
   const view=document.getElementById('view');
   if(calView==='list'){ renderListView(dates); return; }
-  if(calView==='day'){ view.innerHTML=`<div class="week one">${dayColumn(anchorDate)}</div>`; }
+  if(calView==='day'){ view.innerHTML=dayGrid(anchorDate); }
   else { view.innerHTML=`<div class="week">${dates.map(dayColumn).join('')}</div>`; }
   document.querySelectorAll('.evt[data-id]').forEach(el=>el.addEventListener('click',()=>{
     const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
@@ -3211,14 +3333,19 @@ function renderListView(dates){
   dates.forEach(ds=>{
     const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b)).sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
     if(!items.length) return; any=true;
-    const h=colHeadLabel(ds);
-    html+=`<div class="section-title">${h.dow}, ${h.md} · ${items.length} job${items.length===1?'':'s'}</div>`;
+    const dl=new Date(ds+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'});
+    html+=`<div class="ag-day${ds===todayStr()?' today':''}">${esc(dl)}<span>${items.length} job${items.length===1?'':'s'}</span></div>`;
     html+=items.map(b=>{
       const xcoSecondary = b.secondary_technician?.cross_company;
-      return `<div class="job evt-row${xcoSecondary?' xco-secondary':''}" data-id="${b.id}"><div class="row">
-        <div><div class="name">${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}</div>
-        <div class="meta">${avatar(b.technician,true)} ${esc(b.service?.name||'')} ${b.address?'· '+esc(b.address):''}</div></div>
-        <div class="time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</div></div>${listEcon(b)}</div>`;
+      const dur=fmtDuration(b);
+      const total=(Number(b.price)||0)+(Number(b.tip)||0);
+      const techs=[b.technician,b.secondary_technician].filter(Boolean);
+      const who=techs.length?techs.map(t=>esc(String(t.name||'').split(' ')[0])).join(' + '):'Unassigned';
+      return `<div class="job evt-row ag${xcoSecondary?' xco-secondary':''}" data-id="${b.id}" style="--tc:${b.technician?techColor(b.technician):'#cbd3dd'}"><div class="ag-row">
+        <div class="ag-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}${dur?`<span>${esc(dur)}</span>`:''}</div>
+        <div class="ag-main"><div class="name">${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}</div>
+        <div class="meta">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician,true)}${avatar(b.secondary_technician,true)}</span>`:avatar(b.technician,true)} ${who}${b.service?.name?' · '+esc(b.service.name):''}${b.address?' · '+esc(b.address):''}</div></div>
+        ${total>0?`<div class="ag-price">${money(total)}</div>`:''}</div>${listEcon(b)}</div>`;
     }).join('');
   });
   html+='</div>';
@@ -3306,8 +3433,14 @@ async function renderAvailabilityGrid(dates){
       html+=`<div class="avb-cell avb-day${today?' today':''}">${anyOn?`<div class="avpills">${pills}</div>`:'<span class="avb-offlbl">—</span>'}</div>`;
     });
   });
-  html+='</div></div></div>';
+  html+='</div></div>';
+  html+=availTimeline(dates, techs, slots, slotState);
+  html+='</div>';
   view.innerHTML=html;
+  view.querySelectorAll('.tl-day').forEach(el=>el.addEventListener('click',()=>{ availTlDay=el.dataset.ds; renderAvailabilityGrid(dates); }));
+  view.querySelectorAll('.tl-blk[data-id]').forEach(el=>el.addEventListener('click',()=>{
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+  }));
   // Edit clicks bind only on techs whose company this login can act on (the
   // .ro rows have no binding and no button role).
   view.querySelectorAll('.avb-tech:not(.ro)').forEach(el=>{
@@ -3315,6 +3448,51 @@ async function renderAvailabilityGrid(dates){
     el.addEventListener('click',go);
     el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });
   });
+}
+
+// Dispatch timeline under the week board: one row per tech, the day laid out
+// left to right. Solid block = a job (named when it is on this company's
+// schedule, otherwise just "Booked", since partner-company customer names are
+// not sent here). Dashed green = a window the tech is open for. Blank = off.
+let availTlDay=null;
+function availTimeline(dates, techs, slots, slotState){
+  const day = dates.includes(availTlDay) ? availTlDay : (dates.includes(todayStr()) ? todayStr() : dates[0]);
+  const A=480, Z=1350, pos=m=>((m-A)/(Z-A)*100);
+  const toMin=s=>{ const [h,m]=String(s||'0:0').split(':').map(Number); return h*60+(m||0); };
+  const to12=s=>{ let [h,m]=String(s).split(':').map(Number); const ap=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${String(m||0).padStart(2,'0')} ${ap}`; };
+  const jobAt=(t,s)=>calBookings.find(b=>b.status!=='cancelled' && b.status!=='no_show'
+    && (b.technician_id===t.id||b.secondary_technician_id===t.id)
+    && localDateOf(b.scheduled_at)===day
+    && (b.slot_time===to12(s.start) || (Array.isArray(b.extra_slots)&&b.extra_slots.includes(s.key))));
+  let hours='';
+  for(let h=8;h<=22;h+=1) hours+=`<div class="tl-hr" style="left:${pos(h*60)}%"></div>`;
+  let axis='';
+  for(let h=8;h<=22;h+=2) axis+=`<div class="tl-hr" style="left:${pos(h*60)}%">${h%12||12}${h>=12?'p':'a'}</div>`;
+  let open=0, booked=0, rowsHtml='';
+  techs.forEach(t=>{
+    const isOff=t.status==='off';
+    let blocks='';
+    if(isOff) blocks='<span class="tl-offlbl">OFF</span>';
+    else slots.forEach(s=>{
+      const a=toMin(s.start), z=toMin(s.end);
+      const style=`left:calc(${pos(a)}% + 2px);width:calc(${pos(z)-pos(a)}% - 4px)`;
+      const job=jobAt(t,s);
+      const isBooked=!!job || availData.bookedSet.has(`${t.id}:${day}:${s.key}`);
+      if(isBooked){
+        booked++;
+        blocks+=`<div class="tl-blk bk" style="${style};background:${techColor(t)}"${job?` data-id="${job.id}"`:''} title="${esc(s.label)}${job?' · '+esc(job.customer?.name||'Customer'):' · booked (another company)'}">`+
+          `${job?esc(job.customer?.name||'Customer'):'Booked'}<small>${job?esc(job.service?.name||shortSlot(s)):'another company'}</small></div>`;
+      } else if(slotState(t,day,s.key).on){
+        open++;
+        blocks+=`<div class="tl-blk open" style="${style}" title="${esc(s.label)} · open">Open<small>${shortSlot(s)}</small></div>`;
+      }
+    });
+    rowsHtml+=`<div class="tl-row${isOff?' tl-off':''}"><div class="tl-name">${avatar(t)}<span class="avb-tname">${esc(t.name)}</span></div><div class="tl-track">${hours}${blocks}</div></div>`;
+  });
+  const chips=dates.map(ds=>{ const h=colHeadLabel(ds); return `<button type="button" class="tl-day${ds===day?' on':''}" data-ds="${ds}">${ds===todayStr()?'Today':h.dow.charAt(0)+h.dow.slice(1).toLowerCase()+' '+esc(h.md.split(' ')[1]||'')}</button>`; }).join('');
+  return `<div class="tl-wrap"><div class="tl-top"><span class="tl-title">Dispatch timeline</span>${chips}`+
+    `<span class="tl-sum">${booked} booked · ${open} open window${open===1?'':'s'}</span></div>`+
+    `<div class="avb-scroll"><div class="tl-board"><div class="tl-row tl-axis"><div class="tl-name">Technician</div><div class="tl-track">${axis}</div></div>${rowsHtml}</div></div></div>`;
 }
 
 // Status pill. A completed job shows a green check mark, matching the "Paid ✓"
