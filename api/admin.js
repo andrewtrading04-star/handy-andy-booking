@@ -1110,16 +1110,20 @@ async function summary(req, res, db, auth) {
     // clean-up entries are not a secretary and are left out.
     revenue.week_secretaries = [];
     try {
+      // Pull the last 4 weeks so anyone who has taken calls recently is listed
+      // even on a Sunday with no calls yet ("No calls yet" beats a vanished box).
+      const rosterSince = new Date(weekStart.getTime() - 28 * 24 * 60 * 60 * 1000);
       const { data: cRows } = await db.from('calls')
-        .select('handled_by, booking_id, resolution, reached_step')
+        .select('handled_by, booking_id, resolution, reached_step, occurred_at')
         .eq('kind', 'live')
-        .gte('occurred_at', weekStart.toISOString()).lt('occurred_at', weekEnd.toISOString());
+        .gte('occurred_at', rosterSince.toISOString()).lt('occurred_at', weekEnd.toISOString());
       const by = {};
       for (const c of (cRows || [])) {
         const who = (c.handled_by || '').trim();
         if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
-        if (!(c.booking_id || c.resolution || (c.reached_step && c.reached_step !== 'greet'))) continue;
         const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
+        if (new Date(c.occurred_at) < weekStart) continue;   // roster only
+        if (!(c.booking_id || c.resolution || (c.reached_step && c.reached_step !== 'greet'))) continue;
         p.calls++;
         if (c.booking_id || c.resolution === 'booked') p.booked++;
       }
