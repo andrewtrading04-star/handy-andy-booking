@@ -156,6 +156,80 @@
     font-size:16px;color:var(--mute);background:transparent;border:1px solid var(--line);border-radius:7px;}
   .del-audit:hover{color:var(--bad);border-color:#f3c2c2;background:var(--bad-bg);}
   .hidden{display:none;}
+
+/* ── Large-target date and time pickers (replace the native controls) ── */
+  /* ── Date / time picker ─────────────────────────────────────────────────── */
+  .dtp{position:relative;display:inline-block;}
+  .dtp-btn{display:inline-flex;align-items:center;gap:9px;min-height:44px;padding:8px 13px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;font-weight:600;cursor:pointer;
+    color:var(--ink);text-align:left;}
+  .dtp-btn:hover{border-color:var(--mute);}
+  .dtp-btn[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .dtp-btn svg{flex:none;width:18px;height:18px;color:var(--mute);}
+  .dtp-val.empty{color:var(--mute);font-weight:500;}
+  .dtp[data-dtp="time"] .dtp-btn{min-width:120px;}
+  .dtp button:focus-visible,.dtp input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+
+  .dtp-pop{position:absolute;z-index:60;top:calc(100% + 6px);left:0;width:348px;max-width:calc(100vw - 16px);
+    background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;
+    box-shadow:0 12px 34px rgba(20,26,34,.18),0 2px 6px rgba(20,26,34,.08);}
+  .dtp-pop[hidden]{display:none!important;}
+  .dtp[data-dtp="time"] .dtp-pop{width:316px;}
+  .dtp-back{display:none;}
+
+  /* buttons inside popovers share one base */
+  .dtp-pop button{font:inherit;color:var(--ink);cursor:pointer;background:#fff;border:0;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+
+  /* calendar */
+  .dtp-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px;}
+  .dtp-title{font-weight:800;font-size:16px;}
+  .dtp-nav{width:44px;height:44px;border-radius:10px;font-size:22px;line-height:1;color:var(--ink-2);
+    border:1px solid var(--line)!important;}
+  .dtp-nav:hover{background:var(--line2);}
+  .dtp-dow,.dtp-days{display:grid;grid-template-columns:repeat(7,1fr);}
+  .dtp-dow span{text-align:center;font-size:11.5px;font-weight:800;text-transform:uppercase;
+    letter-spacing:.04em;color:var(--mute);padding:6px 0;}
+  .dtp-day{min-height:46px;width:100%;border-radius:10px;font-size:16px;font-weight:600;
+    font-variant-numeric:tabular-nums;padding:0;}
+  .dtp-day:hover{background:var(--line2);}
+  .dtp-day.out{color:var(--mute);font-weight:500;}
+  .dtp-day.today{box-shadow:inset 0 0 0 2px var(--accent);color:var(--accent);font-weight:800;}
+  .dtp-day.sel,.dtp-day.sel:hover{background:var(--accent);color:#fff;box-shadow:none;font-weight:800;}
+  .dtp-foot{display:flex;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;
+    border-top:1px solid var(--line2);}
+  .dtp-foot button{min-height:44px;padding:0 16px;border-radius:10px;font-weight:700;
+    border:1px solid var(--line)!important;}
+  .dtp-foot button:hover{background:var(--line2);}
+  .dtp-foot .primary{background:var(--ink)!important;color:#fff!important;border-color:var(--ink)!important;}
+
+  /* time */
+  .dtp-trow{display:flex;gap:8px;margin-bottom:10px;}
+  .dtp-typed{flex:1;min-width:0;min-height:44px;font-size:16px;font-weight:600;padding:8px 12px;border-radius:10px;}
+  .dtp-typed[aria-invalid="true"]{border-color:var(--bad);background:var(--bad-bg);}
+  .dtp-ampm{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none;}
+  .dtp-ampm button{min-width:52px;min-height:44px;font-weight:800;font-size:15px;}
+  .dtp-ampm button+button{border-left:1px solid var(--line);}
+  .dtp-ampm button.on{background:var(--accent);color:#fff;}
+  .dtp-lbl{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--mute);margin:8px 2px 5px;}
+  .dtp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .dtp-cell{min-height:48px;border-radius:10px;font-size:17px;font-weight:700;
+    border:1px solid var(--line)!important;font-variant-numeric:tabular-nums;}
+  .dtp-cell:hover{background:var(--line2);}
+  .dtp-cell.sel,.dtp-cell.sel:hover{background:var(--accent);border-color:var(--accent)!important;color:#fff;}
+  .dtp-hint{min-height:1.2em;font-size:12.5px;color:var(--mute);margin:6px 2px 0;}
+  .dtp-hint.bad{color:var(--bad);}
+
+  /* phones: bottom sheet, dimmed backdrop, full-width cells */
+  @media (max-width:560px){
+    .dtp-pop,.dtp[data-dtp="time"] .dtp-pop{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;
+      max-width:none;border-radius:16px 16px 0 0;padding:10px 6px calc(12px + env(safe-area-inset-bottom));
+      max-height:92vh;overflow-y:auto;z-index:61;}
+    .dtp-time-pad{padding:0 6px;}
+    .dtp.open .dtp-back{display:block;position:fixed;inset:0;background:rgba(20,26,34,.5);z-index:60;}
+    .dtp-head,.dtp-foot{padding-left:6px;padding-right:6px;}
+  }
 </style>
 </head>
 <body>
@@ -178,7 +252,7 @@
         <div class="sub" id="who"></div>
       </div>
       <div class="row">
-        <input type="date" id="date">
+        <span class="dtp" data-dtp="date"><input type="hidden" id="date"></span>
         <button class="btn ghost" id="outBtn">Sign out</button>
       </div>
     </div>
@@ -278,7 +352,7 @@
 
       <div class="row" style="margin-bottom:6px;">
         <select id="fLine" style="flex:1;min-width:190px;"></select>
-        <input type="time" id="fTime" style="width:120px;" title="Central time, same as Grasshopper shows">
+        <span class="dtp" data-dtp="time"><input type="hidden" id="fTime" title="Central time, same as Grasshopper shows"></span>
         <select id="fDir"><option value="incoming">Inbound</option><option value="outgoing">Outbound</option></select>
         <select id="fWho"><option value="">Who answered</option><option>Heather</option><option>Joey</option><option value="Nobody">Nobody (missed)</option></select>
         <select id="fSvc"><option value="TV Mounting">TV mounting</option><option value="Handyman">Handyman</option><option value="unknown">Never got that far</option></select>
@@ -292,9 +366,10 @@
       <div class="row" style="margin:10px 0;">
         <input type="tel" id="fCallerPhone" placeholder="Caller's phone number" style="flex:1;min-width:170px;">
         <input type="text" id="fCallerName" placeholder="Caller's name, if the recording gives one" style="flex:1;min-width:170px;">
-        <input type="text" id="fCallerZip" placeholder="Zip" style="width:90px;" maxlength="10">
+        <input type="text" id="fCallerZip" placeholder="Zip" title="5-digit zip, or two separated by a slash: 80206/80301" style="width:130px;" maxlength="15">
       </div>
-      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it. Zip fills in by itself when the linked call became a booking; otherwise leave it blank unless the caller says one.</p>
+      <div id="zipErr" class="err" style="display:none;margin:-4px 0 8px;"></div>
+      <p class="sub" style="margin:0 0 8px;">Read the caller's number off the Grasshopper screen. It's required if you flag the call -- otherwise Andrew has nothing to search on when he goes to find it. Zip fills in by itself when the linked call became a booking; otherwise leave it blank unless the caller says one. If the customer gives two zips (the TV comes down at the old house and goes up at the new one), type both with a slash, like 80206/80301.</p>
 
       <div id="score"></div>
 
@@ -312,6 +387,296 @@
   </div>
 </div>
 
+<script>
+(function(){
+'use strict';
+var WEEK_START=0; // 0 = Sunday-first (US default). Set 1 for Monday-first.
+var MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+var MON3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+var DOW2=['Su','Mo','Tu','We','Th','Fr','Sa'];
+var ICON_CAL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>';
+var ICON_CLK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
+function pad(n){ return (n<10?'0':'')+n; }
+function iso(y,m,d){ return y+'-'+pad(m+1)+'-'+pad(d); }
+function parseISO(s){
+  var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||'')); if(!m) return null;
+  var y=+m[1], mo=+m[2]-1, d=+m[3], dt=new Date(y,mo,d);
+  if(dt.getFullYear()!==y||dt.getMonth()!==mo||dt.getDate()!==d) return null;
+  return dt;
+}
+function isoOf(dt){ return iso(dt.getFullYear(),dt.getMonth(),dt.getDate()); }
+function addDays(dt,n){ return new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()+n); }
+function addMonths(dt,n){
+  var t=new Date(dt.getFullYear(),dt.getMonth()+n,1);
+  var last=new Date(t.getFullYear(),t.getMonth()+1,0).getDate();
+  return new Date(t.getFullYear(),t.getMonth(),Math.min(dt.getDate(),last));
+}
+function todayISO(){ return isoOf(new Date()); }
+
+/* Only one popover open at a time. */
+var current=null;
+document.addEventListener('pointerdown',function(e){
+  if(current && !current.root.contains(e.target)) current.close(false);
+},true);
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape' && current){ e.preventDefault(); current.close(true); }
+},true);
+
+/* Shared shell: trigger button, popover, backdrop, open/close, positioning. */
+function shell(root,icon,labelText){
+  var input=root.querySelector('input');
+  var btn=document.createElement('button');
+  btn.type='button'; btn.className='dtp-btn';
+  btn.setAttribute('aria-haspopup','dialog'); btn.setAttribute('aria-expanded','false');
+  if(input.title) btn.title=input.title;
+  btn.innerHTML=icon+'<span class="dtp-val"></span>';
+  var val=btn.lastChild;
+  var back=document.createElement('div'); back.className='dtp-back';
+  var pop=document.createElement('div'); pop.className='dtp-pop'; pop.hidden=true;
+  pop.setAttribute('role','dialog'); pop.setAttribute('aria-label',labelText);
+  root.appendChild(btn); root.appendChild(back); root.appendChild(pop);
+
+  var ctl={root:root,input:input,btn:btn,val:val,pop:pop,onOpen:null,
+    open:function(){
+      if(current && current!==ctl) current.close(false);
+      pop.hidden=false; root.classList.add('open'); btn.setAttribute('aria-expanded','true');
+      current=ctl;
+      if(ctl.onOpen) ctl.onOpen();
+      ctl.place();
+    },
+    close:function(refocus){
+      if(current===ctl) current=null;
+      pop.hidden=true; root.classList.remove('open'); btn.setAttribute('aria-expanded','false');
+      if(refocus) btn.focus();
+    },
+    place:function(){
+      pop.style.left=''; pop.style.right=''; pop.style.top=''; pop.style.bottom='';
+      if(window.innerWidth<=560) return; // bottom sheet, CSS handles it
+      var r=pop.getBoundingClientRect();
+      if(r.right>window.innerWidth-8){ pop.style.left='auto'; pop.style.right='0'; }
+      r=pop.getBoundingClientRect();
+      if(r.bottom>window.innerHeight-8 && btn.getBoundingClientRect().top>r.height+16){
+        pop.style.top='auto'; pop.style.bottom='calc(100% + 6px)';
+      }
+    }
+  };
+  btn.addEventListener('click',function(){ if(pop.hidden) ctl.open(); else ctl.close(true); });
+  btn.addEventListener('keydown',function(e){
+    if(e.key==='ArrowDown' && pop.hidden){ e.preventDefault(); ctl.open(); }
+  });
+  back.addEventListener('click',function(){ ctl.close(true); });
+  window.addEventListener('resize',function(){ if(!pop.hidden) ctl.place(); });
+
+  /* Keep .value validated and the visible label in sync when other code sets it. */
+  var desc=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');
+  ctl.hook=function(normalize,refresh){
+    Object.defineProperty(input,'value',{configurable:true,
+      get:function(){ return desc.get.call(input); },
+      set:function(v){ desc.set.call(input,normalize(v)); refresh(); }});
+  };
+  /* Commit a new value the way a native control would: set it, then fire "change" once if it differs. */
+  ctl.commit=function(v){
+    var before=input.value; input.value=v;
+    if(input.value!==before) input.dispatchEvent(new Event('change',{bubbles:true}));
+  };
+  return ctl;
+}
+
+/* ───────────────────────────── DATE ───────────────────────────── */
+function initDate(root){
+  var c=shell(root,ICON_CAL,'Choose a date'), input=c.input, pop=c.pop;
+  var view={y:0,m:0}, focus=new Date();
+
+  function label(){
+    var dt=parseISO(input.value);
+    c.val.textContent=dt?DAYS[dt.getDay()].slice(0,3)+', '+MON3[dt.getMonth()]+' '+dt.getDate()+', '+dt.getFullYear():'Pick a date';
+    c.val.classList.toggle('empty',!dt);
+  }
+  c.hook(function(v){ v=String(v==null?'':v).trim(); return parseISO(v)?v:''; },label);
+  label();
+
+  var dowHtml='';
+  for(var i=0;i<7;i++) dowHtml+='<span>'+DOW2[(WEEK_START+i)%7]+'</span>';
+  pop.innerHTML=
+    '<div class="dtp-head">'+
+      '<button type="button" class="dtp-nav" data-nav="-1" aria-label="Previous month">&#8249;</button>'+
+      '<div class="dtp-title" aria-live="polite"></div>'+
+      '<button type="button" class="dtp-nav" data-nav="1" aria-label="Next month">&#8250;</button>'+
+    '</div>'+
+    '<div class="dtp-dow" aria-hidden="true">'+dowHtml+'</div>'+
+    '<div class="dtp-days" role="grid"></div>'+
+    '<div class="dtp-foot"><button type="button" data-today>Today</button>'+
+      '<button type="button" class="primary" data-close>Close</button></div>';
+  var title=pop.querySelector('.dtp-title'), grid=pop.querySelector('.dtp-days');
+
+  function render(focusIt){
+    var first=new Date(view.y,view.m,1);
+    var lead=(first.getDay()-WEEK_START+7)%7;
+    var start=new Date(view.y,view.m,1-lead);
+    var sel=input.value, today=todayISO(), fis=isoOf(focus), h='';
+    title.textContent=MONTHS[view.m]+' '+view.y;
+    for(var i=0;i<42;i++){
+      var d=addDays(start,i), s=isoOf(d);
+      var cls='dtp-day'+(d.getMonth()!==view.m?' out':'')+(s===today?' today':'')+(s===sel?' sel':'');
+      h+='<button type="button" role="gridcell" class="'+cls+'" data-d="'+s+'" tabindex="'+(s===fis?0:-1)+'"'+
+        ' aria-label="'+DAYS[d.getDay()]+', '+MONTHS[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear()+'"'+
+        (s===sel?' aria-pressed="true"':' aria-pressed="false"')+(s===today?' aria-current="date"':'')+'>'+d.getDate()+'</button>';
+    }
+    grid.innerHTML=h;
+    if(focusIt){ var b=grid.querySelector('[data-d="'+fis+'"]'); if(b) b.focus(); }
+  }
+  function moveFocus(dt){
+    focus=dt; view.y=dt.getFullYear(); view.m=dt.getMonth(); render(true);
+  }
+  c.onOpen=function(){
+    var dt=parseISO(input.value)||new Date();
+    focus=dt; view.y=dt.getFullYear(); view.m=dt.getMonth(); render(true);
+  };
+  function pick(s){
+    c.commit(s); c.close(true);
+  }
+
+  pop.addEventListener('click',function(e){
+    var t=e.target.closest('button'); if(!t||!pop.contains(t)) return;
+    if(t.hasAttribute('data-d')) pick(t.getAttribute('data-d'));
+    else if(t.hasAttribute('data-nav')) moveFocus(addMonths(focus,+t.getAttribute('data-nav')));
+    else if(t.hasAttribute('data-today')) pick(todayISO());
+    else if(t.hasAttribute('data-close')) c.close(true);
+  });
+  grid.addEventListener('keydown',function(e){
+    var k=e.key, dt=null;
+    if(k==='ArrowLeft') dt=addDays(focus,-1);
+    else if(k==='ArrowRight') dt=addDays(focus,1);
+    else if(k==='ArrowUp') dt=addDays(focus,-7);
+    else if(k==='ArrowDown') dt=addDays(focus,7);
+    else if(k==='PageUp') dt=addMonths(focus,e.shiftKey?-12:-1);
+    else if(k==='PageDown') dt=addMonths(focus,e.shiftKey?12:1);
+    else if(k==='Home') dt=addDays(focus,-((focus.getDay()-WEEK_START+7)%7));
+    else if(k==='End') dt=addDays(focus,6-((focus.getDay()-WEEK_START+7)%7));
+    if(dt){ e.preventDefault(); moveFocus(dt); }
+  });
+}
+
+/* ───────────────────────────── TIME ───────────────────────────── */
+function initTime(root){
+  var c=shell(root,ICON_CLK,'Choose a time'), input=c.input, pop=c.pop;
+  var pm=false;
+
+  function norm(v){
+    var m=/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(String(v==null?'':v).trim());
+    if(!m) return '';
+    var h=+m[1], mi=+m[2];
+    if(h===24) h=0;               // some engines print midnight as 24:xx
+    if(h>23||mi>59) return '';
+    return pad(h)+':'+pad(mi);
+  }
+  function parts(){ var v=input.value; return v?{h:+v.slice(0,2),m:+v.slice(3,5)}:null; }
+  function fmt12(p){ return ((p.h+11)%12+1)+':'+pad(p.m)+' '+(p.h<12?'AM':'PM'); }
+  function label(){
+    var p=parts();
+    c.val.textContent=p?fmt12(p):'Pick a time';
+    c.val.classList.toggle('empty',!p);
+    if(p) pm=p.h>=12;
+    if(!pop.hidden) sync();
+  }
+  c.hook(norm,label);
+
+  var hh='', mm='', i;
+  for(i=1;i<=12;i++) hh+='<button type="button" class="dtp-cell" data-h="'+i+'">'+i+'</button>';
+  for(i=0;i<60;i+=5) mm+='<button type="button" class="dtp-cell" data-m="'+i+'">:'+pad(i)+'</button>';
+  pop.innerHTML='<div class="dtp-time-pad">'+
+    '<div class="dtp-trow">'+
+      '<input type="text" class="dtp-typed" autocomplete="off" autocapitalize="off" spellcheck="false" '+
+        'inputmode="text" placeholder="e.g. 2:15 PM or 14:15" aria-label="Type a time">'+
+      '<div class="dtp-ampm" role="group" aria-label="AM or PM">'+
+        '<button type="button" data-ap="am">AM</button><button type="button" data-ap="pm">PM</button></div>'+
+    '</div>'+
+    '<div class="dtp-lbl">Hour</div><div class="dtp-grid" data-grid="h">'+hh+'</div>'+
+    '<div class="dtp-lbl">Minute</div><div class="dtp-grid" data-grid="m">'+mm+'</div>'+
+    '<div class="dtp-hint" aria-live="polite"></div>'+
+    '<div class="dtp-foot"><button type="button" data-clear>Clear</button>'+
+      '<button type="button" class="primary" data-close>Done</button></div>'+
+  '</div>';
+  var typed=pop.querySelector('.dtp-typed'), hint=pop.querySelector('.dtp-hint');
+  var hourBtns=pop.querySelectorAll('[data-h]'), minBtns=pop.querySelectorAll('[data-m]');
+  var amBtn=pop.querySelector('[data-ap="am"]'), pmBtn=pop.querySelector('[data-ap="pm"]');
+
+  function setHint(t,bad){ hint.textContent=t||''; hint.classList.toggle('bad',!!bad); }
+  function sync(){
+    var p=parts(), h12=p?((p.h+11)%12+1):0, k;
+    for(k=0;k<hourBtns.length;k++) hourBtns[k].classList.toggle('sel',+hourBtns[k].getAttribute('data-h')===h12);
+    for(k=0;k<minBtns.length;k++) minBtns[k].classList.toggle('sel',!!p&&+minBtns[k].getAttribute('data-m')===p.m);
+    amBtn.classList.toggle('on',!pm); pmBtn.classList.toggle('on',pm);
+    amBtn.setAttribute('aria-pressed',String(!pm)); pmBtn.setAttribute('aria-pressed',String(pm));
+    typed.value=p?fmt12(p):''; typed.removeAttribute('aria-invalid');
+    /* minutes that are not on a 5-minute step (e.g. autofilled 2:17) are shown in the typed box */
+    if(p && p.m%5) setHint('Exact time '+fmt12(p)+'. Tap a minute to round, or edit above.');
+  }
+  c.onOpen=function(){
+    var p=parts(); if(p) pm=p.h>=12;
+    setHint(''); sync();
+    var f=pop.querySelector('[data-h].sel')||hourBtns[0]; f.focus();
+  };
+  function to24(h12){ return (h12%12)+(pm?12:0); }
+  function setHM(h,m){ c.commit(pad(h)+':'+pad(m)); }
+
+  function applyTyped(){
+    var s=typed.value.trim().toLowerCase().replace(/\./g,'');
+    if(!s){ return true; }
+    var m=/^(\d{1,2})(?::?(\d{2}))?\s*(a|p|am|pm)?$/.exec(s);
+    if(!m){ typed.setAttribute('aria-invalid','true'); setHint('Try 2:15 PM, 215p or 14:15.',true); return false; }
+    var h=+m[1], mi=m[2]?+m[2]:0, ap=m[3];
+    var ok=mi<=59;
+    if(ap){ ok=ok&&h>=1&&h<=12; if(ok) h=(h%12)+(ap.charAt(0)==='p'?12:0); }
+    else if(h>23) ok=false;
+    else if(h>=1&&h<=12&&!(m[1].length===2&&m[1].charAt(0)==='0')) h=(h%12)+(pm?12:0); // bare 1-12 follows the AM/PM toggle
+    if(!ok){ typed.setAttribute('aria-invalid','true'); setHint('That is not a valid time.',true); return false; }
+    setHM(h,mi); sync(); setHint(''); return true;
+  }
+  typed.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){ e.preventDefault(); if(applyTyped()) c.close(true); }
+  });
+  typed.addEventListener('change',applyTyped);
+  typed.addEventListener('input',function(){ typed.removeAttribute('aria-invalid'); setHint(''); });
+
+  pop.addEventListener('click',function(e){
+    var t=e.target.closest('button'); if(!t||!pop.contains(t)) return;
+    var p=parts();
+    if(t.hasAttribute('data-h')){
+      setHM(to24(+t.getAttribute('data-h')),p?p.m:0); setHint('');
+      var mb=pop.querySelector('[data-m].sel')||minBtns[0]; mb.focus();
+    }else if(t.hasAttribute('data-m')){
+      if(!p){ setHint('Pick an hour first.',true); hourBtns[0].focus(); return; }
+      setHM(p.h,+t.getAttribute('data-m')); c.close(true);
+    }else if(t.hasAttribute('data-ap')){
+      pm=t.getAttribute('data-ap')==='pm';
+      if(p) setHM(to24((p.h+11)%12+1),p.m); else sync();
+    }else if(t.hasAttribute('data-clear')){
+      c.commit(''); c.close(true);
+    }else if(t.hasAttribute('data-close')){
+      if(typed.value.trim() && !applyTyped()) return;
+      c.close(true);
+    }
+  });
+  /* arrow keys move between the big buttons */
+  pop.addEventListener('keydown',function(e){
+    var g=e.target.closest&&e.target.closest('.dtp-grid'); if(!g) return;
+    var list=[].slice.call(g.querySelectorAll('button')), i=list.indexOf(e.target), n=null;
+    if(e.key==='ArrowRight') n=i+1; else if(e.key==='ArrowLeft') n=i-1;
+    else if(e.key==='ArrowDown') n=i+4; else if(e.key==='ArrowUp') n=i-4;
+    if(n!==null && n>=0 && n<list.length){ e.preventDefault(); list[n].focus(); }
+  });
+  label();
+}
+
+var roots=document.querySelectorAll('[data-dtp]');
+for(var r=0;r<roots.length;r++){
+  if(roots[r].getAttribute('data-dtp')==='date') initDate(roots[r]); else initTime(roots[r]);
+}
+})();
+</script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -546,10 +911,69 @@ function paintRecon(){
   }
 }
 
+// Zip: one 5-digit US zip, or two joined by a slash when the customer gave both
+// (TV comes down at the old house, goes up at the new one): 80206/80301.
+// Same rule as normalizeCallerZip() in api/audit.js, keep the two identical.
+const ZIP_MSG='Zip must be 5 digits, like 80206. If the customer gave two (old house and new house), type both with a slash, like 80206/80301.';
+function zipErrShow(msg){
+  const e=$('zipErr'); e.textContent=msg; e.style.display='block';
+  $('fCallerZip').style.borderColor='var(--bad)';
+  $('fCallerZip').focus({preventScroll:true});
+  e.scrollIntoView({block:'center',behavior:'smooth'});
+}
+function zipErrClear(){
+  const e=$('zipErr'); if(e){ e.textContent=''; e.style.display='none'; }
+  $('fCallerZip').style.borderColor='';
+}
+$('fCallerZip').addEventListener('input',zipErrClear);
+function normalizeZip(raw){
+  const s=String(raw==null?'':raw).trim();
+  if(!s) return {value:''};
+  if(/^\d{5}$/.test(s)) return {value:s};
+  const m=/^(\d{5})(?:\s*[\/,;]\s*|\s+)(\d{5})$/.exec(s);
+  if(m) return {value:m[1]===m[2]?m[1]:m[1]+'/'+m[2]};
+  return {error:ZIP_MSG};
+}
+// Only answers to questions that are actually on screen for this call count.
+// The form keeps every answer ever clicked, so switching a call from TV
+// mounting to handyman (or unlinking a call) used to leave the OLD section's
+// answers in the saved audit, and they were scored.
+// Answers stored on an OLD audit that were already hidden when it was opened
+// (its linked call had no price, the service was "never got that far", etc.).
+// Re-saving that audit to fix a note or a zip must not delete them, so they
+// ride along untouched. Only answers hidden by a change made in THIS session
+// (switching service, changing the linked call) are dropped.
+let keptHidden={};
+function visibleKeySet(){
+  const call=linkedCall(), keep=new Set();
+  SECTIONS.forEach(sec=>{ if(!sec.when || sec.when(call)) sec.qs.forEach(q=>keep.add(q.k)); });
+  return keep;
+}
+function visibleAnswers(){
+  const keep=visibleKeySet();
+  const out=Object.assign({},keptHidden);
+  Object.keys(answers).forEach(k=>{ if(keep.has(k)) out[k]=answers[k]; });
+  return out;
+}
 function scoreOf(a){
   const v=Object.values(a.answers||{});
   const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
   return (yes+no)?Math.round(100*yes/(yes+no)):null;
+}
+// "6 of 7" next to the percent, so a 100% (or 0%) built on one answer does
+// not look as solid as one built on nine. Under 3 scored questions the number
+// is greyed and labelled, because a single answer swings it to 0 or 100.
+function scoreBasis(a){
+  const v=Object.values(a.answers||{});
+  const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
+  return {yes, n:yes+no};
+}
+function scoreHtml(a, big){
+  const s=scoreOf(a); if(s==null) return '';
+  const b=scoreBasis(a), thin=b.n<3;
+  const col=thin?'var(--muted,#8b93a1)':(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)');
+  return '<span class="score" style="color:'+col+'"'+(thin?' title="Only '+b.n+' question'+(b.n===1?'':'s')+' scored on this call, so this number is not very reliable"':'')+'>'+s+'%</span>'+
+    '<span class="sub" style="font-size:11px;margin-left:6px;">'+b.yes+' of '+b.n+(thin?' &middot; few answers':'')+'</span>';
 }
 // Always shown in Central, matching Grasshopper, regardless of the browser's
 // own timezone. Rows saved before the 0091 migration have no time_local and
@@ -686,8 +1110,8 @@ function openView(id){
       esc(new Date(a.audit_date+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',timeZone:'UTC'}))+
       (a.time_local?' &middot; '+esc(centralTime(a)):'')+
       (a.handled_by?' &middot; '+esc(a.handled_by):'')+
-      (a.caller_zip?' &middot; zip '+esc(a.caller_zip):'')+
-      (s!=null?' &middot; score <b style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</b>':'')+
+      (a.caller_zip?' &middot; zip'+(a.caller_zip.indexOf('/')>=0?'s ':' ')+esc(a.caller_zip):'')+
+      (s!=null?' &middot; score '+scoreHtml(a):'')+
     '</div>'+
     (a.flagged?'<div class="recon gap" style="margin-bottom:10px;">&#9888; Flagged for Andrew to listen to.</div>':'')+
     ansRows+
@@ -725,7 +1149,7 @@ function renderAudits(){
       '<span class="sub">'+esc(t)+(a.handled_by?' &middot; '+esc(a.handled_by):'')+(a.caller_name?' &middot; '+esc(a.caller_name):'')+'</span>'+
       '<span style="flex:1;"></span>'+
       (a.flagged?'<span class="flagpill">flagged</span>':'')+
-      (s!=null?'<span class="score" style="color:'+(s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)')+'">'+s+'%</span>':'');
+      scoreHtml(a);
     d.onclick=()=>openForm(a);
     // Tapping anywhere on the row already opened it for editing, but with an
     // explicit Delete button sitting right there, "click the row itself" isn't
@@ -798,8 +1222,14 @@ function openForm(a){
     $('fCallerPhone').value=''; $('fCallerName').value=''; $('fCallerZip').value='';
   }
   $('formErr').textContent='';
+  zipErrClear();
   $('formCard').classList.remove('hidden');
   renderCtx();
+  keptHidden={};
+  if(a){
+    const keep=visibleKeySet();
+    Object.keys(answers).forEach(k=>{ if(!keep.has(k)) keptHidden[k]=answers[k]; });
+  }
   $('formCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -820,7 +1250,7 @@ $('fCall').onchange=()=>{
     // The job's zip, from the booking this call turned into. She can't hear a
     // zip the caller never states, but a booked call always collected the
     // address, so the system fills it in for her.
-    if(c.zip && !$('fCallerZip').value) $('fCallerZip').value=c.zip;
+    if(c.zip && !$('fCallerZip').value && !normalizeZip(c.zip).error) $('fCallerZip').value=normalizeZip(c.zip).value;
   }
   renderCtx();
 };
@@ -870,6 +1300,10 @@ $('saveAudit').onclick=async()=>{
     $('formErr').textContent="Flagging a call needs the caller's phone number, so it can be found in Grasshopper later.";
     return;
   }
+  const z=normalizeZip($('fCallerZip').value);
+  if(z.error){ zipErrShow(z.error+(/^\d{5}\/\d{1,4}$/.test($('fCallerZip').value.trim())?' This one looks cut off; type both full zips.':'')); return; }
+  $('fCallerZip').value=z.value;
+  zipErrClear();
   const date=$('date').value, t=$('fTime').value;
   const body={
     id: editing?editing.id:undefined,
@@ -885,8 +1319,8 @@ $('saveAudit').onclick=async()=>{
     service:$('fSvc').value,
     caller_phone:$('fCallerPhone').value.trim(),
     caller_name:$('fCallerName').value.trim(),
-    caller_zip:$('fCallerZip').value.trim(),
-    answers, flagged:$('fFlag').checked, notes:$('fNotes').value,
+    caller_zip:z.value,
+    answers:visibleAnswers(), flagged:$('fFlag').checked, notes:$('fNotes').value,
   };
   const btn=$('saveAudit'), prevText=btn.textContent;
   btn.disabled=true; btn.textContent='Saving...';

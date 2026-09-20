@@ -55,6 +55,21 @@ export function auditLines() {
 
 function isDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')); }
 
+// A caller zip is one 5-digit US zip, or two joined by a slash when the
+// customer gave both (a TV dismounted at the old house and remounted at the
+// new one: 80206/80301). Stored in one canonical form so search can match it.
+// The old code silently cut the value to 10 characters, which turned a real
+// pair into "80209/8023". public/audit.html has the same rule; keep them equal.
+const ZIP_MSG = 'Zip must be 5 digits, like 80206. If the customer gave two (old house and new house), type both with a slash, like 80206/80301.';
+export function normalizeCallerZip(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return { value: null };
+  if (/^\d{5}$/.test(s)) return { value: s };
+  const m = /^(\d{5})(?:\s*[\/,;]\s*|\s+)(\d{5})$/.exec(s);
+  if (m) return { value: m[1] === m[2] ? m[1] : m[1] + '/' + m[2] };
+  return { error: ZIP_MSG };
+}
+
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -334,6 +349,8 @@ async function auditSave(req, res, db, auth, body) {
   // time_local for the bug this replaced.
   const occurredAt = timeLocal ? localDateTimeUTC(AUDITOR_TZ, date, timeLocal) : null;
 
+  const zip = normalizeCallerZip(body.caller_zip);
+  if (zip.error) return res.status(400).json({ error: zip.error });
   const row = {
     audit_date: date,
     grasshopper_number: number,
@@ -346,7 +363,7 @@ async function auditSave(req, res, db, auth, body) {
     handled_by: (body.handled_by || '').toString().trim() || null,
     caller_phone: callerPhone,
     caller_name: (body.caller_name || '').toString().trim() || null,
-    caller_zip: (body.caller_zip || '').toString().trim().slice(0, 10) || null,
+    caller_zip: zip.value,
     answers,
     flagged,
     notes: (body.notes || '').toString().trim() || null,
