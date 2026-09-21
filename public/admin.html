@@ -7465,7 +7465,7 @@ const LAUNCH_CITY_ORDER = ['Denver','Austin','Houston','Los Angeles','Dallas','F
 function launchCityOf(slug){ return LAUNCH_CITY_OF[slug] || 'Other'; }
 // A market's own `name` IS the city ("Los Angeles", "Dallas", ...) — unlike a
 // business, whose name is a brand, not a place, so it needs the lookup above.
-function launchMarketCityOf(m){ return m.name || 'Other'; }
+function launchMarketCityOf(m){ return m.city || m.name || 'Other'; }
 function launchItemsFor(b, items){
   if(LAUNCH_NO_GBP_SLUGS.has(b.slug))  items = items.filter(it => it.key!=='gbp_created' && it.key!=='gbp_verified');
   if(LAUNCH_NO_EMAIL_SLUGS.has(b.slug)) items = items.filter(it => it.key!=='email_keys');
@@ -7673,31 +7673,49 @@ function launchContactHtml(b){
   if(!bits.length) return '';
   return `<div style="font-size:11px;color:var(--mute);margin-top:2px;">${bits.join(' &middot; ')}</div>`;
 }
-// ── Launch traffic sparkline ─────────────────────────────────────────────────
-// Daily unique sessions on each business's own site, last 30 days. Fetched once
-// per Launch load (launch_traffic) and drawn as a small line chart inside every
-// card; cards re-render from this cache, so ticking a box never refetches.
-let _launchTraffic=null; // { days:[...], series:{slug:[n x30]|null} }
-function launchSparkHtml(slug){
+// ── Launch traffic chart ─────────────────────────────────────────────────────
+// Daily unique sessions, last 30 days, one chart per card. Built for LOW
+// traffic: each chart is scaled to its own peak (so a site that went from 1 a
+// day to 3 visibly moves), every day is a dot with its exact numbers on hover,
+// and the header compares the last 7 days with the 7 before.
+let _launchTraffic=null, _launchTrafficAt=0; // { days, series:{slug:{s,v}|null}, marketSeries }
+function launchSparkHtml(key){
   if(!_launchTraffic) return '<div style="font-size:11px;color:var(--mute);">Loading traffic…</div>';
-  const pts=_launchTraffic.series&&_launchTraffic.series[slug];
-  if(!pts) return '<div style="font-size:11px;color:var(--mute);">Traffic unavailable</div>';
-  const W=300,H=44,P=3,n=pts.length,max=Math.max(1,...pts),total=pts.reduce((a,b)=>a+b,0);
-  const x=i=>P+(n>1?i*(W-2*P)/(n-1):0), y=v=>H-P-(v/max)*(H-2*P);
+  const isMarket=key.startsWith('m:');
+  const d=isMarket ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key];
+  if(!d) return '<div style="font-size:11px;color:var(--mute);">No traffic data for this card</div>';
+  const pts=d.s, views=d.v, days=_launchTraffic.days||[], n=pts.length;
+  const W=320,H=72,L=20,R=4,T=6,B=14, max=Math.max(1,...pts);
+  const x=i=>L+(n>1?i*(W-L-R)/(n-1):0), y=v=>T+(1-v/max)*(H-T-B);
+  const sum=a=>a.reduce((p,c)=>p+c,0);
+  const total=sum(pts), last7=sum(pts.slice(-7)), prev7=sum(pts.slice(-14,-7)), diff=last7-prev7;
+  const trend = diff>0 ? `<span style="color:var(--green);font-weight:700;">▲ +${diff}</span>` : diff<0 ? `<span style="color:var(--red);font-weight:700;">▼ ${diff}</span>` : '<span>no change</span>';
+  const fmt=s=>{ const p=String(s).split('-'); return p.length===3 ? `${+p[1]}/${+p[2]}` : s; };
   const line=pts.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const area=`${line} L${x(n-1).toFixed(1)},${H-P} L${x(0).toFixed(1)},${H-P} Z`;
-  const first=_launchTraffic.days[0]||'', last=_launchTraffic.days[n-1]||'';
-  return `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mute);margin-bottom:2px;"><span>Daily sessions · 30 days</span><span><b style="color:var(--ink-2);">${total}</b> total · peak ${Math.max(0,...pts)}</span></div>
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;" role="img" aria-label="Daily sessions, ${esc(first)} to ${esc(last)}: ${total} total">
+  const area=`${line} L${x(n-1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+  const mid=Math.round(max/2);
+  const grid=[0,...(max>=2?[mid]:[]),max].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/><text x="${L-4}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" font-size="8" fill="#6b7280">${v}</text>`).join('');
+  const week=`<rect x="${x(n-7).toFixed(1)}" y="${T}" width="${(x(n-1)-x(n-7)).toFixed(1)}" height="${H-T-B}" fill="rgba(37,99,235,0.06)"/>`;
+  const dots=pts.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${v?2.2:1.2}" fill="${v?'#2563eb':'#cbd5e1'}"><title>${esc(fmt(days[i]||''))}: ${v} session${v===1?'':'s'}, ${views[i]||0} page view${views[i]===1?'':'s'}</title></circle>`).join('');
+  const ticks=[0,Math.floor((n-1)/2),n-1].map(i=>`<text x="${x(i).toFixed(1)}" y="${H-3}" text-anchor="${i===0?'start':i===n-1?'end':'middle'}" font-size="8" fill="#6b7280">${esc(fmt(days[i]||''))}</text>`).join('');
+  return `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--mute);margin-bottom:3px;">
+      <span>Last 7 days: <b style="color:var(--ink-2);">${last7}</b> ${trend} <span>vs prior 7 (${prev7})</span></span>
+      <span>30 days: <b style="color:var(--ink-2);">${total}</b> sessions · ${sum(views)} views</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="Daily sessions for the last 30 days: ${total} total, ${last7} in the last 7 days, ${prev7} in the 7 before">
+      ${week}${grid}
       <path d="${area}" fill="rgba(37,99,235,0.10)"/>
-      <path d="${line}" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <path d="${line}" fill="none" stroke="#2563eb" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}${ticks}
     </svg>`;
 }
 async function loadLaunchTraffic(){
+  if(_launchTraffic && Date.now()-_launchTrafficAt<120000) return; // cards already drew from the cache
   try{
-    _launchTraffic=await api('launch_traffic',{timeoutMs:45000});
+    _launchTraffic=await api('launch_traffic',{timeoutMs:30000});
+    _launchTrafficAt=Date.now();
   }catch(e){
-    _launchTraffic={days:[],series:{}};
+    if(!_launchTraffic) _launchTraffic={days:[],series:{},marketSeries:{}};
   }
   document.querySelectorAll('[data-launch-spark]').forEach(el=>{ el.innerHTML=launchSparkHtml(el.dataset.launchSpark); });
 }
@@ -7732,7 +7750,7 @@ function launchCardHtml(b, items){
 // of how many of the other boxes are ticked.
 function launchMarketScoreOf(m, items){
   const passed = items.filter(it => !!m.checklist[it.key]).length;
-  return { passed, total: items.length, blocked: !m.checklist.can_book };
+  return { passed, total: items.length, blocked: !m.checklist.techs_staffed };
 }
 function launchMarketNextAction(m, items){
   if(!m.url) return 'Choose a URL for this page';
@@ -7777,7 +7795,7 @@ function launchMarketDetailHtml(m, items){
 function launchMarketAddressLineHtml(m){
   return m.address
     ? `<span style="font-size:11px;color:var(--mute);">${esc(m.address)}</span>`
-    : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`;
+    : (m.checklist && m.checklist.gbp_created ? '' : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`);
 }
 // A market's name is its city (it doubles as the hub key), so the card title
 // adds the parent brand: "Handy Andy Austin" feeds the Austin hub as its own
@@ -7794,6 +7812,7 @@ function launchMarketCardHtml(m, items){
         <div class="launch-market-address" style="margin-top:2px;">${launchMarketAddressLineHtml(m)}</div>
       </div>
     </div>
+    <div class="launch-spark" data-launch-spark="m:${esc(m.slug)}" style="margin-top:10px;">${launchSparkHtml('m:'+m.slug)}</div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchMarketNextAction(m, items))}</p>
     <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
     <div class="launch-detail" style="display:none;"></div>
@@ -7845,12 +7864,29 @@ function launchDrawWires(root){
 let _launchCity='All';
 let _launchWireObserver=null;
 let _launchRequest=0;
+let _launchFresh=null;
 async function renderLaunch(){
   const view=document.getElementById('view');
   const request=++_launchRequest;
-  view.innerHTML=`<div class="wrap"><div class="empty">Checking every business — this hits each live site, give it a few seconds…</div></div>`;
-  let data;
-  try{ data=await api('launch_status',{timeoutMs:30000}); }
+  // Paint straight away from the last result (the live site checks take a few
+  // seconds), then swap in the fresh one when it lands, unless a checklist is
+  // open, where a repaint would close it under the owner's cursor.
+  let data=_launchFresh; _launchFresh=null;
+  if(!data){
+    let cached=null;
+    try{ cached=JSON.parse(localStorage.getItem('launch_status_cache')||'null'); }catch(_){ cached=null; }
+    if(cached && cached.businesses){
+      data=cached;
+      api('launch_status',{timeoutMs:30000}).then(d=>{
+        try{ localStorage.setItem('launch_status_cache', JSON.stringify(d)); }catch(_){}
+        if(request!==_launchRequest||!onScreen('launch')) return;
+        if(document.querySelector('.launch-open[aria-expanded="true"]')) return;
+        _launchFresh=d; renderLaunch();
+      }).catch(()=>{});
+    }
+  }
+  if(!data) view.innerHTML=`<div class="wrap"><div class="empty">Checking every business — this hits each live site, give it a few seconds…</div></div>`;
+  try{ if(!data){ data=await api('launch_status',{timeoutMs:30000}); try{ localStorage.setItem('launch_status_cache', JSON.stringify(data)); }catch(_){} } }
   catch(e){ if(request!==_launchRequest||!onScreen('launch'))return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="launchRetry">Try again</button></div>`;view.querySelector('#launchRetry').addEventListener('click',renderLaunch); return; }
   if(request!==_launchRequest||!onScreen('launch'))return;
 
@@ -7868,7 +7904,7 @@ async function renderLaunch(){
   // `score` is a function, not a snapshot: ticking a box changes it, and sync()
   // below re-reads it to recolour the card, its wire, the hub ring and the tiles.
   const entries=[
-    ...businesses.map(b=>({ sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
+    ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
     ...markets.map(m=>({ sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
   ];
   const statusOf=s=>s.blocked ? 'blocked' : (s.passed===s.total ? 'live' : 'progress');

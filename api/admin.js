@@ -2333,13 +2333,10 @@ const LAUNCH_CHECKLIST_ITEMS = [
 // column on the row (see launchMarketAddressSet below) — a real street
 // address is exactly the thing Google's video verifier checks against, so
 // WHICH one matters and a checkbox alone couldn't say.
-const MARKET_CHECKLIST_ITEMS = [
-  { key: 'gbp_created',             label: 'Google Business Profile created' },
-  { key: 'gbp_verified',            label: 'GBP verified (video)' },
-  { key: 'url_chosen_and_directed', label: 'URL chosen and live' },
-  { key: 'address_chosen',          label: 'Address chosen' },
-  { key: 'can_book',                label: 'Can book a real appointment or an estimate' },
-];
+// Same 14 items as a business (owner call 2026-09-22: a Handy Andy location is
+// not a lesser thing than a brand). A market has no keys of its own, so the
+// three `auto` items are plain ticks here rather than live checks.
+const MARKET_CHECKLIST_ITEMS = LAUNCH_CHECKLIST_ITEMS.map(({ key, label }) => ({ key, label }));
 
 async function launchMarketRows(db) {
   const { data: markets, error } = await db.from('markets')
@@ -2366,50 +2363,62 @@ async function launchMarketRows(db) {
     const notes = (m.settings && m.settings.launch_notes) || '';
     return {
       id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
+      city: (m.settings && m.settings.city) || m.name,
       url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist, notes,
     };
   }));
 }
 
-// GET ?action=launch_traffic — daily unique sessions for each business's own
-// site over the last 30 days, for the sparkline on every Launch card. Counts
-// page_view events from web_events (same source and bot filter as the market
-// analytics above), one session counted once per day, bucketed in Central time.
+// GET ?action=launch_traffic — daily unique sessions + page views for the last
+// 30 days, for the chart on every Launch card. One grouped query
+// (public.launch_daily_traffic, migration 0127) across BOTH trackers: the
+// microsites report to web_events_sites keyed by site, ihandyandy.com reports
+// to web_events and is split by URL path so each Handy Andy location page gets
+// its own line.
+const LAUNCH_TRAFFIC_SITE_KEY = { 'mile-high': 'milehightvmounting' };
 async function launchTraffic(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const DAYS = 30;
-  const TZ = 'America/Chicago';
-  const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: TZ });
+  const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
   const days = [];
   for (let i = DAYS - 1; i >= 0; i--) days.push(dayKey(Date.now() - i * 24 * 60 * 60 * 1000));
-  const since = new Date(Date.now() - (DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: businesses, error } = await db.from('businesses').select('slug, url');
+  const [{ data: businesses, error: bErr }, { data: markets, error: mErr }] = await Promise.all([
+    db.from('businesses').select('slug, url'),
+    db.from('markets').select('slug, url'),
+  ]);
+  if (bErr) throw bErr;
+  if (mErr) throw mErr;
+  const pathOf = (u) => { try { return new URL(u).pathname.replace(/\/+$/, '') || '/'; } catch { return null; } };
+  const siteKeyOf = (slug) => LAUNCH_TRAFFIC_SITE_KEY[slug] || slug;
+  const marketPath = {};
+  for (const m of (markets || [])) { const p = pathOf(m.url); if (p) marketPath[m.slug] = p; }
+
+  const keys = [...new Set([...(businesses || []).map(b => siteKeyOf(b.slug)), ...Object.values(marketPath)])];
+  const { data: rows, error } = await serviceClientPublic()
+    .rpc('launch_daily_traffic', { p_days: DAYS }).in('key', keys).limit(5000);
   if (error) throw error;
-  const pub = serviceClientPublic();
-  const series = {};
-  await Promise.all((businesses || []).map(async (biz) => {
-    let host = '';
-    try { host = new URL(biz.url).hostname.replace(/^www\./, ''); } catch { host = ''; }
-    if (!host) return;
-    try {
-      const rows = await fetchAllPages((cols, opts) =>
-        pub.from('web_events').select(cols || 'session_id, created_at, user_agent', opts)
-          .eq('event_type', 'page_view')
-          .ilike('page_url', `%${host}%`)
-          .gte('created_at', since), { maxPages: 12 });
-      const perDay = new Map(days.map(d => [d, new Set()]));
-      for (const r of rows) {
-        if (isBotUserAgent(r.user_agent)) continue;
-        const set = perDay.get(dayKey(r.created_at));
-        if (set) set.add(r.session_id);
-      }
-      series[biz.slug] = days.map(d => perDay.get(d).size);
-    } catch (e) {
-      series[biz.slug] = null; // unknown, not zero
-    }
-  }));
-  return res.status(200).json({ days, series });
+
+  const idx = new Map(days.map((d, i) => [d, i]));
+  const bucket = {};
+  for (const r of (rows || [])) {
+    const i = idx.get(String(r.day).slice(0, 10));
+    if (i === undefined) continue;
+    const k = `${r.src}:${r.key}`;
+    const b = bucket[k] || (bucket[k] = { s: new Array(DAYS).fill(0), v: new Array(DAYS).fill(0) });
+    b.s[i] = Number(r.sessions) || 0;
+    b.v[i] = Number(r.views) || 0;
+  }
+  const zero = () => ({ s: new Array(DAYS).fill(0), v: new Array(DAYS).fill(0) });
+  const series = {}, marketSeries = {};
+  for (const b of (businesses || [])) {
+    // Dom's and the Handy Andy parent have no single-site tracker key.
+    series[b.slug] = (b.slug === 'doms' || b.slug === 'handy-andy') ? null : (bucket[`site:${siteKeyOf(b.slug)}`] || zero());
+  }
+  for (const m of (markets || [])) {
+    marketSeries[m.slug] = marketPath[m.slug] ? (bucket[`path:${marketPath[m.slug]}`] || zero()) : null;
+  }
+  return res.status(200).json({ days, series, marketSeries });
 }
 
 async function launchStatus(req, res, db, auth) {
