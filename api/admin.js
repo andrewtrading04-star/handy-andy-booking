@@ -6054,6 +6054,42 @@ async function analyticsOverview(req, res, db, auth) {
     }
   }
 
+  // ── Calls per business in the chosen range ────────────────────────────────
+  // A call counts when it reached a phone or a voicemail box: Twilio-logged
+  // inbound calls (robocalls that never pressed 1, and blocked numbers, are left
+  // out) plus the main Grasshopper lines from the auditor's hand count. A
+  // multi-market business is split by market; rows with no market of their own
+  // (a landing page like Golden, or the main site) show a dash, not a guess.
+  const callsByBiz = new Map();   // business_id -> { total, byMarket: Map }
+  try {
+    const addCall = (bizId, market) => {
+      if (!bizId) return;
+      let e = callsByBiz.get(bizId);
+      if (!e) { e = { total: 0, byMarket: new Map() }; callsByBiz.set(bizId, e); }
+      e.total++;
+      if (market) e.byMarket.set(market, (e.byMarket.get(market) || 0) + 1);
+    };
+    const { data: tn } = await db.from('tracking_numbers').select('phone');
+    const trackingPhones = new Set((tn || []).map(t => digitsOf(t.phone)));
+    const { data: cl } = await db.from('calls').select('business_id, market')
+      .eq('kind', 'inbound').not('answered', 'is', null).gte('occurred_at', since).limit(10000);
+    for (const c of (cl || [])) addCall(c.business_id, c.market);
+    const { data: au } = await db.from('call_audits').select('business_id, grasshopper_number')
+      .eq('direction', 'incoming').gte('audit_date', String(since).slice(0, 10)).limit(10000);
+    for (const a of (au || [])) {
+      const d = digitsOf(a.grasshopper_number);
+      if (trackingPhones.has(d)) continue;          // already counted from the Twilio log
+      addCall(a.business_id, (GRASSHOPPER_LINES[d] || {}).market || null);
+    }
+  } catch (e) { console.warn('[admin] analytics calls count failed:', e.message); }
+  const CALL_MARKETS = new Set(['Denver', 'Houston', 'Austin', 'Los Angeles', 'San Antonio', 'Dallas']);
+  const callsForMarket = (bizId, marketName) => {
+    const e = callsByBiz.get(bizId);
+    const key = String(marketName || '').replace(/^HA\s+/i, '');
+    if (e && e.byMarket.has(key)) return e.byMarket.get(key);
+    return CALL_MARKETS.has(key) ? 0 : null;
+  };
+
   // Dense, zero-filled 30-day axis so a quiet day reads as a real zero in the
   // sparkline instead of being compressed out of the line entirely.
   const dayKeys = [];
@@ -6232,6 +6268,7 @@ async function analyticsOverview(req, res, db, auth) {
           bookings_cancelled_30d: cancelled,
           bookings_internal_30d: internal,
           bookings_by_day: dayKeys.map(d => bookingsByDay.get(d) || 0),
+          calls_30d: callsForMarket(b.id, m.name),
           last_event: lastSeen,
         });
       }
@@ -6267,6 +6304,7 @@ async function analyticsOverview(req, res, db, auth) {
       bookings_cancelled_30d: bk ? bk.cancelled : 0,
       bookings_internal_30d: bk ? bk.internal : 0,
       bookings_by_day: bk ? dayKeys.map(d => bk.byDay.get(d) || 0) : dayKeys.map(() => 0),
+      calls_30d: (callsByBiz.get(b.id) || { total: 0 }).total,
       last_event: s ? s.lastSeen : null,
     };
   })
