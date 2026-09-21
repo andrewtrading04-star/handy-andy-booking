@@ -7793,6 +7793,7 @@ function launchMarketDetailHtml(m, items){
   </div>`;
 }
 function launchMarketAddressLineHtml(m){
+  if(m.parentSlug==='handy-andy') return ''; // owner call 2026-09-22: no address line on Handy Andy locations
   return m.address
     ? `<span style="font-size:11px;color:var(--mute);">${esc(m.address)}</span>`
     : (m.checklist && m.checklist.gbp_created ? '' : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`);
