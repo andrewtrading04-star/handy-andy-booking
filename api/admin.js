@@ -1079,7 +1079,7 @@ async function summary(req, res, db, auth) {
     // for the weekly view alone.
     {
       const { data: apRows } = await db.from('actual_profit_weekly')
-        .select('pay_date, doms_stripe_payout, handy_andy_stripe_payout, tech_pay')
+        .select('pay_date, doms_stripe_payout, handy_andy_stripe_payout, tech_pay, lead_gen_payouts')
         .not('doms_stripe_payout', 'is', null)
         .not('handy_andy_stripe_payout', 'is', null)
         .not('tech_pay', 'is', null)
@@ -1087,7 +1087,7 @@ async function summary(req, res, db, auth) {
         .limit(104);
       profit.income_history = (apRows || []).map(r => ({
         pay_date: r.pay_date,
-        total_made: Math.round((Number(r.doms_stripe_payout) + Number(r.handy_andy_stripe_payout) - Number(r.tech_pay)) * 100) / 100,
+        total_made: Math.round((Number(r.doms_stripe_payout) + Number(r.handy_andy_stripe_payout) + leadGenSum(leadGenMap(r.lead_gen_payouts)) - Number(r.tech_pay)) * 100) / 100,
       })).reverse();
     }
 
@@ -13777,21 +13777,38 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
     .filter(t => t.jobs.length > 0 || t.deferred.length > 0);
 }
 
+// Lead-gen brands' hand-entered payouts: { "<slug>": amount } on the same weekly
+// row. Tolerates null / junk so a bad row can never break the payroll page.
+function leadGenMap(raw) {
+  const out = {};
+  if (raw && typeof raw === 'object') {
+    for (const [k, v] of Object.entries(raw)) { const n = Number(v); if (Number.isFinite(n)) out[k] = n; }
+  }
+  return out;
+}
+function leadGenSum(map) {
+  return Math.round(Object.values(map).reduce((s, n) => s + n, 0) * 100) / 100;
+}
+
 // Shared "actual profit" lookup — same hand-entered row shown on both the
 // single-business and combined payroll screens (one row per pay_date, not
 // per business). Owner-gated by both callers already.
 async function actualProfitFor(db, payDate) {
   const { data: profitRow } = await db.from('actual_profit_weekly')
-    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay').eq('pay_date', payDate).maybeSingle();
+    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay, lead_gen_payouts').eq('pay_date', payDate).maybeSingle();
   const domsStripe = profitRow?.doms_stripe_payout != null ? Number(profitRow.doms_stripe_payout) : null;
   const haStripe = profitRow?.handy_andy_stripe_payout != null ? Number(profitRow.handy_andy_stripe_payout) : null;
   const techPay = profitRow?.tech_pay != null ? Number(profitRow.tech_pay) : null;
   const allThreeSet = domsStripe != null && haStripe != null && techPay != null;
+  const leadGen = leadGenMap(profitRow?.lead_gen_payouts);
+  const leadGenTotal = leadGenSum(leadGen);
   return {
     doms_stripe_payout: domsStripe,
     handy_andy_stripe_payout: haStripe,
     tech_pay: techPay,
-    total_made: allThreeSet ? (domsStripe + haStripe - techPay) : null,
+    lead_gen_payouts: leadGen,
+    lead_gen_total: leadGenTotal,
+    total_made: allThreeSet ? Math.round((domsStripe + haStripe + leadGenTotal - techPay) * 100) / 100 : null,
   };
 }
 
@@ -14025,22 +14042,27 @@ async function payrollCombined(req, res, db, auth) {
 async function actualProfitSave(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const { pay_date, field, amount } = req.body || {};
-  const validFields = ['doms_stripe_payout', 'handy_andy_stripe_payout', 'tech_pay'];
+  const validFields = ['doms_stripe_payout', 'handy_andy_stripe_payout', 'tech_pay', 'lead_gen'];
   if (!pay_date || !/^\d{4}-\d{2}-\d{2}$/.test(pay_date)) return res.status(400).json({ error: 'pay_date (YYYY-MM-DD) required' });
   if (!validFields.includes(field)) return res.status(400).json({ error: `field must be one of ${validFields.join(', ')}` });
   if (amount == null || isNaN(Number(amount))) return res.status(400).json({ error: 'amount required' });
+  // field 'lead_gen' = one lead-gen brand's payout, keyed by business slug.
+  const leadSlug = String((req.body || {}).slug || '');
+  if (field === 'lead_gen' && !/^[a-z0-9-]{1,60}$/.test(leadSlug)) return res.status(400).json({ error: 'slug required for lead_gen' });
 
   const { data: existing } = await db.from('actual_profit_weekly')
-    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay').eq('pay_date', pay_date).maybeSingle();
+    .select('doms_stripe_payout, handy_andy_stripe_payout, tech_pay, lead_gen_payouts').eq('pay_date', pay_date).maybeSingle();
 
   const row = {
     pay_date,
     doms_stripe_payout: existing?.doms_stripe_payout ?? null,
     handy_andy_stripe_payout: existing?.handy_andy_stripe_payout ?? null,
     tech_pay: existing?.tech_pay ?? null,
-    [field]: Number(amount),
+    lead_gen_payouts: leadGenMap(existing?.lead_gen_payouts),
     updated_at: new Date().toISOString(),
   };
+  if (field === 'lead_gen') row.lead_gen_payouts[leadSlug] = Number(amount);
+  else row[field] = Number(amount);
   const { error } = await db.from('actual_profit_weekly').upsert(row, { onConflict: 'pay_date' });
   if (error) throw error;
 
