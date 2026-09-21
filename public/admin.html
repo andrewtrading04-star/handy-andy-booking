@@ -8128,7 +8128,7 @@ function renderPayrollData(d){
     <details class="ap-lg" style="margin-bottom:14px;">
       <summary style="cursor:pointer; font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px;">Lead-gen brands <span id="apLgSum" style="color:var(--ink); text-transform:none; letter-spacing:0; font-size:14px;">${payFmtUSD(ap.lead_gen_total||0)}</span></summary>
       <div style="display:flex; gap:10px 20px; flex-wrap:wrap; margin-top:10px;">
-        ${(businesses||[]).filter(b=>!OWN_CHIP_SLUGS.includes(b.slug)).sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(b=>`<div style="min-width:250px;">
+        ${(businesses||[]).filter(b=>!OWN_CHIP_SLUGS.includes(b.slug)).sort((a,b)=>(a.slug==='mile-high'?-1:0)-(b.slug==='mile-high'?-1:0)||String(a.name).localeCompare(String(b.name))).map(b=>`<div style="min-width:250px;">
           <div style="font-size:12px; color:var(--mute); margin-bottom:4px;">${esc(b.name)}</div>
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="color:var(--mute);">$</span>
@@ -8142,6 +8142,7 @@ function renderPayrollData(d){
     <div style="border-top:1px solid var(--line); padding-top:10px;">
       <div style="font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px;">Total I made</div>
       <div id="apTotalMade" style="font-size:22px; font-weight:800; color:var(--ink);">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
+      <div id="apMath" style="font-size:12.5px; color:var(--mute); margin-top:2px;">${ap.total_made!=null?`${payFmtUSD(ap.doms_stripe_payout)} Dom's + ${payFmtUSD(ap.handy_andy_stripe_payout)} Handy Andy + ${payFmtUSD(ap.lead_gen_total||0)} lead-gen brands − ${payFmtUSD(ap.tech_pay)} tech pay`:''}</div>
     </div>
   </div>`;
   const wireActualProfit = () => {
@@ -8152,7 +8153,10 @@ function renderPayrollData(d){
       // Lead-gen brands: blank = $0, summed into one figure.
       let lg=0; content.querySelectorAll('.ap-lg-input').forEach(i=>{ const n=Number(i.value); if(i.value!==''&&!isNaN(n)) lg+=n; });
       const lgEl=document.getElementById('apLgSum'); if(lgEl) lgEl.textContent=payFmtUSD(lg);
-      totalEl.textContent=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp)) ? payFmtUSD(ds+ha+lg-tp) : '—';
+      const okAll=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp));
+      totalEl.textContent=okAll ? payFmtUSD(ds+ha+lg-tp) : '—';
+      const mathEl=document.getElementById('apMath');
+      if(mathEl) mathEl.textContent=okAll ? `${payFmtUSD(ds)} Dom's + ${payFmtUSD(ha)} Handy Andy + ${payFmtUSD(lg)} lead-gen brands − ${payFmtUSD(tp)} tech pay` : '';
     };
     content.querySelectorAll('.ap-input,.ap-lg-input').forEach(inp=>inp.addEventListener('input', recalcApTotal));
     content.querySelectorAll('.ap-lg-save').forEach(btn=>{
@@ -13810,7 +13814,7 @@ function paintEstimates(){
     if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
     const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
     const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
-    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email?' · <b style="color:#b45309;">No email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email&&!e.customer_phone?' · <b style="color:#b45309;">No phone or email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
@@ -18777,12 +18781,12 @@ async function renderCallWiz(){
     // reluctant caller for a name and two contact details to hear a number is
     // how the estimate gets lost entirely — so one way to reach them is all
     // that's required, and it goes out on whichever they gave.
-    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. What's the best email for it? I'll text it too if you like.")}
+    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. Would a text or an email be easier?")}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(draft.estimateContact.phone)}">
         <input class="search" id="cwEmail" style="margin:0;" placeholder="Email" value="${esc(draft.estimateContact.email)}">
       </div>
-      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Ask every caller for an email</b>, even if they take the text. One is enough to send. No email means we cannot follow up by email later.</div>
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Text is best.</b> Ask every caller for a mobile number to text the estimate to. An email is a nice extra. One is enough to send.</div>
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>${TEXTS_ON_LABEL}</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
