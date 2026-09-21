@@ -335,6 +335,14 @@
   .cap-day.open{background:#f0faf3;border-color:#bfe5c9;} .cap-day.open b{color:#15803d;}
   .cap-day.full{background:#fff1f1;border-color:#f5c2c2;} .cap-day.full b{color:#b91c1c;}
   .cap-day.none{background:#f6f7f9;} .cap-day.none b{color:#aeb7c3;}
+  /* Analytics > Phone Desk */
+  .pd-chip small{display:block;font-size:11.5px;font-weight:700;margin-top:2px;}
+  .pd-chip small.up{color:#15803d;} .pd-chip small.down{color:#b91c1c;} .pd-chip small.flat{color:var(--mute);}
+  .pd-rules{background:#fffbea;border:1px solid #f3e2a3;border-radius:12px;padding:12px 16px;margin:0 0 18px;font-size:13.5px;line-height:1.55;}
+  .pd-rules b{display:block;margin-bottom:4px;}
+  .pd-rules ol{margin:4px 0 0 18px;padding:0;}
+  .pd-table td.num,.pd-table th.num{text-align:right;white-space:nowrap;}
+  .pd-table tr.cur td{background:#f0f6ff;font-weight:700;}
   @media (max-width:640px){ .cap-days{grid-template-columns:repeat(4,minmax(0,1fr));} .cap-bar{width:60px;} }
 
   /* generic content (bookings / customers / technicians render here) */
@@ -10323,6 +10331,7 @@ const HANDYMAN_SLUGS = new Set(['handy-andy', 'doms', 'austin']);
 const ANALYTICS_TABS=[
   { id:'insights', label:'Insights', screen:'insights', show:()=>role==='owner', render:()=>renderInsights() },
   { id:'capacity', label:'Capacity', screen:'capacity', show:()=>role==='owner', render:()=>renderCapacity() },
+  { id:'phonedesk', label:'Phone Desk', screen:'phonedesk', show:()=>role==='owner', render:()=>renderPhoneDesk() },
   { id:'overview', label:'Overview', screen:'analyticsoverview', show:()=>role==='owner', render:()=>renderAnalyticsOverview() },
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
@@ -10396,6 +10405,63 @@ async function renderCallHub(){
 }
 async function renderAnalyticsHub(){
   await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); });
+}
+
+// ── Analytics > Phone Desk: phone-booked sales, ticket and add-ons vs the form ──
+// Read-only. api/_lib/phone-desk.js does the math.
+let _pdReq=0;
+function pdMoney(n){ return n==null?'–':'$'+Math.round(n).toLocaleString('en-US'); }
+function pdPct(n){ return n==null?'–':n+'%'; }
+function pdDelta(now,base){
+  if(now==null||!base) return '';
+  const d=Math.round(100*(now-base)/base);
+  return `<small class="${d>=3?'up':d<=-3?'down':'flat'}">${d>0?'+':''}${d}% vs summer</small>`;
+}
+async function renderPhoneDesk(){
+  const view=document.getElementById('view');
+  const req=++_pdReq;
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d;
+  try{ d=await api('phone_desk'); }
+  catch(err){ if(req===_pdReq) view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; return; }
+  if(req!==_pdReq || !onScreen('phonedesk')) return;
+  let h='<div class="cap-wrap">';
+  h+=`<div class="pd-rules"><b>Phone desk rules for this week</b><ol>
+    <li>Close on the call. An estimate is the exception, not the default.</li>
+    <li>Ask the widget's add-on questions on every TV call: bracket, hiding wires, soundbar, second TV.</li>
+    <li>Every quote goes out in writing within 5 minutes. Ask for an email address on every call.</li>
+    <li>Callers who did not book: call back about 3 hours later and again the next morning.</li>
+    <li>Call open estimates under 14 days old first. Close the ones over 30 days old.</li></ol></div>`;
+  h+=`<p class="cap-note">${esc(d.note||'')} "Summer" is ${esc(d.baseline.from)} to ${esc(d.baseline.to)}.</p>`;
+  (d.brands||[]).forEach(b=>{
+    const p=b.phone, f=b.form, l4=p.last4, bs=p.baseline;
+    h+=`<div class="cap-city"><h3>${esc(b.name)}</h3><div class="cap-sub">Jobs entered by the office (phone) compared with jobs booked on the website (form).</div>`;
+    h+='<div class="cap-chips">'+
+      `<div class="cap-chip pd-chip"><b>${pdMoney(l4.sales_per_week)}</b><span>Phone sales / week, last 4</span>${pdDelta(l4.sales_per_week,bs.sales_per_week)}</div>`+
+      `<div class="cap-chip pd-chip"><b>${l4.jobs_per_week}</b><span>Phone jobs / week, last 4</span>${pdDelta(l4.jobs_per_week,bs.jobs_per_week)}</div>`+
+      `<div class="cap-chip pd-chip"><b>${pdMoney(l4.avg_ticket)}</b><span>Average phone ticket</span>${pdDelta(l4.avg_ticket,bs.avg_ticket)}</div>`+
+      `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.bracket_pct)}</b><span>Phone bracket rate</span><small class="flat">form: ${pdPct(f.last8.bracket_pct)}</small></div>`+
+      `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.inwall_pct)}</b><span>Phone in-wall rate</span><small class="flat">form: ${pdPct(f.last8.inwall_pct)}</small></div>`+
+      `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.soundbar_pct)}</b><span>Phone soundbar rate</span><small class="flat">form: ${pdPct(f.last8.soundbar_pct)}</small></div>`+
+    '</div>';
+    h+='<div class="cap-h">Week by week</div><div class="avb-scroll"><table class="cap-table pd-table"><thead><tr><th>Week of</th><th class="num">Phone jobs</th><th class="num">Phone sales</th><th class="num">Avg ticket</th><th class="num">Bracket</th><th class="num">In-wall</th><th class="num">Soundbar</th><th class="num">Form jobs</th><th class="num">Form ticket</th></tr></thead><tbody>'+
+      p.weeks.map((w,i)=>{
+        const fw=f.weeks[i]||{};
+        const l=capDayLabel(w.start);
+        return `<tr class="${w.current?'cur':''}"><td>${esc(l.md)}${w.current?' · this week':''}</td><td class="num">${w.jobs}</td><td class="num">${pdMoney(w.sales)}</td><td class="num">${pdMoney(w.avg_ticket)}</td><td class="num">${pdPct(w.bracket_pct)}</td><td class="num">${pdPct(w.inwall_pct)}</td><td class="num">${pdPct(w.soundbar_pct)}</td><td class="num">${fw.jobs==null?'–':fw.jobs}</td><td class="num">${pdMoney(fw.avg_ticket)}</td></tr>`;
+      }).join('')+'</tbody></table></div>';
+    const e=b.estimates;
+    h+=`<div class="cap-h">Estimates, last 90 days</div><div class="cap-chips">`+
+      `<div class="cap-chip"><b>${e.open}</b><span>Open</span></div>`+
+      `<div class="cap-chip"><b>${pdMoney(e.open_quoted)}</b><span>Quoted, still open</span></div>`+
+      `<div class="cap-chip ${e.close_pct!=null&&e.close_pct<20?'bad':''}"><b>${pdPct(e.close_pct)}</b><span>Closed (scheduled)</span></div>`+
+      `<div class="cap-chip ${e.archived_no_contact?'hot':''}"><b>${e.archived_no_contact}</b><span>Archived, never contacted</span></div></div>`+
+      '<div class="avb-scroll"><table class="cap-table"><thead><tr><th>Age of open estimate</th><th class="num">Count</th><th class="num">Quoted</th><th class="num">No email</th></tr></thead><tbody>'+
+      e.buckets.map(x=>`<tr><td>${esc(x.label)}</td><td class="num">${x.count}</td><td class="num">${pdMoney(x.quoted)}</td><td class="num">${x.no_email}</td></tr>`).join('')+'</tbody></table></div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  view.innerHTML=h;
 }
 
 // ── Analytics > Capacity: idle tech time and open slots, by city ───────────────

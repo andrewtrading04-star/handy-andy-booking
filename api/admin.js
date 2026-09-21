@@ -34,6 +34,7 @@ import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { capacityOverview } from './_lib/capacity.js';
+import { phoneDesk } from './_lib/phone-desk.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot } from './_lib/availability.js';
 import { parseDomainList, runDomainWatch } from './_lib/domain-watch.js';
 import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
@@ -446,6 +447,10 @@ export default async function handler(req, res) {
       case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
       case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
       case 'insights_overview':    return await insightsOverview(req, res, db, auth);
+      case 'phone_desk': {
+        if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+        return res.status(200).json(await phoneDesk(db));
+      }
       case 'capacity_overview': {
         if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
         return res.status(200).json(await capacityOverview(db));
