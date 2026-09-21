@@ -507,6 +507,9 @@ export default async function handler(req, res) {
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
+      case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
+      case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
+      case 'estimate_bulk_close': return await estimateBulkClose(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
       case 'estimate_broker_save_spec': return await estimateBrokerSaveSpec(req, res, db, auth, body);
@@ -10861,6 +10864,103 @@ async function estimateSendSms(req, res, db, auth, body) {
 
   const patch = await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth), 'sms');
   return res.status(200).json({ ok: true, estimate: patch });
+}
+
+// ── Follow up now ────────────────────────────────────────────────────────────
+// Sent, not approved, and still fresh enough to win. Two groups, best first:
+//   opened   – the customer opened the text/email but did not approve
+//   unopened – sent more than 3 hours ago and never opened
+// Read-only. Nothing here changes an estimate.
+async function estimateFollowups(req, res, db, auth) {
+  const biz = await resolveBusiness(db, auth, req.query.business || '');
+  const now = Date.now();
+  const cols = 'id, customer_name, customer_phone, customer_email, service_label, line_items, tax_rate, sms_consent, notes, source, created_at, contacted_at, texted_at, emailed_at, text_opened_at, email_opened_at';
+  const { data, error } = await db.from('estimates').select(cols)
+    .eq('business_id', biz.id).eq('status', 'contacted').is('approved_at', null)
+    .gte('created_at', new Date(now - 21 * 86400000).toISOString())
+    .order('created_at', { ascending: false }).limit(300);
+  if (error) throw error;
+  const ms = (t) => (t ? Date.parse(t) : 0) || 0;
+  const opened = [], unopened = [];
+  for (const e of (data || [])) {
+    const items = Array.isArray(e.line_items) ? e.line_items : [];
+    const sub = items.reduce((t, it) => t + (Number(it.qty != null ? it.qty : it.quantity) || 1) * (Number(it.unit_price) || 0), 0);
+    const total = Math.round(sub * (1 + (Number(e.tax_rate) || 0)) * 100) / 100;
+    const sentAt = Math.max(ms(e.contacted_at), ms(e.texted_at), ms(e.emailed_at)) || ms(e.created_at);
+    const openedAt = Math.max(ms(e.text_opened_at), ms(e.email_opened_at));
+    const rem = [...String(e.notes || '').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/g)].map(m => Date.parse(m[1])).filter(Boolean);
+    const row = {
+      id: e.id, name: e.customer_name || '', phone: e.customer_phone || '', email: e.customer_email || '',
+      service: e.service_label || '', total: items.length ? total : null, can_text: !!(e.customer_phone && e.sms_consent === true),
+      phone_estimate: e.source === 'manual', sent_at: sentAt ? new Date(sentAt).toISOString() : null,
+      opened_at: openedAt ? new Date(openedAt).toISOString() : null,
+      reminded_at: rem.length ? new Date(Math.max(...rem)).toISOString() : null,
+    };
+    if (openedAt) opened.push(row);
+    else if (sentAt && sentAt <= now - 3 * 3600000 && sentAt >= now - 14 * 86400000) unopened.push(row);
+  }
+  opened.sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at));
+  unopened.sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
+  return res.status(200).json({ opened, unopened });
+}
+
+// One-tap reminder text for a sent estimate. Needs the customer's text consent;
+// re-uses the same signed 90-day approve link as the original estimate text.
+async function estimateRemind(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+  const est = await fetchEstimate(db, body.id, biz.id, 'customer_name, customer_phone, sms_consent, status, approved_at, notes');
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.approved_at || est.status === 'scheduled') return res.status(409).json({ error: 'This estimate was already approved.' });
+  if (!est.customer_phone) return res.status(400).json({ error: 'No phone number on this estimate.' });
+  if (est.sms_consent !== true) return res.status(400).json({ error: 'This customer replied STOP, so we cannot text them.' });
+  const firstName = (est.customer_name || '').trim().split(/\s+/)[0];
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const approveToken = signToken({ kind: 'estimate_approve', estimate_id: body.id }, 7776000);
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
+  const shortLink = estimateApproveLink({ slug: biz.slug, token: approveToken, fallbackUrl: approveUrl });
+  const msg = `${firstName ? `Hi ${firstName}, just` : 'Just'} checking in on your estimate.${shortLink ? `\nView it and pick a time:\n${shortLink}` : ' Reply or call us to get scheduled.'}`;
+  const r = await sendSMSResult(est.customer_phone, msg);
+  await logAutomatedMessage(db, { businessId: biz.id, customerPhone: est.customer_phone, body: msg, result: r });
+  if (!r.ok) {
+    if (r.skipped === 'notifications_off') return res.status(503).json({ error: 'Texting is turned off until the account is approved.' });
+    if (r.skipped === 'not_configured')   return res.status(503).json({ error: 'SMS service (Twilio) is not configured.' });
+    if (r.skipped === 'bad_phone')        return res.status(400).json({ error: `"${est.customer_phone}" is not a valid mobile number.` });
+    return res.status(502).json({ error: r.error || 'Text message failed to send.' });
+  }
+  const stamp = new Date().toISOString();
+  const notes = [est.notes, `Reminder texted ${stamp} by ${auth.name || adminAuthorName(auth)}.`].filter(Boolean).join('\n').slice(0, 2000);
+  await db.from('estimates').update({ notes }).eq('id', body.id).eq('business_id', biz.id);
+  return res.status(200).json({ ok: true, reminded_at: stamp });
+}
+
+// Bulk close: sent estimates nobody approved, older than N days, move to the
+// Archived folder with a lost reason in the notes. `dry: true` only counts.
+const LOST_REASONS = { no_reply: 'No reply', price: 'Price too high', elsewhere: 'Went with someone else', not_needed: 'No longer needs it', other: 'Other' };
+async function estimateBulkClose(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  const days = [14, 30, 60].includes(Number(body.days)) ? Number(body.days) : 30;
+  const reason = LOST_REASONS[body.reason] ? body.reason : 'no_reply';
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const { data, error } = await db.from('estimates').select('id, notes')
+    .eq('business_id', biz.id).eq('status', 'contacted').is('approved_at', null)
+    .lt('created_at', cutoff).limit(1000);
+  if (error) throw error;
+  const rows = data || [];
+  if (body.dry === true) return res.status(200).json({ ok: true, count: rows.length, days });
+  const line = `Closed: ${LOST_REASONS[reason]} (${days}+ days, no approval) by ${auth.name || adminAuthorName(auth)} on ${new Date().toISOString().slice(0, 10)}.`;
+  let closed = 0;
+  for (let i = 0; i < rows.length; i += 25) {
+    await Promise.all(rows.slice(i, i + 25).map(async (r) => {
+      const notes = [r.notes, line].filter(Boolean).join('\n').slice(0, 2000);
+      const { error: e2 } = await db.from('estimates').update({ status: 'archived', notes })
+        .eq('id', r.id).eq('business_id', biz.id).eq('status', 'contacted').is('approved_at', null);
+      if (!e2) closed++;
+    }));
+  }
+  return res.status(200).json({ ok: true, count: closed, days });
 }
 
 // Send quote email to customer

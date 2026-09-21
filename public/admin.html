@@ -377,6 +377,17 @@
   .ec-ok{background:#f0faf3;border:1px solid #bfe5c9;border-radius:10px;padding:10px 12px;font-size:13.5px;color:#15803d;font-weight:700;margin:8px 0;}
   /* Estimates page: where the estimate came from */
   .est-origin{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px;align-items:center;}
+  .fu-box{border:1px solid var(--line2);border-radius:12px;background:#fff;margin:8px 0 10px;overflow:hidden;}
+  .fu-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;background:#fffbeb;border-bottom:1px solid var(--line2);}
+  .fu-head h3{margin:0;font-size:15px;}
+  .fu-sec{padding:8px 14px 2px;font-size:11.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;}
+  .fu-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line2);}
+  .fu-row .fu-who{flex:1 1 200px;min-width:0;}
+  .fu-row .fu-who b{display:block;font-size:14px;}
+  .fu-row .fu-who span{display:block;font-size:12.5px;color:var(--ink-2);}
+  .fu-row .fu-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .fu-none{padding:10px 14px;font-size:13px;color:var(--ink-2);}
+  .fu-close{padding:10px 14px;border-top:1px solid var(--line2);background:#f9fafb;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;}
   .est-origin small{font-size:11.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;margin-right:4px;}
   .est-phone-badge{display:inline-block;font-size:11px;font-weight:800;color:#0b5e3a;background:#e2f5ea;border-radius:6px;padding:2px 8px;margin:0 6px 6px 0;}
   .est-form-badge{display:inline-block;font-size:11px;font-weight:800;color:#4c2fb3;background:#ece7ff;border-radius:6px;padding:2px 8px;margin:0 6px 6px 0;}
@@ -13632,6 +13643,7 @@ async function renderEstimates(){
       <div class="est-filters" id="estFilters">${filters}</div>
       <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
     </div>
+    <div id="estFollow"></div>
     <div class="est-origin" id="estOrigin"><small>Came from</small>${Object.entries(EST_ORIGINS).map(([k,v])=>`<button type="button" class="seg-btn ${estOrigin===k?'on':''}" data-eo="${k}">${v}<span class="eo-n" data-eon="${k}"></span></button>`).join('')}</div>
     <div class="ch-toolbar est-tools"><label>Find an estimate<input id="estSearch" type="search" value="${esc(_estQuery)}" placeholder="Customer, service, phone, or ZIP"></label><label>Sort<select id="estSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value">Highest value</option></select></label><span id="estCount" role="status"></span></div>
     <div id="estWrap"><div class="empty">Loading estimates…</div></div>
@@ -13649,6 +13661,7 @@ async function renderEstimates(){
   view.querySelector('#estSearch').addEventListener('input',e=>{_estQuery=e.target.value;paintEstimates();});
   view.querySelector('#estSort').addEventListener('change',e=>{_estSort=e.target.value;paintEstimates();});
   _estRows=[];
+  loadEstFollowups();
   try{
     // A sent estimate the customer hasn't approved stays right here in "Estimate
     // sent" no matter how old it gets — there's no separate "not approved" folder
@@ -13680,7 +13693,7 @@ function paintEstimates(){
     if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
     const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
     const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
-    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email?' · <b style="color:#b45309;">No email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
@@ -13699,6 +13712,77 @@ function paintEstimates(){
     document.querySelectorAll('#estWrap [data-est-convert]').forEach(b=>b.addEventListener('click',()=>convertEstimateToJob(b.dataset.estConvert)));
     document.querySelectorAll('#estWrap [data-est-openjob]').forEach(b=>b.addEventListener('click',()=>openAlertJob(current.slug, b.dataset.estOpenjob)));
     document.querySelectorAll('#estWrap img[data-full]').forEach(im=>im.addEventListener('click',()=>openLightbox(im.dataset.full)));
+}
+
+// ── Follow up now: sent estimates the customer opened (or never opened) but did not approve ──
+function fuAgo(iso){
+  const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));
+  return m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:`${Math.floor(m/1440)}d ago`;
+}
+async function loadEstFollowups(){
+  const box=document.getElementById('estFollow'); if(!box) return;
+  const request=_estRequest;
+  try{
+    const d=await api('estimate_followups',{ params:{ business:current.slug }});
+    if(request!==_estRequest||!onScreen('estimates')) return;
+    paintEstFollowups(d);
+  }catch(_){ box.innerHTML=''; }
+}
+function paintEstFollowups(d){
+  const box=document.getElementById('estFollow'); if(!box) return;
+  const row=(r,kind)=>`<div class="fu-row" data-fu="${esc(r.id)}">
+    <div class="fu-who"><b>${esc(r.name||r.phone||'Customer')}${r.phone_estimate?'':' <small style="font-weight:400;color:var(--mute);">website</small>'}</b>
+      <span>${esc(r.service||'Estimate')}${r.total!=null?' · '+money2(r.total):''}</span>
+      <span>${kind==='opened'?`Opened ${fuAgo(r.opened_at)}, not approved`:`Sent ${fuAgo(r.sent_at)}, not opened`}${r.reminded_at?` · Reminded ${fuAgo(r.reminded_at)}`:''}</span></div>
+    <div class="fu-btns">
+      ${r.phone?`<a class="rc-btn ghost" href="tel:${esc(r.phone)}" style="text-decoration:none;">Call</a>`:''}
+      ${r.can_text?`<button type="button" class="rc-btn" data-fu-remind="${esc(r.id)}">${r.reminded_at?'Text again':'Text reminder'}</button>`:''}
+      <button type="button" class="rc-btn ghost" data-fu-open="${esc(r.id)}">Open</button>
+    </div></div>`;
+  const opened=d.opened||[], unopened=d.unopened||[];
+  box.innerHTML=`<div class="fu-box">
+    <div class="fu-head"><h3>Follow up now · ${opened.length+unopened.length}</h3>
+      <button type="button" class="rc-btn ghost" id="fuCloseBtn">Close old estimates…</button></div>
+    ${opened.length?`<div class="fu-sec">Opened, not approved (${opened.length})</div>${opened.map(r=>row(r,'opened')).join('')}`:''}
+    ${unopened.length?`<div class="fu-sec">Sent, not opened after 3 hours (${unopened.length})</div>${unopened.map(r=>row(r,'unopened')).join('')}`:''}
+    ${opened.length+unopened.length?'':'<div class="fu-none">Nobody to follow up with right now.</div>'}
+    <div class="fu-close" id="fuClosePanel" hidden></div></div>`;
+  box.querySelectorAll('[data-fu-open]').forEach(b=>b.addEventListener('click',()=>{ _estSelected=b.dataset.fuOpen; _estQuery=''; estOrigin='all'; estFilter='contacted'; renderEstimates(); }));
+  box.querySelectorAll('[data-fu-remind]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Text this customer a reminder with their estimate link?')) return;
+    b.disabled=true; const t=b.textContent; b.textContent='Sending…';
+    try{ await api('estimate_remind',{ method:'POST', body:{ business:current.slug, id:b.dataset.fuRemind }}); toast('Reminder sent'); loadEstFollowups(); }
+    catch(err){ toast(err.message||'Could not send'); b.disabled=false; b.textContent=t; }
+  }));
+  document.getElementById('fuCloseBtn').addEventListener('click',openEstBulkClose);
+}
+const EST_LOST_REASONS={ no_reply:'No reply', price:'Price too high', elsewhere:'Went with someone else', not_needed:'No longer needs it', other:'Other' };
+function openEstBulkClose(){
+  const p=document.getElementById('fuClosePanel'); if(!p) return;
+  if(!p.hidden){ p.hidden=true; return; }
+  p.hidden=false;
+  p.innerHTML=`Close sent estimates with no approval, older than
+    <select id="fuDays"><option value="14">14 days</option><option value="30" selected>30 days</option><option value="60">60 days</option></select>
+    Reason <select id="fuReason">${Object.entries(EST_LOST_REASONS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+    <b id="fuCount">…</b>
+    <button type="button" class="rc-btn" id="fuGo" disabled>Close them</button>`;
+  const count=async()=>{
+    const go=document.getElementById('fuGo'), c=document.getElementById('fuCount'); if(!go||!c) return;
+    go.disabled=true; c.textContent='…';
+    try{ const r=await api('estimate_bulk_close',{ method:'POST', body:{ business:current.slug, days:document.getElementById('fuDays').value, dry:true }});
+      c.textContent=`${r.count} estimate${r.count===1?'':'s'}`; go.disabled=!r.count; go.dataset.n=r.count; }
+    catch(err){ c.textContent=err.message||'Could not count'; }
+  };
+  document.getElementById('fuDays').addEventListener('change',count);
+  document.getElementById('fuGo').addEventListener('click',async()=>{
+    const go=document.getElementById('fuGo'), n=go.dataset.n||0;
+    if(!confirm(`Close ${n} estimates? They move to Archived. You can still find them there.`)) return;
+    go.disabled=true; go.textContent='Closing…';
+    try{ const r=await api('estimate_bulk_close',{ method:'POST', body:{ business:current.slug, days:document.getElementById('fuDays').value, reason:document.getElementById('fuReason').value }});
+      toast(`Closed ${r.count}`); renderEstimates(); }
+    catch(err){ toast(err.message||'Could not close'); go.disabled=false; go.textContent='Close them'; }
+  });
+  count();
 }
 
 // Deep link from the "new estimate" text message (api/estimate.js links to
@@ -18575,12 +18659,12 @@ async function renderCallWiz(){
     // reluctant caller for a name and two contact details to hear a number is
     // how the estimate gets lost entirely — so one way to reach them is all
     // that's required, and it goes out on whichever they gave.
-    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. Would a text or an email be easier?")}
+    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. What's the best email for it? I'll text it too if you like.")}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(draft.estimateContact.phone)}">
         <input class="search" id="cwEmail" style="margin:0;" placeholder="Email" value="${esc(draft.estimateContact.email)}">
       </div>
-      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;">Either one is enough — whichever they'd rather give.</div>
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Ask every caller for an email</b>, even if they take the text. One is enough to send. No email means we cannot follow up by email later.</div>
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>${TEXTS_ON_LABEL}</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
