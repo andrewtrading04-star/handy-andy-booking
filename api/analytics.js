@@ -625,12 +625,14 @@ async function handleVoiceGather(req, res) {
   } catch (e) {
     console.error('[voice_gather] line lookup failed:', e.message);
   }
-  if ((params.Digits || '').toString() !== '1') {
-    // No key, or the wrong key — hang up with no row at all (handleVoiceInbound
-    // deliberately skipped logging this call), never voicemail: a real
-    // customer who mis-taps gets a second chance by simply calling back, and
-    // giving a scam dialer a record/transcribe prompt is exactly the thing
-    // the gate exists to deny it.
+  if (!/^[0-9*#]$/.test((params.Digits || '').toString())) {
+    // No key at all — hang up with no row (handleVoiceInbound deliberately
+    // skipped logging this call), never voicemail: giving a scam dialer a
+    // record/transcribe prompt is exactly the thing the gate exists to deny.
+    // ANY key passes, not just 1 (2026-09-21, port day): callers of the lines
+    // ported from Grasshopper learned its "press 1 for TV mounting, press 2
+    // for handyman" menu, and a repeat customer pressing 2 was being hung up
+    // on. Autodialers press nothing, so the spam filter is unchanged.
     return xml(res, '<Response><Hangup/></Response>');
   }
   // Passed the gate — this is a real call about to ring someone, so it gets
@@ -843,19 +845,31 @@ async function handleVoiceRecording(req, res) {
     let row = null;
     if (Object.keys(patch).length) {
       const { data } = await db.from('calls').update(patch).eq('twilio_call_sid', sid)
-        .select('id, caller_phone, tracking_label, forwarded_to, notified_at').maybeSingle();
+        .select('id, caller_phone, tracking_label, forwarded_to, notified_at, answered, market').maybeSingle();
       row = data || null;
     }
-    // Text whoever the line forwards to, once, and only on the recording
-    // callback — the transcription callback lands minutes later and would
-    // otherwise double-alert. Awaited, never fire-and-forget: an un-awaited
-    // send is killed the moment this function responds.
-    if (row && params.RecordingUrl && row.forwarded_to && !row.notified_at) {
-      const p = row.caller_phone || '';
-      const pretty = p.length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p;
-      const sent = await sendSMS(row.forwarded_to,
-        `Missed call${row.tracking_label ? ` on ${row.tracking_label}` : ''} from ${pretty}. They left a voicemail - it is in the Calls tab.`);
-      if (sent) await db.from('calls').update({ notified_at: new Date().toISOString() }).eq('id', row.id);
+    // Text whoever the line forwards to that a VOICEMAIL is waiting — once,
+    // and only for a real voicemail. Fixed 2026-09-21 (port day): this used to
+    // fire on every ANSWERED recorded call too, because the dual-channel
+    // recording of an answered call (RecordingSource 'DialVerb') posts a
+    // RecordingUrl here as well, and a real voicemail alerted twice (the
+    // <Record> action and the transcribeCallback both carry RecordingUrl)
+    // since sendSMS() returns nothing and notified_at was never stamped. Now:
+    // skip dial-leg recordings and answered calls, claim notified_at BEFORE
+    // sending so only one callback can win, and release the claim if the send
+    // fails. Awaited, never fire-and-forget: an un-awaited send is killed the
+    // moment this function responds.
+    const fromDialLeg = params.RecordingSource === 'DialVerb';
+    if (row && params.RecordingUrl && row.forwarded_to && !row.notified_at && row.answered !== true && !fromDialLeg) {
+      const { data: claimed } = await db.from('calls').update({ notified_at: new Date().toISOString() })
+        .eq('id', row.id).is('notified_at', null).select('id');
+      if (claimed && claimed.length) {
+        const p = row.caller_phone || '';
+        const pretty = p.length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p;
+        const r = await sendSMSResult(row.forwarded_to,
+          `Missed call${row.market ? ` (${row.market})` : ''} from ${pretty}. They left a voicemail - it is in the Calls tab.`);
+        if (!r.ok) await db.from('calls').update({ notified_at: null }).eq('id', row.id);
+      }
     }
   } catch (e) {
     console.error('[voice_recording] update failed:', e.message);
