@@ -9214,13 +9214,16 @@ async function loadTechNotesRecent(){
     wrap.className='';
     wrap.innerHTML=notes.map(n=>{
       const seen=n.dismissed||[];
-      const pill=seen.length
-        ? `<span class="note-pill read" title="${esc(seen.map(s=>s.name).join(', '))}">Seen by ${esc(seen.map(s=>s.name).join(', '))}</span>`
-        : (n.scheduled ? noteScheduledPill(n) : n.live ? '<span class="note-pill wait">Not dismissed</span>' : '<span class="note-pill done">Expired</span>');
+      const rec=n.recipients||[];
+      const chips=rec.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">`+rec.map(r=>`<span style="font-size:12px;font-weight:700;padding:3px 9px;border-radius:99px;${r.seen?'background:#d1fae5;color:#065f46;':'background:#fee2e2;color:#991b1b;'}">${r.seen?'✓':'✕'} ${esc(r.name)}</span>`).join('')+`</div>`
+        : '';
+      const pill=n.scheduled ? noteScheduledPill(n) : (!n.live && !seen.length ? '<span class="note-pill done">Expired</span>' : '');
       return `<div class="note-row">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
           ${notePhotosHtml(n.photo_urls)}
+          ${chips}
           <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(n.target_label)} · ${esc((NOTE_MODE_LABEL[n.mode]||n.mode).replace('ticked off','they tap X'))} · ${esc(noteWhen(n.created_at))}</div>
         </div>
         ${pill}

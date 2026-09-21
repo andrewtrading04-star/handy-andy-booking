@@ -14343,7 +14343,15 @@ async function techNotesList(req, res, db, auth) {
       .select('note_id, dismissed_at, tech:technicians ( name )').in('note_id', ids);
     (ds || []).forEach(d => { (dismissedBy[d.note_id] = dismissedBy[d.note_id] || []).push({ name: d.tech?.name || 'Tech', at: d.dismissed_at }); });
   }
+  // Who the note is FOR (same audience rule the tech app uses), so the office
+  // can see who has NOT dismissed it, not just who has.
+  const { data: roster } = await db.from('technicians')
+    .select('id, name, area:service_areas ( name )').eq('active', true).order('name');
+  const audience = (n) => (roster || []).filter(t => n.target_type === 'all'
+    || (n.target_type === 'tech' && n.technician_id === t.id)
+    || (n.target_type === 'city' && t.area?.name && t.area.name === n.city));
   const notes = (data || []).map(n => ({
+    recipients: audience(n).map(t => ({ name: t.name, seen: (dismissedBy[n.id] || []).some(d => d.name === t.name) })),
     id: n.id, body: n.body, mode: n.mode, photo_urls: n.photo_urls || [], created_by: n.created_by, created_at: n.created_at,
     target_type: n.target_type, technician_id: n.technician_id || null, city: n.city || null,
     target_label: n.target_type === 'all' ? 'Every technician' : n.target_type === 'city' ? `Every tech in ${n.city}` : (n.tech?.name || 'One technician'),
