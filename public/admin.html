@@ -1582,6 +1582,63 @@
   .ana .ranges button.on{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .ana .grid{ display:grid; gap:14px; }
   .ana .kpis{ grid-template-columns:repeat(5,1fr); margin-bottom:18px; }
+  /* Insights layout: stat strip + sticky flags rail | cities, techs, funnel.
+     Container queries, not viewport ones -- the sidebar eats ~250px, so the
+     window can be wide while the content column is narrow. */
+  .ana .ins{ --ins-good:#1f9d57; --ins-goodbg:#e8f6ee; --ins-warn:#b7791f; --ins-warnbg:#fbf3e4; --ins-bad:#b53343; --ins-badbg:#fceff1; container-type:inline-size; container-name:ins; }
+  .ins .ins-h{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .ins .ins-h small{ font-size:11.5px; font-weight:600; color:var(--mute); text-align:right; }
+  .ins-strip{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:16px; }
+  .ins-tile{ padding:14px 18px; border-left:1px solid #f0f3f8; min-width:0; }
+  .ins-tile:first-child{ border-left:0; }
+  .ins-tile > span{ display:block; font-size:12px; font-weight:600; color:var(--mute); }
+  .ins-tile strong{ display:block; font-size:24px; font-weight:800; margin:4px 0 3px; }
+  .ins-tile strong.bad{ color:var(--ins-bad); }
+  .ins-tile em{ display:block; font-style:normal; font-size:11.5px; color:var(--mute); min-height:20px; }
+  .ins-delta{ display:inline-block; font-size:11.5px; font-weight:800; border-radius:999px; padding:2px 8px; margin-right:4px; }
+  .ins-delta.good{ color:var(--ins-good); background:var(--ins-goodbg); } .ins-delta.bad{ color:var(--ins-bad); background:var(--ins-badbg); } .ins-delta.flat{ color:var(--mute); background:#f0f3f8; }
+  .ins-two{ display:grid; grid-template-columns:minmax(280px,340px) minmax(0,1fr); gap:16px; align-items:start; }
+  /* .view-scroll is overflow:auto but never actually scrolls (the window does), and
+     a sticky element sticks to its nearest overflow ancestor -- so on this tab only,
+     hand scrolling back to the window. */
+  .view-scroll:has(.ins-rail){ overflow:visible; }
+  .ins-rail{ position:sticky; top:var(--ins-rail-top,84px); max-height:calc(100vh - var(--ins-rail-top,84px) - 12px); overflow:auto; }
+  .ana .ins-rail .section, .ana .ins-main .section{ margin-bottom:0; }
+  .ins-main{ display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .ins-alert{ display:flex; flex-direction:column; gap:4px; align-items:flex-start; width:100%; text-align:left; font:inherit; color:inherit; background:#fff; border:1px solid var(--line); border-left:4px solid var(--c); border-radius:10px; padding:11px 13px; margin-bottom:8px; }
+  .ins-alert:last-child{ margin-bottom:0; }
+  button.ins-alert{ cursor:pointer; } button.ins-alert:hover{ box-shadow:0 6px 16px #202c4314; }
+  .ins-alert p{ min-width:0; font-size:13px; font-weight:600; line-height:1.4; }
+  .ins-alert span{ flex:none; font-size:12px; font-weight:800; color:var(--accent); white-space:nowrap; }
+  .ins-alert.bad{ --c:var(--ins-bad); } .ins-alert.warn{ --c:var(--ins-warn); } .ins-alert.good{ --c:var(--ins-good); } .ins-alert.flat{ --c:#c3cad6; }
+  .ins-cities{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .ins-city{ border:1px solid var(--line); border-radius:12px; padding:14px 10px; text-align:center; }
+  .ins-city h4{ font-size:14px; font-weight:800; } .ins-city small{ display:block; font-size:11.5px; color:var(--mute); margin:2px 0 6px; }
+  .ins-ring{ position:relative; width:84px; height:84px; margin:0 auto 6px; }
+  .ins-ring svg{ width:84px; height:84px; transform:rotate(-90deg); display:block; }
+  .ins-ring circle{ fill:none; }
+  .ins-ring-track{ stroke:#f0f3f8; stroke-width:7; }
+  .ins-ring-week{ stroke-width:7; stroke-linecap:round; stroke:var(--accent); }
+  .ins-ring-week.good{ stroke:var(--ins-good); } .ins-ring-week.bad{ stroke:var(--ins-bad); }
+  .ins-ring-usual{ stroke:#202c43; stroke-width:2; opacity:.4; }
+  .ins-ring b{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:800; }
+  .ins-quiet{ margin-top:12px; padding:10px 12px; border:1px dashed var(--line); border-radius:8px; font-size:12.5px; color:var(--mute); }
+  .ins-tw{ overflow-x:auto; } .ins-tw table{ min-width:560px; }
+  /* On a phone the table scrolls sideways; keep the tech name pinned so the flagged
+     columns (cancel, late) are never read without knowing whose they are. */
+  .ins-tw th:first-child, .ins-tw td:first-child{ position:sticky; left:0; z-index:1; background:#fff; box-shadow:1px 0 0 var(--line); }
+  .ins-sub{ color:var(--mute); font-size:11.5px; }
+  .ins-pill{ display:inline-block; min-width:38px; text-align:center; border-radius:6px; padding:1px 8px; font-weight:800; }
+  .ins-pill.warn{ color:var(--ins-warn); background:var(--ins-warnbg); } .ins-pill.bad{ color:var(--ins-bad); background:var(--ins-badbg); }
+  .ins-rev{ display:inline-flex; align-items:center; gap:8px; }
+  .ins-rev i{ display:inline-block; height:6px; width:calc(64px * var(--w)); min-width:3px; border-radius:3px; background:var(--accent); opacity:.7; }
+  .ins-flash{ animation:ins-flash 1.5s ease-out; }
+  @keyframes ins-flash{ 0%,35%{ box-shadow:0 0 0 3px var(--accent); background:var(--accent-soft); } 100%{ box-shadow:0 0 0 3px transparent; } }
+  @container ins (max-width:860px){
+    .ins-two{ grid-template-columns:1fr; } .ins-rail{ position:static; max-height:none; overflow:visible; }
+    .ins-strip{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .ins-tile:nth-child(3){ border-left:0; } .ins-tile:nth-child(n+3){ border-top:1px solid #f0f3f8; }
+  }
   .ana .card{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
   .ana .kpi .lbl{ font-size:11px; color:var(--mute); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; }
   .ana .kpi .val{ font-size:26px; font-weight:800; }
@@ -5763,92 +5820,121 @@ function anaOverviewSorted(rows){
 // exact same data + thresholds already shown on Bracket Inventory / Technicians
 // (invIsLow, applicantsBlockHtml) so a number never disagrees with itself
 // across tabs.
-const INSIGHTS_SEVERITY_STYLE={
-  high:{bg:'#fef2f2',border:'#fecaca',color:'#991b1b',icon:'⚠️'},
-  med:{bg:'#fffbeb',border:'#fde68a',color:'#92400e',icon:'●'},
-  low:{bg:'#f8fafc',border:'#e2e8f0',color:'#475569',icon:'○'},
-  good:{bg:'#f0fdf4',border:'#bbf7d0',color:'#15803d',icon:'✓'},
-};
-function insightsFlagsHtml(flags){
-  if(!flags||!flags.length) return `<div class="section card"><div class="empty">Nothing flagged — no metro swings, late notices, review dips, or revenue drops in the last 30 days.</div></div>`;
-  return `<div class="section card"><h2>What needs your attention</h2>`+flags.map(f=>{
-    const s=INSIGHTS_SEVERITY_STYLE[f.severity]||INSIGHTS_SEVERITY_STYLE.low;
-    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);">
-      <span style="flex:none;">${s.icon}</span>
-      <span style="font-size:13.5px;color:${s.color};font-weight:${f.severity==='high'?700:500};">${esc(f.text)}</span>
-    </div>`;
+// Layout: a stat strip, then two columns -- the flags rail on the left (sticky,
+// so "what needs attention" stays in view while you read the tables) and the
+// cities, technicians and funnel on the right. Every number in the strip is
+// counted once per booking on the server (d.totals), never summed from the tech
+// rows, which would double-count two-tech jobs.
+// Colour thresholds for city swings match the server's flags (insightsOverview:
+// down 25%+ = slow, up 40%+ = busy, and only at 3+ bookings a week) so a red city
+// always has a matching flag.
+function insMoney0(n){ return '$'+Math.round(Number(n)||0).toLocaleString('en-US'); }
+// A small city swings wildly on a handful of bookings, so below the server's
+// minimum trailing volume (INSIGHTS_METRO_MIN_AVG in api/admin.js) the number is
+// shown but never coloured -- it would be a red card with no matching flag.
+const INS_METRO_MIN_AVG_CLIENT=3;
+function insTone(p, usual){ return p==null||(Number(usual)||0)<INS_METRO_MIN_AVG_CLIENT?'flat':p<=-25?'bad':p>=40?'good':'flat'; }
+function insDelta(p, usual){
+  if(p==null) return `<span class="ins-delta flat">no trend yet</span>`;
+  return `<span class="ins-delta ${insTone(p,usual)}">${p>0?'&#9650; +':p<0?'&#9660; ':''}${p}%</span>`;
+}
+function insRingSvg(week, usual, tone){
+  const R=36, C=2*Math.PI*R, R2=27, C2=2*Math.PI*R2, top=Math.max(week, usual, 1);
+  return `<svg viewBox="0 0 84 84" aria-hidden="true"><circle class="ins-ring-track" cx="42" cy="42" r="${R}"/>`
+    +(week>0?`<circle class="ins-ring-week ${tone}" cx="42" cy="42" r="${R}" stroke-dasharray="${(C*week/top).toFixed(2)} ${C.toFixed(2)}"/>`:'')
+    +(usual>0?`<circle class="ins-ring-usual" cx="42" cy="42" r="${R2}" stroke-dasharray="${(C2*usual/top).toFixed(2)} ${C2.toFixed(2)}"/>`:'')
+    +`</svg>`;
+}
+function insightsStripHtml(d){
+  const metros=d.metros||[], techs=d.techs||[];
+  const week=metros.reduce((n,m)=>n+(Number(m.bookings_this_week)||0),0);
+  const usual=metros.reduce((n,m)=>n+(Number(m.trailing_weekly_avg)||0),0);
+  const pct=usual>0?Math.round((week/usual-1)*100):null;
+  const T=d.totals||null;
+  const lateBad=techs.some(t=>(Number(t.late_30d)||0)>=INSIGHTS_LATE_THRESHOLD_CLIENT);
+  const lateWho=techs.filter(t=>t.late_30d>0).sort((a,b)=>b.late_30d-a.late_30d).slice(0,2).map(t=>`${esc(t.name)} ${t.late_30d}`).join(' &middot; ');
+  const top=techs.filter(t=>t.avg_ticket!=null).sort((a,b)=>b.avg_ticket-a.avg_ticket)[0];
+  const tile=(label,val,sub,cls)=>`<div class="ins-tile"><span>${label}</span><strong class="${cls||''}">${val}</strong><em>${sub||'&nbsp;'}</em></div>`;
+  return `<div class="ins-strip">
+    ${tile('Bookings this week', metros.length?week:'&mdash;', metros.length?`${insDelta(pct,usual)} usual ${Math.round(usual*10)/10}`:'')}
+    ${tile('Revenue &middot; 30 days', T?insMoney0(T.revenue_30d):'&mdash;', T?`${T.jobs_30d} job${T.jobs_30d===1?'':'s'}`:'')}
+    ${tile('Average ticket', T&&T.completed_30d?insMoney0(T.revenue_30d/T.completed_30d):'&mdash;', top&&techs.length>1?`${esc(top.name)} leads at ${insMoney0(top.avg_ticket)}`:'')}
+    ${tile('Late notices &middot; 30 days', T?T.late_30d:'&mdash;', T&&T.late_30d?lateWho:'None', lateBad?'bad':'')}
+  </div>`;
+}
+const INS_SEV_TONE={high:'bad',med:'warn',low:'flat',good:'good'};
+// Where a flag leads. Flags are plain text from the server, so the target is
+// worked out from what the text names: a tech or city that is in the tables,
+// or (client-made flags) an explicit nav. No match = a plain, unclickable row.
+function insightsFlagAction(f, d){
+  if(f.nav) return {label:'Open inventory \u2192', nav:f.nav};
+  const lead=(name)=>f.text.startsWith(name) && !/[A-Za-z0-9]/.test(f.text.charAt(name.length)||' ');
+  const longest=(rows)=>rows.filter(r=>r.name && lead(r.name)).sort((a,b)=>b.name.length-a.name.length)[0];
+  const t=longest(d.techs||[]); if(t) return {label:'See technician \u2192', scroll:`[data-ins-tech="${CSS.escape(t.name)}"]`};
+  const m=longest(d.metros||[]); if(m) return {label:'See city \u2192', scroll:`[data-ins-city="${CSS.escape(m.name)}"]`};
+  if(/^Revenue/.test(f.text)) return {label:'See technicians \u2192', scroll:'[data-ins-techs]'};
+  if(/estimates/i.test(f.text)) return {label:'See funnel \u2192', scroll:'[data-ins-funnel]'};
+  return null;
+}
+function insightsFlagsHtml(flags, actions){
+  if(!flags||!flags.length) return `<div class="section card"><div class="empty">Nothing flagged &mdash; no metro swings, late notices, review dips, or revenue drops in the last 30 days.</div></div>`;
+  return `<div class="section card"><h2 class="ins-h">What needs your attention <small>${flags.length} item${flags.length===1?'':'s'}</small></h2>`+flags.map((f,i)=>{
+    const tone=INS_SEV_TONE[f.severity]||'flat', a=actions[i];
+    return a
+      ? `<button type="button" class="ins-alert ${tone}" data-ins-act="${i}"><p>${esc(f.text)}</p><span>${a.label}</span></button>`
+      : `<div class="ins-alert ${tone}"><p>${esc(f.text)}</p></div>`;
   }).join('')+`</div>`;
 }
-// Click a column header to sort the Metro table by it; same header again
-// reverses. Purely a client-side re-sort of the already-fetched rows (see
-// insightsMetroSort / drawInsights), same click-to-sort UX as the Overview
-// tab's ANA_OV_COLS table.
-const INSIGHTS_METRO_COLS=[
-  {key:'name', label:'Metro'},
-  {key:'bookings_this_week', label:'This week', num:true},
-  {key:'trailing_weekly_avg', label:'Trailing avg/wk', num:true},
-  {key:'pct_change', label:'vs trailing', num:true},
-];
-let insightsMetroSort={key:'bookings_this_week', dir:'desc'};
-function insightsMetrosSorted(metros){
-  const {key,dir}=insightsMetroSort, mul=dir==='asc'?1:-1;
-  return [...metros].sort((a,b)=>{
-    const va=a[key], vb=b[key];
-    // Missing trend data (a metro too quiet to have a trailing average) sorts
-    // last regardless of direction, rather than jumping to the top on asc.
-    if(va==null&&vb==null) return 0;
-    if(va==null) return 1;
-    if(vb==null) return -1;
-    const c=typeof va==='string'?String(va).localeCompare(String(vb)):(va<vb?-1:va>vb?1:0);
-    return c*mul;
-  });
-}
-function insightsMetrosHtml(metros){
+function insightsCitiesHtml(metros){
   if(!metros||!metros.length) return '';
-  const sorted=insightsMetrosSorted(metros);
-  const rows=sorted.map(m=>{
-    const pct=m.pct_change;
-    const pctTxt=pct==null?'—':`${pct>0?'+':''}${pct}%`;
-    const pctColor=pct==null?'var(--mute)':pct<=-25?'#dc2626':pct>=40?'#16a34a':'var(--ink-2)';
-    return `<tr><td>${esc(m.name)}</td><td>${m.bookings_this_week}</td><td>${m.trailing_weekly_avg}</td><td style="color:${pctColor};font-weight:700;">${pctTxt}</td></tr>`;
-  }).join('');
-  const head=INSIGHTS_METRO_COLS.map(c=>{
-    const active=insightsMetroSort.key===c.key;
-    const arrow=active?(insightsMetroSort.dir==='asc'?' ▲':' ▼'):'';
-    return `<th data-inssort="${c.key}" title="Sort by ${esc(c.label)}" style="cursor:pointer;user-select:none;${active?'color:var(--ink);':''}">${esc(c.label)}<span style="font-size:9px;opacity:.75;">${arrow}</span></th>`;
-  }).join('');
-  return `<div class="section card"><h2>Bookings by Metro</h2>
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-      <thead><tr style="text-align:left;color:var(--mute);font-size:11.5px;">${head}</tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>`;
+  const wk=m=>Number(m.bookings_this_week)||0, us=m=>Number(m.trailing_weekly_avg)||0;
+  const live=metros.filter(m=>wk(m)>0||us(m)>0).sort((a,b)=>wk(b)-wk(a)||us(b)-us(a));
+  const quiet=metros.filter(m=>!(wk(m)>0||us(m)>0));
+  const card=m=>{
+    const p=m.pct_change==null?null:m.pct_change, tone=insTone(p,us(m));
+    const label=`${m.name}: ${wk(m)} bookings this week, usual ${us(m)}${p==null?'':`, ${p>0?'up':p<0?'down':'flat'} ${Math.abs(p)}%`}`;
+    return `<div class="ins-city" data-ins-city="${esc(m.name)}" role="group" aria-label="${esc(label)}">
+      <div class="ins-ring">${insRingSvg(wk(m),us(m),tone)}<b>${wk(m)}</b></div>
+      <h4>${esc(m.name)}</h4><small>usual ${us(m)}/wk</small>${insDelta(p,us(m))}
+    </div>`;
+  };
+  return `<div class="section card"><h2 class="ins-h">Cities <small>thick ring = this week &middot; thin ring = usual week</small></h2>
+    ${live.length?`<div class="ins-cities">${live.map(card).join('')}</div>`:`<div class="empty">No bookings in any city yet.</div>`}
+    ${quiet.length?`<p class="ins-quiet">${quiet.length} cit${quiet.length===1?'y':'ies'} with no bookings yet: ${quiet.map(m=>esc(m.name)).join(', ')}</p>`:''}
+  </div>`;
+}
+
+function insPill(text, v, warnAt, badAt){
+  const n=Number(v)||0;
+  return n>=badAt?`<span class="ins-pill bad">${text}</span>`:n>=warnAt?`<span class="ins-pill warn">${text}</span>`:`${text}`;
 }
 function insightsTechsHtml(techs){
   if(!techs||!techs.length) return '';
+  const maxRev=Math.max(1,...techs.map(t=>Number(t.revenue_30d)||0));
   const rows=techs.map(t=>{
-    const rev=(r,n)=>r==null?'—':`${r}★ <span style="color:var(--mute);font-size:11.5px;">(${n})</span>`;
-    return `<tr>
+    const rev=(r,n)=>r==null?'&mdash;':`${r}\u2605 <span class="ins-sub">(${n})</span>`;
+    return `<tr data-ins-tech="${esc(t.name)}">
       <td><b>${esc(t.name)}</b></td>
       <td>${t.jobs_30d}</td>
-      <td>${t.revenue_30d?money2(t.revenue_30d):'—'}</td>
-      <td>${t.avg_ticket!=null?money2(t.avg_ticket):'—'}</td>
-      <td>${t.cancel_rate}%</td>
-      <td style="${t.late_30d>=INSIGHTS_LATE_THRESHOLD_CLIENT?'color:#dc2626;font-weight:700;':''}">${t.late_30d}</td>
+      <td>${t.revenue_30d?`<span class="ins-rev"><i style="--w:${((Number(t.revenue_30d)||0)/maxRev).toFixed(3)}"></i>${money2(t.revenue_30d)}</span>`:'&mdash;'}</td>
+      <td>${t.avg_ticket!=null?money2(t.avg_ticket):'&mdash;'}</td>
+      <td>${insPill(t.cancel_rate+'%', t.cancel_rate, 5, 10)}</td>
+      <td>${insPill(t.late_30d, t.late_30d, 2, INSIGHTS_LATE_THRESHOLD_CLIENT)}</td>
       <td>${rev(t.review_avg_30d,t.review_n_30d)}</td>
     </tr>`;
   }).join('');
-  return `<div class="section card"><h2>Technicians (last 30 days)</h2>
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-      <thead><tr style="text-align:left;color:var(--mute);font-size:11.5px;"><th>Tech</th><th>Jobs</th><th>Revenue</th><th>Avg ticket</th><th>Cancel %</th><th>Late notices</th><th>Reviews</th></tr></thead>
+  return `<div class="section card" data-ins-techs><h2 class="ins-h">Technicians <small>last 30 days</small></h2>
+    <div class="ins-tw"><table>
+      <thead><tr><th>Tech</th><th>Jobs</th><th>Revenue</th><th>Avg ticket</th><th>Cancel %</th><th>Late notices</th><th>Reviews</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>`;
+    </table></div></div>`;
 }
 const INSIGHTS_LATE_THRESHOLD_CLIENT=3;
 function insightsEstimatesHtml(f){
-  if(!f||!f.sent) return `<div class="section card"><h2>Estimate Funnel (30 days)</h2><div class="empty">No estimates sent in the last 30 days.</div></div>`;
+  if(!f||!f.sent) return `<div class="section card" data-ins-funnel><h2>Estimate Funnel (30 days)</h2><div class="empty">No estimates sent in the last 30 days.</div></div>`;
   const pct=(n)=>f.sent?Math.round((n/f.sent)*100):0;
   const step=(label,n)=>`<div class="fstep"><div class="flbl">${label}</div><div class="ftrack"><div class="fbar" style="width:${Math.max(pct(n),4)}%;background:var(--accent);">${n}</div></div><div class="fdrop"><span class="fpct">${pct(n)}%</span></div></div>`;
-  return `<div class="section card"><h2>Estimate Funnel (30 days)</h2>
+  return `<div class="section card" data-ins-funnel><h2>Estimate Funnel (30 days)</h2>
     ${step('Sent',f.sent)}${step('Opened',f.opened)}${step('Approved',f.approved)}
     ${f.declined?`<div class="meta" style="margin-top:8px;">${f.declined} declined as outside scope.</div>`:''}
   </div>`;
@@ -5857,44 +5943,61 @@ function insightsEstimatesHtml(f){
 // these cached rows instead of re-fetching, same split as
 // renderAnalyticsOverview/drawAnaOverview.
 let insightsCache=null;
+let _insReq=0;
 async function renderInsights(){
   const view=document.getElementById('view');
+  const req=++_insReq, slug=current.slug;
+  // Three awaits below: a fast tab or business switch must not get painted over.
+  const stale=()=>req!==_insReq||!onScreen('insights');
   view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
   const wantApplicants=current&&current.slug==='handy-andy';
   let d, app=null, bracketInv=[];
   try{
     [d,app]=await Promise.all([
-      api('insights_overview',{ params:{ business:current.slug }}),
+      api('insights_overview',{ params:{ business:slug }}),
       wantApplicants?api('applicants').catch(e=>({error:e.message})):Promise.resolve(null),
     ]);
-    try{ const bi=await api('bracket_inventory',{ params:{ business:current.slug }}); bracketInv=bi.inventory||[]; }catch(_){}
+    // Same three inputs as the Bracket Inventory screen: without the purchases and
+    // wire-plate orders still in route, a tech whose restock is already coming
+    // would be flagged here but not there.
+    try{
+      const [bi,pu,wp]=await Promise.all([
+        api('bracket_inventory',{ params:{ business:slug }}),
+        api('bracket_purchases',{ params:{ business:slug, limit:'20' }}).catch(()=>({purchases:[]})),
+        api('wire_plate_orders',{ params:{ business:slug }}).catch(()=>({orders:[]})),
+      ]);
+      bracketInv=bi.inventory||[];
+      attachIncomingStock(bracketInv, pu.purchases||[], wp.orders||[]);
+    }catch(_){}
   }catch(e){
+    if(stale()) return;
     view.innerHTML=`<div class="ana"><div class="card err" style="padding:18px;">${esc(e.message||'Could not load insights')}</div></div>`;
     return;
   }
+  if(stale()) return;
   const lowStock=bracketInv.filter(invIsLow);
   const flags=[...(d.flags||[])];
   if(lowStock.length){
-    flags.unshift({severity:'med',text:`${lowStock.length} tech${lowStock.length===1?' is':'s are'} low on bracket or plate stock — see Bracket Inventory.`});
+    flags.unshift({severity:'med',nav:'brackets',text:`${lowStock.length} tech${lowStock.length===1?' is':'s are'} low on bracket or plate stock — see Bracket Inventory.`});
   }
-  insightsCache={flags, metros:d.metros||[], techs:d.techs||[], estimate_funnel:d.estimate_funnel, app:(app&&!app.error)?app:null};
+  insightsCache={flags, metros:d.metros||[], techs:d.techs||[], totals:d.totals||null, estimate_funnel:d.estimate_funnel, app:(app&&!app.error)?app:null};
   drawInsights();
 }
 function drawInsights(){
   const view=document.getElementById('view');
   const d=insightsCache; if(!d) return;
-  let html=insightsFlagsHtml(d.flags);
-  html+=insightsMetrosHtml(d.metros);
-  html+=insightsTechsHtml(d.techs);
-  html+=insightsEstimatesHtml(d.estimate_funnel);
-  if(d.app) html+=applicantsBlockHtml(d.app);
-  view.innerHTML=`<div class="ana">${html}</div>`;
-  view.querySelectorAll('[data-inssort]').forEach(el=>el.addEventListener('click',()=>{
-    const key=el.dataset.inssort;
-    const col=INSIGHTS_METRO_COLS.find(c=>c.key===key);
-    if(insightsMetroSort.key===key) insightsMetroSort={key,dir:insightsMetroSort.dir==='asc'?'desc':'asc'};
-    else insightsMetroSort={key,dir:col&&col.num?'desc':'asc'};
-    drawInsights();
+  const actions=(d.flags||[]).map(f=>insightsFlagAction(f,d));
+  const main=insightsCitiesHtml(d.metros)+insightsTechsHtml(d.techs)+insightsEstimatesHtml(d.estimate_funnel)+(d.app?applicantsBlockHtml(d.app):'');
+  view.innerHTML=`<div class="ana"><div class="ins">
+    ${insightsStripHtml(d)}
+    <div class="ins-two"><aside class="ins-rail">${insightsFlagsHtml(d.flags,actions)}</aside><div class="ins-main">${main}</div></div>
+  </div></div>`;
+  view.querySelectorAll('[data-ins-act]').forEach(el=>el.addEventListener('click',()=>{
+    const a=actions[Number(el.dataset.insAct)]; if(!a) return;
+    if(a.nav){ navTo(a.nav); return; }
+    const target=view.querySelector(a.scroll); if(!target) return;
+    target.scrollIntoView({behavior:'smooth',block:'center'});
+    target.classList.remove('ins-flash'); void target.offsetWidth; target.classList.add('ins-flash');
   }));
 }
 // Range picker: last 7 days / last 30 days / all time. The server field names

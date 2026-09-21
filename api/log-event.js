@@ -19,6 +19,13 @@ export default async function handler(req, res) {
   if (isBotUserAgent(req.headers['user-agent'])) {
     return res.status(200).json({ ok: true, skipped: 'bot' });
   }
+  // USA-only (owner rule 2026-09-22): the booking funnel has no timezone field,
+  // so foreign traffic is dropped here by Vercel's IP country. A missing header
+  // (local dev) is let through. Same boring 200 as a bot.
+  const ipCountry = String(req.headers['x-vercel-ip-country'] || '').toUpperCase();
+  if (ipCountry && ipCountry !== 'US') {
+    return res.status(200).json({ ok: true, skipped: 'non-us' });
+  }
 
   try {
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

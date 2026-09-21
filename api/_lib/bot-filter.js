@@ -36,6 +36,14 @@ const INTERNAL_UA = /(Claude\/|ClaudeSEO|Electron\/|vercel-screenshot|vercel-fav
  * tooling rather than a potential customer.
  * @param {string|null|undefined} ua raw User-Agent header
  */
+// USA-only traffic (owner rule 2026-09-22): the owner works from Bangkok and
+// scrapers come from everywhere, so a web session only counts when its browser
+// reported a US timezone. 'UTC' is deliberately NOT in here: that is headless /
+// datacenter traffic, never a real US visitor. Mirrors the regex in
+// public.launch_daily_traffic (migration 0129).
+const US_TZ = /^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Juneau|Sitka|Nome|Yakutat|Metlakatla|Menominee|Adak|Indianapolis|Louisville|Indiana\/.*|Kentucky\/.*|North_Dakota\/.*)|Pacific\/Honolulu)$/;
+export function isUsTimezone(tz) { return US_TZ.test(String(tz || '')); }
+
 export function isBotUserAgent(ua) {
   if (!ua) return false; // absent UA stays human: see the conservatism note above
   const s = String(ua);
