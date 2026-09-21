@@ -31,10 +31,11 @@ const tables = {
     { booking_id: 'd1', name: '60"-69"', line_total: 130 },
   ],
   estimates: [
-    { business_id: 'h', status: 'contacted', created_at: daysAgo(2), customer_email: 'a@b.c', line_items: [{ qty: 1, unit_price: 135 }, { qty: 2, unit_price: 50 }] },
-    { business_id: 'h', status: 'contacted', created_at: daysAgo(20), customer_email: '', line_items: [{ qty: 1, unit_price: 300 }] },
-    { business_id: 'h', status: 'scheduled', created_at: daysAgo(10), customer_email: 'x@y.z', line_items: [] },
-    { business_id: 'h', status: 'archived', created_at: daysAgo(40), contacted_at: null, line_items: [] },
+    { business_id: 'h', source: 'manual', status: 'contacted', created_at: daysAgo(2), customer_email: 'a@b.c', line_items: [{ qty: 1, unit_price: 135 }, { qty: 2, unit_price: 50 }] },
+    { business_id: 'h', source: 'manual', status: 'contacted', created_at: daysAgo(20), customer_email: '', line_items: [{ qty: 1, unit_price: 300 }] },
+    { business_id: 'h', source: 'widget', status: 'contacted', created_at: daysAgo(1), customer_email: 'w@x.y', line_items: [{ qty: 1, unit_price: 90 }] },
+    { business_id: 'h', source: 'manual', status: 'scheduled', created_at: daysAgo(10), customer_email: 'x@y.z', line_items: [] },
+    { business_id: 'h', source: 'manual', status: 'archived', created_at: daysAgo(40), contacted_at: null, line_items: [] },
   ],
 };
 const db = {
@@ -57,13 +58,17 @@ assert.equal(wk.bracket_pct, 50);                 // p1 yes, p2 own-bracket line
 assert.equal(wk.inwall_pct, 50);
 const fw = ha.form.weeks.find(w => w.start === addDaysStr(sunday, -7));
 assert.equal(fw.jobs, 1); assert.equal(fw.bracket_pct, 100);
-assert.equal(ha.estimates.open, 2);
-assert.equal(ha.estimates.open_quoted, 135 + 100 + 300);
-assert.equal(ha.estimates.buckets[0].count, 1);
-assert.equal(ha.estimates.buckets[2].count, 1);
-assert.equal(ha.estimates.buckets[2].no_email, 1);
-assert.equal(ha.estimates.close_pct, 25);         // 1 of 4
-assert.equal(ha.estimates.archived_no_contact, 1);
+const ep = ha.estimates.phone, ew = ha.estimates.web;
+assert.equal(ep.open, 2);
+assert.equal(ep.open_quoted, 135 + 100 + 300);
+assert.equal(ep.buckets[0].count, 1);
+assert.equal(ep.buckets[2].count, 1);
+assert.equal(ep.buckets[2].no_email, 1);
+assert.equal(ep.close_pct, 25);         // 1 of 4 phone estimates
+assert.equal(ep.archived_no_contact, 1);
+assert.equal(ew.total, 1);              // the website estimate is counted apart
+assert.equal(ew.open, 1);
+assert.equal(ew.open_quoted, 90);
 const dd = r.brands.find(b => b.slug === 'doms');
 assert.equal(dd.phone.last4.jobs, 1);
 console.log('phone-desk tests ok');

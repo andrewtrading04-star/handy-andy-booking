@@ -35,6 +35,7 @@ import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, a
 import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
 import { capacityOverview } from './_lib/capacity.js';
 import { phoneDesk } from './_lib/phone-desk.js';
+import { estimateCheckFor, setExcuse } from './_lib/estimate-check.js';
 import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot } from './_lib/availability.js';
 import { parseDomainList, runDomainWatch } from './_lib/domain-watch.js';
 import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
@@ -447,6 +448,8 @@ export default async function handler(req, res) {
       case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
       case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
       case 'insights_overview':    return await insightsOverview(req, res, db, auth);
+      case 'estimate_check': return await estimateCheckAction(req, res, db, auth);
+      case 'estimate_excuse': return await estimateExcuseAction(req, res, db, auth, body);
       case 'phone_desk': {
         if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
         return res.status(200).json(await phoneDesk(db));
@@ -11639,6 +11642,41 @@ async function callNumbers(req, res, db, auth) {
       pool_size: sms.pool_size,
     },
   });
+}
+
+// Estimate check (api/_lib/estimate-check.js): calls that ended with neither an
+// estimate nor a booking. A secretary sees only her own; the owner sees both
+// Handy Andy's and Dom's.
+async function estimateCheckAction(req, res, db, auth) {
+  const scopes = auth.role === 'owner' ? ['handy-andy', 'doms']
+    : (auth.role === 'secretary' && ['handy-andy', 'doms'].includes(auth.scope)) ? [auth.scope] : null;
+  if (!scopes) return res.status(403).json({ error: 'Not available for this login' });
+  const { data: bizRows } = await db.from('businesses').select('id, slug, timezone').in('slug', scopes);
+  const people = [];
+  for (const slug of scopes) {
+    const b = (bizRows || []).find(x => x.slug === slug);
+    if (!b) continue;
+    const p = await estimateCheckFor(db, { bizId: b.id, tz: b.timezone || 'America/Denver', name: displayNameFor(slug) });
+    people.push({ business: slug, ...p });
+  }
+  return res.status(200).json({ people });
+}
+async function estimateExcuseAction(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const slug = auth.role === 'owner' ? String(body.business || '') : auth.scope;
+  if (!['handy-andy', 'doms'].includes(slug) || !(auth.role === 'owner' || auth.role === 'secretary')) {
+    return res.status(403).json({ error: 'Not available for this login' });
+  }
+  const { data: bizRows } = await db.from('businesses').select('id').eq('slug', slug).limit(1);
+  const bizId = bizRows && bizRows[0] && bizRows[0].id;
+  if (!bizId) return res.status(404).json({ error: 'Business not found' });
+  try {
+    const out = await setExcuse(db, {
+      kind: String(body.kind || ''), id: String(body.id || ''), reason: body.reason ? String(body.reason) : '',
+      note: body.note, bizId, who: auth.role === 'owner' ? null : displayNameFor(slug),
+    });
+    return res.status(200).json(out);
+  } catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
 }
 
 // A secretary's own booking numbers: how many calls she took, how many became

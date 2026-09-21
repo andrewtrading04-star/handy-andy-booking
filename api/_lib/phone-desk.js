@@ -106,7 +106,7 @@ export async function phoneDesk(db) {
 
   // Open estimates, last 90 days.
   const { data: ests } = await db.from('estimates')
-    .select('business_id, status, created_at, customer_email, customer_phone, line_items, approved_at, contacted_at')
+    .select('business_id, status, source, created_at, customer_email, customer_phone, line_items, approved_at, contacted_at')
     .in('business_id', bizIds).gte('created_at', new Date(Date.now() - 90 * 86400000).toISOString()).limit(2000);
 
   const brands = BRANDS.filter(b => idBySlug.has(b.slug)).map(b => {
@@ -133,24 +133,32 @@ export async function phoneDesk(db) {
     form.baseline.jobs_per_week = +(form.baseline.jobs / baseWeeks).toFixed(1);
     form.baseline.sales_per_week = Math.round(form.baseline.sales / baseWeeks);
 
-    // estimates
-    const mine = (ests || []).filter(e => slugById.get(e.business_id) === b.slug);
-    const open = mine.filter(e => e.status === 'contacted' || e.status === 'new' || e.status === 'pending');
-    const bucketsDef = [['0 to 3 days', 0, 3], ['4 to 14 days', 4, 14], ['15 to 30 days', 15, 30], ['Over 30 days', 31, 9999]];
-    const buckets = bucketsDef.map(([label, lo, hi]) => {
-      const list = open.filter(e => { const age = (Date.now() - Date.parse(e.created_at)) / 86400000; return age >= lo && age < hi + 1; });
-      return { label, count: list.length, quoted: Math.round(list.reduce((s, e) => s + quoteOf(e), 0)),
-        no_email: list.filter(e => !e.customer_email).length };
-    });
-    const scheduled = mine.filter(e => e.status === 'scheduled').length;
-    return {
-      slug: b.slug, name: b.name, phone, form,
-      estimates: {
+    // Estimates, kept apart by where they came from: 'manual' = the office wrote
+    // it for someone who phoned; 'widget' / 'website_form' = the customer asked
+    // on the website. They have different owners and different fixes.
+    const allMine = (ests || []).filter(e => slugById.get(e.business_id) === b.slug);
+    const estimateStats = (mine) => {
+      const open = mine.filter(e => e.status === 'contacted' || e.status === 'new' || e.status === 'pending');
+      const bucketsDef = [['0 to 3 days', 0, 3], ['4 to 14 days', 4, 14], ['15 to 30 days', 15, 30], ['Over 30 days', 31, 9999]];
+      const buckets = bucketsDef.map(([label, lo, hi]) => {
+        const list = open.filter(e => { const age = (Date.now() - Date.parse(e.created_at)) / 86400000; return age >= lo && age < hi + 1; });
+        return { label, count: list.length, quoted: Math.round(list.reduce((s, e) => s + quoteOf(e), 0)),
+          no_email: list.filter(e => !e.customer_email).length };
+      });
+      const scheduled = mine.filter(e => e.status === 'scheduled').length;
+      return {
         total: mine.length, scheduled, close_pct: rate(scheduled, mine.length),
         open: open.length, open_quoted: Math.round(open.reduce((s, e) => s + quoteOf(e), 0)),
         buckets,
         archived_no_contact: mine.filter(e => e.status === 'archived' && !e.contacted_at).length,
         archived: mine.filter(e => e.status === 'archived').length,
+      };
+    };
+    return {
+      slug: b.slug, name: b.name, phone, form,
+      estimates: {
+        phone: estimateStats(allMine.filter(e => e.source === 'manual')),
+        web: estimateStats(allMine.filter(e => e.source !== 'manual')),
       },
     };
   });

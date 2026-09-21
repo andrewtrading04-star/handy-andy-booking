@@ -335,6 +335,27 @@
   .cap-day.open{background:#f0faf3;border-color:#bfe5c9;} .cap-day.open b{color:#15803d;}
   .cap-day.full{background:#fff1f1;border-color:#f5c2c2;} .cap-day.full b{color:#b91c1c;}
   .cap-day.none{background:#f6f7f9;} .cap-day.none b{color:#aeb7c3;}
+  /* Estimate check (My Call Performance + Analytics > Phone Desk) */
+  .ec-box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 18px;}
+  .ec-box h3{margin:0 0 4px;font-size:17px;font-weight:800;}
+  .ec-head{display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;margin-bottom:8px;}
+  .ec-rate{font-size:30px;font-weight:800;line-height:1;}
+  .ec-rate.good{color:#15803d;} .ec-rate.warn{color:#b45309;} .ec-rate.bad{color:#b91c1c;}
+  .ec-rule{font-size:13px;color:var(--ink-2);margin:0 0 10px;line-height:1.5;}
+  .ec-miss{border:1px solid #f3c1c1;background:#fff6f6;border-radius:10px;padding:10px 12px;margin:8px 0;}
+  .ec-miss .ec-top{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;font-size:13.5px;}
+  .ec-miss .ec-top b{font-size:14px;}
+  .ec-miss .ec-meta{font-size:12px;color:var(--mute);margin:2px 0 8px;}
+  .ec-act{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .ec-act select,.ec-act input{font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:100%;}
+  .ec-act input{flex:1;min-width:140px;}
+  .ec-done{font-size:12.5px;color:var(--mute);}
+  .ec-ok{background:#f0faf3;border:1px solid #bfe5c9;border-radius:10px;padding:10px 12px;font-size:13.5px;color:#15803d;font-weight:700;margin:8px 0;}
+  /* Estimates page: where the estimate came from */
+  .est-origin{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px;align-items:center;}
+  .est-origin small{font-size:11.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;margin-right:4px;}
+  .est-phone-badge{display:inline-block;font-size:11px;font-weight:800;color:#0b5e3a;background:#e2f5ea;border-radius:6px;padding:2px 8px;margin:0 6px 6px 0;}
+  .est-form-badge{display:inline-block;font-size:11px;font-weight:800;color:#4c2fb3;background:#ece7ff;border-radius:6px;padding:2px 8px;margin:0 6px 6px 0;}
   /* Analytics > Phone Desk */
   .pd-chip small{display:block;font-size:11.5px;font-weight:700;margin-top:2px;}
   .pd-chip small.up{color:#15803d;} .pd-chip small.down{color:#b91c1c;} .pd-chip small.flat{color:var(--mute);}
@@ -10407,6 +10428,58 @@ async function renderAnalyticsHub(){
   await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); });
 }
 
+// ── Estimate check ─────────────────────────────────────────────────────────
+// Owner rule: every real customer who phones gets an estimate (or a booking).
+// api/_lib/estimate-check.js finds the calls that ended with neither; the
+// secretary either sends one or excuses the call with a reason.
+const EC_REASONS={not_a_customer:'Not a customer (wrong number, spam, hang-up)',existing_customer:'Existing customer (schedule change or job question)',outside_area:'Outside our service area',vendor:'Vendor or solicitor',other:'Other (write why)'};
+const EC_STEP={greet:'greeting',zip:'zip code',tvopts:'TV options',schedule:'time',recap:'recap',discount:'discount',customer:'contact details',estimate:'estimate',resolution:'hang-up'};
+function estimateCheckHtml(p, opts){
+  opts=opts||{};
+  const w0=(p.windows||[])[0]||{calls:0,booked:0,estimate:0,excused:0,missed:0,rate:null};
+  const cls=w0.rate==null?'':w0.rate>=90?'good':w0.rate>=75?'warn':'bad';
+  const counted=w0.calls-w0.excused;
+  const rows=(p.windows||[]).map(w=>`<tr><td>${esc(w.label)}</td><td class="num">${w.calls}</td><td class="num">${w.booked}</td><td class="num">${w.estimate}</td><td class="num">${w.excused}</td><td class="num"><b${w.missed?' style="color:#b91c1c;"':''}>${w.missed}</b></td><td class="num">${w.rate==null?'–':w.rate+'%'}</td></tr>`).join('');
+  const reasonOpts='<option value="">Why no estimate?</option>'+Object.entries(EC_REASONS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  const miss=(p.missed||[]).map(m=>{
+    const who=m.kind==='audit'
+      ? `${m.caller_name?`<b>${esc(m.caller_name)}</b>`:''}${m.phone?` <a href="tel:${esc(m.phone)}">${esc(m.phone)}</a>`:'<span class="ec-done">No number recorded</span>'}`
+      : `<b>Call on the phone script</b>${m.quoted_total?` · quoted ${esc(money(m.quoted_total))}`:''}`;
+    const meta=[m.when, m.service, m.kind==='wizard'&&m.reached_step?`stopped at ${EC_STEP[m.reached_step]||m.reached_step}`:null, m.kind==='audit'?'logged by Jiyah, no estimate or booking found for this number':null].filter(Boolean).map(esc).join(' · ');
+    return `<div class="ec-miss" data-ecrow="${esc(m.kind+':'+m.id)}" data-ecbiz="${esc(opts.business||'')}">
+      <div class="ec-top">${who}</div><div class="ec-meta">${meta}</div>
+      <div class="ec-act"><button type="button" class="rc-btn blue" data-ec-start="1">Send an estimate</button>
+        <select data-ec-reason>${reasonOpts}</select><input data-ec-note placeholder="Say why" style="display:none;"><button type="button" class="rc-btn ghost" data-ec-save="1">Save reason</button></div></div>`;
+  }).join('');
+  const exc=(p.excused||[]).length?`<details style="margin-top:10px;"><summary class="ec-done" style="cursor:pointer;">Excused in the last 14 days (${p.excused.length})</summary>`+
+    p.excused.map(m=>`<div class="ec-done" style="padding:5px 0;border-bottom:1px solid var(--line2);">${esc(m.when)} · ${esc(EC_REASONS[m.reason]||m.reason)}${m.reason_note?' · '+esc(m.reason_note):''} <button type="button" class="rc-btn ghost" style="padding:1px 8px;" data-ec-undo="${esc(m.kind+':'+m.id)}" data-ecbiz="${esc(opts.business||'')}">Undo</button></div>`).join('')+'</details>':'';
+  return `<div class="ec-box"><h3>${opts.owner?esc(p.name)+' · ':''}Estimate check</h3>
+    <p class="ec-rule">Every customer who calls gets an estimate or a booking. A call that ends with neither shows up below until you send one or say why.</p>
+    <div class="ec-head"><span class="ec-rate ${cls}">${w0.rate==null?'–':w0.rate+'%'}</span><span>${w0.booked+w0.estimate} of ${counted} calls in the last 7 days ended in a booking or an estimate${w0.excused?` (${w0.excused} excused)`:''}</span></div>
+    ${(p.missed||[]).length?`<div style="font-size:13.5px;font-weight:800;color:#b91c1c;margin:8px 0 2px;">${p.missed.length} call${p.missed.length===1?'':'s'} with no estimate or booking (last 14 days)</div>${miss}`:`<div class="ec-ok">No calls waiting. Every call in the last 14 days ended in an estimate, a booking, or a reason.</div>`}
+    <div class="avb-scroll" style="margin-top:10px;"><table class="cap-table pd-table"><thead><tr><th>Period</th><th class="num">Calls</th><th class="num">Booked</th><th class="num">Estimate sent</th><th class="num">Excused</th><th class="num">Missed</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${exc}</div>`;
+}
+function bindEstimateCheck(root, reload){
+  root.querySelectorAll('[data-ec-start]').forEach(b=>b.addEventListener('click',()=>openNewBooking({ _estimateOnly:true })));
+  root.querySelectorAll('.ec-miss').forEach(row=>{
+    const sel=row.querySelector('[data-ec-reason]'), note=row.querySelector('[data-ec-note]');
+    sel.addEventListener('change',()=>{ note.style.display=sel.value==='other'?'':'none'; });
+    row.querySelector('[data-ec-save]').addEventListener('click',async ev=>{
+      if(!sel.value){ toast('Pick a reason first'); return; }
+      const [kind,id]=row.dataset.ecrow.split(':');
+      ev.target.disabled=true;
+      try{ await api('estimate_excuse',{ method:'POST', body:{ kind, id, reason:sel.value, note:note.value, business:row.dataset.ecbiz } }); toast('Saved'); reload(); }
+      catch(err){ ev.target.disabled=false; toast(err.message||'Could not save that'); }
+    });
+  });
+  root.querySelectorAll('[data-ec-undo]').forEach(b=>b.addEventListener('click',async()=>{
+    const [kind,id]=b.dataset.ecUndo.split(':');
+    try{ await api('estimate_excuse',{ method:'POST', body:{ kind, id, reason:'', business:b.dataset.ecbiz } }); reload(); }
+    catch(err){ toast(err.message||'Could not undo that'); }
+  }));
+}
+
 // ── Analytics > Phone Desk: phone-booked sales, ticket and add-ons vs the form ──
 // Read-only. api/_lib/phone-desk.js does the math.
 let _pdReq=0;
@@ -10421,8 +10494,8 @@ async function renderPhoneDesk(){
   const view=document.getElementById('view');
   const req=++_pdReq;
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
-  let d;
-  try{ d=await api('phone_desk'); }
+  let d, ec=null;
+  try{ [d,ec]=await Promise.all([ api('phone_desk'), api('estimate_check').catch(()=>null) ]); }
   catch(err){ if(req===_pdReq) view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; return; }
   if(req!==_pdReq || !onScreen('phonedesk')) return;
   let h='<div class="cap-wrap">';
@@ -10432,6 +10505,7 @@ async function renderPhoneDesk(){
     <li>Every quote goes out in writing within 5 minutes. Ask for an email address on every call.</li>
     <li>Callers who did not book: call back about 3 hours later and again the next morning.</li>
     <li>Call open estimates under 14 days old first. Close the ones over 30 days old.</li></ol></div>`;
+  if(ec&&ec.people) h+=ec.people.map(p=>estimateCheckHtml(p,{owner:true,business:p.business})).join('');
   h+=`<p class="cap-note">${esc(d.note||'')} "Summer" is ${esc(d.baseline.from)} to ${esc(d.baseline.to)}.</p>`;
   (d.brands||[]).forEach(b=>{
     const p=b.phone, f=b.form, l4=p.last4, bs=p.baseline;
@@ -10449,18 +10523,20 @@ async function renderPhoneDesk(){
         const l=capDayLabel(w.start);
         return `<tr class="${w.current?'cur':''}"><td>${esc(l.md)}${w.current?' · this week':''}</td><td class="num">${w.jobs}</td><td class="num">${pdMoney(w.sales)}</td><td class="num">${pdMoney(w.avg_ticket)}</td><td class="num">${pdPct(w.bracket_pct)}</td><td class="num">${pdPct(w.inwall_pct)}</td><td class="num">${fw.jobs==null?'–':fw.jobs}</td><td class="num">${pdMoney(fw.avg_ticket)}</td></tr>`;
       }).join('')+'</tbody></table></div>';
-    const e=b.estimates;
-    h+=`<div class="cap-h">Estimates, last 90 days</div><div class="cap-chips">`+
-      `<div class="cap-chip"><b>${e.open}</b><span>Open</span></div>`+
-      `<div class="cap-chip"><b>${pdMoney(e.open_quoted)}</b><span>Quoted, still open</span></div>`+
-      `<div class="cap-chip ${e.close_pct!=null&&e.close_pct<20?'bad':''}"><b>${pdPct(e.close_pct)}</b><span>Closed (scheduled)</span></div>`+
-      `<div class="cap-chip ${e.archived_no_contact?'hot':''}"><b>${e.archived_no_contact}</b><span>Archived, never contacted</span></div></div>`+
-      '<div class="avb-scroll"><table class="cap-table"><thead><tr><th>Age of open estimate</th><th class="num">Count</th><th class="num">Quoted</th><th class="num">No email</th></tr></thead><tbody>'+
-      e.buckets.map(x=>`<tr><td>${esc(x.label)}</td><td class="num">${x.count}</td><td class="num">${pdMoney(x.quoted)}</td><td class="num">${x.no_email}</td></tr>`).join('')+'</tbody></table></div>';
+    [['Estimates from phone calls, last 90 days',b.estimates.phone],['Estimates from the website, last 90 days',b.estimates.web]].forEach(([title,e])=>{
+      h+=`<div class="cap-h">${title}</div><div class="cap-chips">`+
+        `<div class="cap-chip"><b>${e.open}</b><span>Open</span></div>`+
+        `<div class="cap-chip"><b>${pdMoney(e.open_quoted)}</b><span>Quoted, still open</span></div>`+
+        `<div class="cap-chip ${e.close_pct!=null&&e.close_pct<20?'bad':''}"><b>${pdPct(e.close_pct)}</b><span>Closed (scheduled)</span></div>`+
+        `<div class="cap-chip ${e.archived_no_contact?'hot':''}"><b>${e.archived_no_contact}</b><span>Archived, never contacted</span></div></div>`+
+        '<div class="avb-scroll"><table class="cap-table"><thead><tr><th>Age of open estimate</th><th class="num">Count</th><th class="num">Quoted</th><th class="num">No email</th></tr></thead><tbody>'+
+        e.buckets.map(x=>`<tr><td>${esc(x.label)}</td><td class="num">${x.count}</td><td class="num">${pdMoney(x.quoted)}</td><td class="num">${x.no_email}</td></tr>`).join('')+'</tbody></table></div>';
+    });
     h+='</div>';
   });
   h+='</div>';
   view.innerHTML=h;
+  bindEstimateCheck(view, renderPhoneDesk);
 }
 
 // ── Analytics > Capacity: idle tech time and open slots, by city ───────────────
@@ -10870,8 +10946,10 @@ async function renderMyCallPerformance(){
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   let d;
   const rc=MP_RANGES[_mpRange]||MP_RANGES['30'];
-  try{ d=await api('my_call_performance',{ params:{ days:rc.days, offset:rc.offset }}); }
+  let ecData=null;
+  try{ [d,ecData]=await Promise.all([ api('my_call_performance',{ params:{ days:rc.days, offset:rc.offset }}), api('estimate_check').catch(()=>null) ]); }
   catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  const ecBox=(ecData&&ecData.people&&ecData.people[0])?estimateCheckHtml(ecData.people[0],{business:ecData.people[0].business}):'';
 
   const rangeBtns=Object.entries(MP_RANGES).map(([x,r])=>
     `<button type="button" class="seg-btn ${_mpRange===x?'on':''}" data-mp="${x}">${r.label}</button>`).join('');
@@ -10932,6 +11010,7 @@ async function renderMyCallPerformance(){
       <h2 class="rc-title">📞 My Call Performance</h2>
       <div class="rc-sub">Your calls taken through the phone script. Booked means a real booking was created from that call, not just that the script reached the end.</div>
     </div></div>
+    ${ecBox}
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
 
     <div class="greet-stats" style="margin-bottom:18px;">
@@ -10963,6 +11042,7 @@ async function renderMyCallPerformance(){
     </div>
   </div>`;
   view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
+  bindEstimateCheck(view, renderMyCallPerformance);
   view.querySelectorAll('[data-cdd-date]').forEach(el=>el.addEventListener('click',()=>{
     const dateStr=el.dataset.cddDate;
     let lbl=dateStr; try{ lbl=new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }catch(_){}
@@ -13390,6 +13470,11 @@ function estAgeMinutes(e){ return e&&e.created_at ? (Date.now()-new Date(e.creat
 function isStaleEstimate(e){ return e && e.status==='new' && estAgeMinutes(e)>=EST_STALE_MINUTES; }
 function fmtWaitMinutes(mins){ mins=Math.max(0,Math.round(mins)); const h=Math.floor(mins/60), m=mins%60; return h>0?`${h}h${m?` ${m}m`:''}`:`${m}m`; }
 let estFilter = 'new';
+// Where the estimate came from: a phone call the office handled ('manual'), or
+// the customer asking on the website ('widget' request or 'website_form' message).
+let estOrigin = 'all';
+const EST_ORIGINS = { all:'All', phone:'Phone calls', web:'Website' };
+function estOriginOf(e){ return e && e.source==='manual' ? 'phone' : 'web'; }
 let estCache = {};   // id -> estimate row, so the quote modal can open without a refetch
 const EST_TAX_RATE = 0.0875;   // default sales tax applied to quotes (8.75%)
 function fmtSlotDate(d){ try{ return new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return d; } }
@@ -13427,10 +13512,12 @@ async function renderEstimates(){
       <div class="est-filters" id="estFilters">${filters}</div>
       <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
     </div>
+    <div class="est-origin" id="estOrigin"><small>Came from</small>${Object.entries(EST_ORIGINS).map(([k,v])=>`<button type="button" class="seg-btn ${estOrigin===k?'on':''}" data-eo="${k}">${v}<span class="eo-n" data-eon="${k}"></span></button>`).join('')}</div>
     <div class="ch-toolbar est-tools"><label>Find an estimate<input id="estSearch" type="search" value="${esc(_estQuery)}" placeholder="Customer, service, phone, or ZIP"></label><label>Sort<select id="estSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value">Highest value</option></select></label><span id="estCount" role="status"></span></div>
     <div id="estWrap"><div class="empty">Loading estimates…</div></div>
   </div>`;
   document.querySelectorAll('#estFilters [data-ef]').forEach(b=>b.addEventListener('click',()=>{ estFilter=b.dataset.ef; renderEstimates(); }));
+  document.querySelectorAll('#estOrigin [data-eo]').forEach(b=>b.addEventListener('click',()=>{ estOrigin=b.dataset.eo; document.querySelectorAll('#estOrigin [data-eo]').forEach(x=>x.classList.toggle('on',x===b)); paintEstimates(); }));
   // Same New Booking engine everything else uses to price an estimate -- this
   // just opens it with the estimate-first intent made visible (title swaps to
   // "New Estimate"), so a secretary isn't stuck routing through Schedule ->
@@ -13462,14 +13549,18 @@ async function renderEstimates(){
 function paintEstimates(){
     const wrap=document.getElementById('estWrap');if(!wrap||!onScreen('estimates'))return;
     const query=_estQuery.trim().toLowerCase();
-    const items=_estRows.filter(e=>!query||[e.customer_name,e.customer_phone,e.customer_email,e.service_label,e.customer_zip].join(' ').toLowerCase().includes(query));
+    // Counts on the origin buttons cover the whole current status list, so the
+    // office can see how many phone estimates vs website estimates are waiting.
+    { const n={all:_estRows.length,phone:_estRows.filter(e=>estOriginOf(e)==='phone').length,web:_estRows.filter(e=>estOriginOf(e)==='web').length};
+      document.querySelectorAll('#estOrigin [data-eon]').forEach(s=>{ s.textContent=' '+n[s.dataset.eon]; }); }
+    const items=_estRows.filter(e=>(estOrigin==='all'||estOriginOf(e)===estOrigin)&&(!query||[e.customer_name,e.customer_phone,e.customer_email,e.service_label,e.customer_zip].join(' ').toLowerCase().includes(query)));
     const value=e=>estTotals(e.line_items||[],Number(e.tax_rate)||0).total;
     items.sort((a,b)=>_estSort==='value'?value(b)-value(a):(_estSort==='oldest'?1:-1)*(Date.parse(a.created_at||0)-Date.parse(b.created_at||0)));
     document.getElementById('estCount').textContent=`${items.length} estimate${items.length===1?'':'s'}`;
     if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
     const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
     const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
-    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
@@ -13549,7 +13640,9 @@ function estCard(e){
   // free-text message and no line items, so the card leads with the message and
   // the office builds a quote from there.
   const isWeb=e.source==='website_form';
-  const webBadge=isWeb?`<span class="est-web-badge">🌐 Website message</span>`:'';
+  const webBadge=isWeb?`<span class="est-web-badge">🌐 Website message</span>`
+    :e.source==='widget'?`<span class="est-form-badge">🌐 Website estimate request</span>`
+    :`<span class="est-phone-badge">📞 Phone call estimate</span>`;
   const _tzi=estTimezone(e);
   const created=e.created_at?new Date(e.created_at).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   const receivedBadge=created?`<div class="est-received">Received ${esc(created)}${_tzi.label?` · ${esc(_tzi.label)}`:''}</div>`:'';
@@ -15036,12 +15129,14 @@ async function renderGreeting(){
     if(wantsCallPerf){
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:0 }}).catch(()=>null));
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
+      reqs.push(api('estimate_check').catch(()=>null));
     }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
     if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
     const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
+    const ecMissed = wantsCallPerf && rest[2] && rest[2].people && rest[2].people[0] ? (rest[2].people[0].missed||[]).length : 0;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
@@ -15058,6 +15153,7 @@ async function renderGreeting(){
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
       lowStockTechs: lowStockCount(bracketInv),
       callPerf,
+      estimateCheckMissed: ecMissed,
     };
     paintGreeting();
     { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
@@ -15126,6 +15222,17 @@ function staleEstimateAlertHtml(){
       ${estStale.oldestPhone?`<a class="ca-call" href="tel:${esc(estStale.oldestPhone)}">📞 Call ${esc(estStale.oldestPhone)}</a>`:''}
       <button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="goToEstimates()">📋 Go to estimate →</button>
     </div>
+  </div>`;
+}
+// Secretary banner: calls in the last 14 days that ended with no estimate and
+// no booking. Clears as she sends one or excuses the call.
+function estimateCheckAlertHtml(){
+  const n=(greetingData&&greetingData.estimateCheckMissed)||0;
+  if(role==='owner' || !n) return '';
+  return `<div class="crit-alert">
+    <div class="ca-h">⚠ Every caller gets an estimate</div>
+    <div class="ca-b"><strong>${n} call${n===1?'':'s'}</strong> from the last 14 days ended with no estimate and no booking. Send an estimate to each one, or say why one is not needed.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="document.querySelector('[data-nav=&quot;mycallperf&quot;]').click()">📞 Review these calls →</button></div>
   </div>`;
 }
 function goToEstimates(){ const b=document.querySelector('[data-nav="estimates"]'); if(b) b.click(); }
@@ -15238,6 +15345,7 @@ function paintGreeting(){
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
+    estimateCheckAlertHtml()+
     staleEstimateAlertHtml()+
     // One dense line: date, local time, then the day's summary. The
     // "Good afternoon <name>" header and the "Today is… It's currently…"
