@@ -7779,13 +7779,17 @@ function launchMarketAddressLineHtml(m){
     ? `<span style="font-size:11px;color:var(--mute);">${esc(m.address)}</span>`
     : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`;
 }
+// A market's name is its city (it doubles as the hub key), so the card title
+// adds the parent brand: "Handy Andy Austin" feeds the Austin hub as its own
+// business, not as the city itself.
+function launchMarketTitle(m){ return m.parentSlug==='handy-andy' ? `Handy Andy ${m.name}` : m.name; }
 function launchMarketCardHtml(m, items){
   const { passed, total, blocked } = launchMarketScoreOf(m, items);
   return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
       <div style="min-width:0;">
-        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(m.name)} ${launchNotesFlagHtml(m.notes)}</div>
+        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(launchMarketTitle(m))} ${launchNotesFlagHtml(m.notes)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
         <div class="launch-market-address" style="margin-top:2px;">${launchMarketAddressLineHtml(m)}</div>
       </div>
@@ -8037,7 +8041,7 @@ async function renderLaunch(){
         });
         wireLaunchNotes(detail, (notes)=>{
           m.notes=notes;
-          card.querySelector('[data-launch-name]').innerHTML = `${esc(m.name)} ${launchNotesFlagHtml(m.notes)}`;
+          card.querySelector('[data-launch-name]').innerHTML = `${esc(launchMarketTitle(m))} ${launchNotesFlagHtml(m.notes)}`;
         });
       }
     });
