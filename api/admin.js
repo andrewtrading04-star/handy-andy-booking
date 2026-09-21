@@ -32,7 +32,7 @@ import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { isBotUserAgent, isInternalContact } from './_lib/bot-filter.js';
+import { isBotUserAgent, isInternalContact, isUsTimezone } from './_lib/bot-filter.js';
 import { capacityOverview } from './_lib/capacity.js';
 import { phoneDesk } from './_lib/phone-desk.js';
 import { estimateCheckFor, setExcuse } from './_lib/estimate-check.js';
@@ -6188,12 +6188,14 @@ async function analyticsOverview(req, res, db, auth) {
       const sess = new Map();
       {
         const pvRows = await fetchAllPages((cols, opts) =>
-          pub.from('web_events').select(cols || 'session_id, page_url, created_at, user_agent', opts)
+          pub.from('web_events').select(cols || 'session_id, page_url, created_at, user_agent, metadata', opts)
             .eq('event_type', 'page_view')
             .ilike('page_url', `%${host}%`)
             .gte('created_at', since), { maxPages: rangeParam === 'all' ? 60 : 12 });
         for (const r of pvRows) {
           if (isBotUserAgent(r.user_agent)) continue;
+          if (!isUsTimezone(r.metadata && r.metadata.timezone)) continue; // USA-only traffic
+          let path;
           try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
           catch { continue; }
           let e = sess.get(r.session_id);
@@ -6511,7 +6513,6 @@ async function insightsOverview(req, res, db, auth) {
       }
     }
   }
-  const avg = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
   // Headline totals are counted once per BOOKING. Summing the per-tech rows would
   // count a two-tech job under both techs (full price twice) and leave out jobs
   // with no tech or with a tech who has since been deactivated.
@@ -6523,6 +6524,7 @@ async function insightsOverview(req, res, db, auth) {
     if (b.metadata && b.metadata.staff_late_notified_at) totals.late_30d++;
   }
   totals.revenue_30d = Math.round(totals.revenue_30d);
+  const avg = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
   const techs = [...techStats.values()].map(s => ({
     id: s.id, name: s.name, jobs_30d: s.jobs_30d, revenue_30d: Math.round(s.revenue_30d),
     avg_ticket: s.completed_30d ? Math.round((s.revenue_30d / s.completed_30d) * 100) / 100 : null,
@@ -6565,8 +6567,8 @@ async function insightsOverview(req, res, db, auth) {
   }
 
   flags.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
-  return res.status(200).json({ flags, metros, techs, estimate_funnel: estimateFunnel, revenue: { this_week: Math.round(revCur), trailing_weekly_avg: Math.round(revAvgWeekly), pct_change: revPct } });
   return res.status(200).json({ flags, metros, techs, totals, estimate_funnel: estimateFunnel, revenue: { this_week: Math.round(revCur), trailing_weekly_avg: Math.round(revAvgWeekly), pct_change: revPct } });
+}
 const SEVERITY_ORDER = { high: 0, med: 1, low: 2, good: 3 };
 
 // Owner-only: it spends money on API calls, and it is the owner's tagging
@@ -10244,7 +10246,14 @@ async function cityPagesAnalytics(req, res, db, auth) {
     .limit(8000);
   if (error) throw error;
 
+  // USA-only traffic: a session counts only if one of its page views reported a
+  // US timezone (only page_view rows carry it, so it is decided per session).
+  const usSessions = new Set();
+  for (const r of (data || [])) {
+    if (r.event_type === 'page_view' && isUsTimezone(r.metadata && r.metadata.timezone)) usSessions.add(r.session_id);
+  }
   const rows = (data || [])
+    .filter(r => usSessions.has(r.session_id))
     .map(r => ({ ...r, path: cityPagePath(r.page_url) }))
     .filter(r => cityPages.includes(r.path));
 
@@ -15976,7 +15985,7 @@ async function brandForUnmappedTexters(db, phones, bizById) {
       .filter(id => id !== best.business_id)
       .map(id => (bizById.get(id) || {}).name).filter(Boolean);
     out.set(p, {
-      business_id: biz.id, slug: biz.slug, name: biz.name,
+      business_id: biz.id, slug: biz.slug, name: biz.name, timezone: biz.timezone,
       source: best.source, source_label: BRAND_SOURCE_LABEL[best.source] || best.source,
       customer_name: sameBrand ? sameBrand.name : null,
       others,
@@ -15986,7 +15995,7 @@ async function brandForUnmappedTexters(db, phones, bizById) {
 }
 
 async function businessesById(db) {
-  const { data } = await db.from('businesses').select('id, slug, name');
+  const { data } = await db.from('businesses').select('id, slug, name, timezone');
   return new Map((data || []).map(b => [b.id, b]));
 }
 
@@ -16091,6 +16100,7 @@ async function messagesList(req, res, db, auth) {
     // entries whenever it has both a dedicated line and toll-free traffic —
     // e.g. Dom's showing twice. b.slug is authoritative whenever b exists.
     if (b) t.business_slug = b.slug;
+    t.business_timezone = b ? b.timezone : null;
     t.brand_source = b ? 'line' : null;
   }
   // Unmapped line (the 888 notification number): work out the brand from
@@ -16104,6 +16114,7 @@ async function messagesList(req, res, db, auth) {
     if (!g) continue;
     t.business_name = g.name;
     t.business_slug = g.slug;
+    t.business_timezone = g.timezone || null;
     t.brand_source = g.source;
     t.brand_source_label = g.source_label;
     t.brand_others = g.others;
@@ -16168,6 +16179,7 @@ async function messagesThread(req, res, db, auth) {
     notify_line: isNotifyLine(ctx.ourPhone),
     business: brand ? brand.slug : null,
     business_name: brand ? brand.name : null,
+    business_timezone: (ctx.biz && bizById.get(ctx.biz.id) ? bizById.get(ctx.biz.id).timezone : null) || (brand && brand.timezone) || null,
     brand_source: brand ? brand.source : null,
     brand_source_label: brand ? brand.source_label : null,
     brand_others: brand ? brand.others : [],
