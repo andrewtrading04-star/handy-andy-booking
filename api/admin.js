@@ -10871,6 +10871,8 @@ async function estimateSendSms(req, res, db, auth, body) {
 //   opened   – the customer opened the text/email but did not approve
 //   unopened – sent more than 3 hours ago and never opened
 // Read-only. Nothing here changes an estimate.
+// Clean slate (owner, 2026-09-22): only estimates sent from this moment on are listed.
+const FOLLOWUP_STARTS = Date.parse('2026-09-22T00:00:00-06:00');
 async function estimateFollowups(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const now = Date.now();
@@ -10896,6 +10898,7 @@ async function estimateFollowups(req, res, db, auth) {
       opened_at: openedAt ? new Date(openedAt).toISOString() : null,
       reminded_at: rem.length ? new Date(Math.max(...rem)).toISOString() : null,
     };
+    if (sentAt < FOLLOWUP_STARTS) continue;
     if (openedAt) opened.push(row);
     else if (sentAt && sentAt <= now - 3 * 3600000 && sentAt >= now - 14 * 86400000) unopened.push(row);
   }

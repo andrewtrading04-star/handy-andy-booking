@@ -13747,15 +13747,14 @@ async function renderEstimates(){
   const view=document.getElementById('view');
   // "Website messages" is a source filter, not a status (api/admin.js handles it
   // specially). Sits before Archived so it reads as a working folder.
-  const filters=Object.entries({all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
-    `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}</button>`).join('');
+  const filters=Object.entries({followup:'Follow up',all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
+    `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}${k==='followup'?'<span id="fuTabN"></span>':''}</button>`).join('');
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div><h2 class="rc-title">Estimates</h2><p class="rc-sub">Review requests, build quotes, and turn approved estimates into jobs.</p></div></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:2px;">
       <div class="est-filters" id="estFilters">${filters}</div>
       <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
     </div>
-    <div id="estFollow"></div>
     <div class="est-origin" id="estOrigin"><small>Came from</small>${Object.entries(EST_ORIGINS).map(([k,v])=>`<button type="button" class="seg-btn ${estOrigin===k?'on':''}" data-eo="${k}">${v}<span class="eo-n" data-eon="${k}"></span></button>`).join('')}</div>
     <div class="ch-toolbar est-tools"><label>Find an estimate<input id="estSearch" type="search" value="${esc(_estQuery)}" placeholder="Customer, service, phone, or ZIP"></label><label>Sort<select id="estSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value">Highest value</option></select></label><span id="estCount" role="status"></span></div>
     <div id="estWrap"><div class="empty">Loading estimates…</div></div>
@@ -13774,6 +13773,12 @@ async function renderEstimates(){
   view.querySelector('#estSort').addEventListener('change',e=>{_estSort=e.target.value;paintEstimates();});
   _estRows=[];
   loadEstFollowups();
+  if(estFilter==='followup'){
+    document.getElementById('estOrigin').hidden=true;
+    view.querySelector('.est-tools').hidden=true;
+    document.getElementById('estWrap').innerHTML='<div id="estFollow"><div class="empty">Loading…</div></div>';
+    return;
+  }
   try{
     // A sent estimate the customer hasn't approved stays right here in "Estimate
     // sent" no matter how old it gets — there's no separate "not approved" folder
@@ -13832,13 +13837,14 @@ function fuAgo(iso){
   return m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:`${Math.floor(m/1440)}d ago`;
 }
 async function loadEstFollowups(){
-  const box=document.getElementById('estFollow'); if(!box) return;
   const request=_estRequest;
   try{
     const d=await api('estimate_followups',{ params:{ business:current.slug }});
     if(request!==_estRequest||!onScreen('estimates')) return;
+    const n=(d.opened||[]).length+(d.unopened||[]).length;
+    const tab=document.getElementById('fuTabN'); if(tab) tab.textContent=n?' '+n:'';
     paintEstFollowups(d);
-  }catch(_){ box.innerHTML=''; }
+  }catch(_){ const box=document.getElementById('estFollow'); if(box) box.innerHTML='<div class="empty">Could not load the follow-up list.</div>'; }
 }
 function paintEstFollowups(d){
   const box=document.getElementById('estFollow'); if(!box) return;
@@ -13853,7 +13859,7 @@ function paintEstFollowups(d){
     </div></div>`;
   const opened=d.opened||[], unopened=d.unopened||[];
   box.innerHTML=`<div class="fu-box">
-    <div class="fu-head"><h3>Follow up now · ${opened.length+unopened.length}</h3>
+    <div class="fu-head"><div><h3>Follow up now · ${opened.length+unopened.length}</h3><small style="color:var(--mute);">Estimates sent from Sept 22 on.</small></div>
       <button type="button" class="rc-btn ghost" id="fuCloseBtn">Close old estimates…</button></div>
     ${opened.length?`<div class="fu-sec">Opened, not approved (${opened.length})</div>${opened.map(r=>row(r,'opened')).join('')}`:''}
     ${unopened.length?`<div class="fu-sec">Sent, not opened after 3 hours (${unopened.length})</div>${unopened.map(r=>row(r,'unopened')).join('')}`:''}
