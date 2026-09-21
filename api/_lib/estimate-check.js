@@ -14,7 +14,7 @@
 //
 // Read model + one write (excuse). A secretary only ever sees her own rows.
 import { digitsOf, prettyPhone } from './grasshopper.js';
-import { localDayStartUTC } from './time.js';
+import { localDayStartUTC, localDateStartUTC } from './time.js';
 
 export const EXCUSE_REASONS = {
   not_a_customer: 'Not a customer (wrong number, spam, hang-up)',
@@ -24,8 +24,10 @@ export const EXCUSE_REASONS = {
   other: 'Other (write why)',
 };
 
-const WINDOWS = 4;              // four rolling 7-day windows, newest first
-const LIST_DAYS = 14;           // the "needs attention" list covers the last two weeks
+// Clean slate (owner, 2026-09-21): the secretaries were told that day to send an
+// estimate to every caller, so nothing before this date is counted or shown.
+export const TRACKING_STARTS = '2026-09-21';
+const SPAN_DAYS = 7;            // the widest window shown is the last 7 days
 const MATCH_DAYS = 3;           // an estimate/booking up to 3 days after an audited call counts
 
 const rate = (ok, n) => (n > 0 ? Math.round((ok / n) * 100) : null);
@@ -34,8 +36,8 @@ const rate = (ok, n) => (n > 0 ? Math.round((ok / n) * 100) : null);
 // and call_audits.handled_by hold that name).
 export async function estimateCheckFor(db, { bizId, tz, name, now = new Date() }) {
   const startOf = (off) => localDayStartUTC(tz, off, now);
-  const span = 7 * WINDOWS;
-  const since = startOf(-(span - 1));
+  const trackFrom = localDateStartUTC(tz, TRACKING_STARTS).getTime();
+  const since = new Date(Math.max(startOf(-(SPAN_DAYS - 1)).getTime(), trackFrom));
   const until = startOf(1);
   const sinceDay = since.toISOString().slice(0, 10);
   const untilDay = new Date(until.getTime() - 86400000).toISOString().slice(0, 10);
@@ -114,26 +116,17 @@ export async function estimateCheckFor(db, { bizId, tz, name, now = new Date() }
     });
   }
 
-  // rolling windows
-  const windows = [];
-  for (let w = 0; w < WINDOWS; w++) {
-    const from = startOf(-(7 * w + 6)), to = startOf(-(7 * w) + 1);
-    const inWin = items.filter(i => { const t = Date.parse(i.at); return t >= from.getTime() && t < to.getTime(); });
+  // Three windows: today, yesterday, the last 7 days. Numbers only, no list of
+  // individual calls. Nothing before TRACKING_STARTS is counted.
+  const WIN = [['Today', 0, 0], ['Yesterday', -1, -1], ['Last 7 days', -(SPAN_DAYS - 1), 0]];
+  const windows = WIN.map(([label, a, b]) => {
+    const from = Math.max(startOf(a).getTime(), trackFrom), to = startOf(b + 1).getTime();
+    const inWin = items.filter(i => { const t = Date.parse(i.at); return t >= from && t < to; });
     const c = (s) => inWin.filter(i => i.status === s).length;
     const n = inWin.length, ok = c('booked') + c('estimate');
-    windows.push({
-      label: w === 0 ? 'Last 7 days' : `${7 * w + 7} to ${7 * w + 1} days ago`,
-      from: from.toISOString().slice(0, 10), calls: n, booked: c('booked'), estimate: c('estimate'), excused: c('excused'), missed: c('missed'),
-      rate: rate(ok, n - c('excused')),        // excused calls do not count for or against
-    });
-  }
-  const listFrom = startOf(-(LIST_DAYS - 1)).getTime();
-  const shape = (i) => ({ ...i, when: new Date(i.at).toLocaleString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(/, (\d{1,2}:\d{2})/, ' · $1') });
-  const missed = items.filter(i => i.status === 'missed' && Date.parse(i.at) >= listFrom).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).map(shape);
-  const excused = items.filter(i => i.status === 'excused' && Date.parse(i.at) >= listFrom).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).map(shape);
-  const reasonCounts = {};
-  for (const i of items.filter(x => x.status === 'excused')) reasonCounts[i.reason] = (reasonCounts[i.reason] || 0) + 1;
-  return { name, windows, missed, excused, reason_counts: reasonCounts, unchecked_audits: unchecked };
+    return { label, calls: n, booked: c('booked'), estimate: c('estimate'), missed: c('missed') + c('excused'), rate: rate(ok, n) };
+  });
+  return { name, windows, started_on: TRACKING_STARTS, unchecked_audits: unchecked };
 }
 
 // Excuse (or un-excuse) one call. `who` is the caller's own display name for a

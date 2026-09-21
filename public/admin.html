@@ -361,6 +361,11 @@
   .ec-rate{font-size:30px;font-weight:800;line-height:1;}
   .ec-rate.good{color:#15803d;} .ec-rate.warn{color:#b45309;} .ec-rate.bad{color:#b91c1c;}
   .ec-rule{font-size:13px;color:var(--ink-2);margin:0 0 10px;line-height:1.5;}
+  .ec-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  .ec-stat{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;background:#f9fafb;}
+  .ec-lbl{font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.4px;}
+  .ec-sub{font-size:12.5px;color:var(--ink-2);margin-top:3px;}
+  @media (max-width:640px){ .ec-grid{grid-template-columns:1fr;} }
   .ec-miss{border:1px solid #f3c1c1;background:#fff6f6;border-radius:10px;padding:10px 12px;margin:8px 0;}
   .ec-miss .ec-top{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;font-size:13.5px;}
   .ec-miss .ec-top b{font-size:14px;}
@@ -10451,54 +10456,19 @@ async function renderAnalyticsHub(){
 // Owner rule: every real customer who phones gets an estimate (or a booking).
 // api/_lib/estimate-check.js finds the calls that ended with neither; the
 // secretary either sends one or excuses the call with a reason.
-const EC_REASONS={not_a_customer:'Not a customer (wrong number, spam, hang-up)',existing_customer:'Existing customer (schedule change or job question)',outside_area:'Outside our service area',vendor:'Vendor or solicitor',other:'Other (write why)'};
-const EC_STEP={greet:'greeting',zip:'zip code',tvopts:'TV options',schedule:'time',recap:'recap',discount:'discount',customer:'contact details',estimate:'estimate',resolution:'hang-up'};
 function estimateCheckHtml(p, opts){
   opts=opts||{};
-  const w0=(p.windows||[])[0]||{calls:0,booked:0,estimate:0,excused:0,missed:0,rate:null};
-  const cls=w0.rate==null?'':w0.rate>=90?'good':w0.rate>=75?'warn':'bad';
-  const counted=w0.calls-w0.excused;
-  const rows=(p.windows||[]).map(w=>`<tr><td>${esc(w.label)}</td><td class="num">${w.calls}</td><td class="num">${w.booked}</td><td class="num">${w.estimate}</td><td class="num">${w.excused}</td><td class="num"><b${w.missed?' style="color:#b91c1c;"':''}>${w.missed}</b></td><td class="num">${w.rate==null?'–':w.rate+'%'}</td></tr>`).join('');
-  const reasonOpts='<option value="">Why no estimate?</option>'+Object.entries(EC_REASONS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
-  const miss=(p.missed||[]).map(m=>{
-    const who=m.kind==='audit'
-      ? `${m.caller_name?`<b>${esc(m.caller_name)}</b>`:''}${m.phone?` <a href="tel:${esc(m.phone)}">${esc(m.phone)}</a>`:'<span class="ec-done">No number recorded</span>'}`
-      : `<b>Call on the phone script</b>${m.quoted_total?` · quoted ${esc(money(m.quoted_total))}`:''}`;
-    const meta=[m.when, m.service, m.kind==='wizard'&&m.reached_step?`stopped at ${EC_STEP[m.reached_step]||m.reached_step}`:null, m.kind==='audit'?'logged by Jiyah, no estimate or booking found for this number':null].filter(Boolean).map(esc).join(' · ');
-    return `<div class="ec-miss" data-ecrow="${esc(m.kind+':'+m.id)}" data-ecbiz="${esc(opts.business||'')}">
-      <div class="ec-top">${who}</div><div class="ec-meta">${meta}</div>
-      <div class="ec-act"><button type="button" class="rc-btn blue" data-ec-start="1">Send an estimate</button>
-        <select data-ec-reason>${reasonOpts}</select><input data-ec-note placeholder="Say why" style="display:none;"><button type="button" class="rc-btn ghost" data-ec-save="1">Save reason</button></div></div>`;
-  }).join('');
-  const exc=(p.excused||[]).length?`<details style="margin-top:10px;"><summary class="ec-done" style="cursor:pointer;">Excused in the last 14 days (${p.excused.length})</summary>`+
-    p.excused.map(m=>`<div class="ec-done" style="padding:5px 0;border-bottom:1px solid var(--line2);">${esc(m.when)} · ${esc(EC_REASONS[m.reason]||m.reason)}${m.reason_note?' · '+esc(m.reason_note):''} <button type="button" class="rc-btn ghost" style="padding:1px 8px;" data-ec-undo="${esc(m.kind+':'+m.id)}" data-ecbiz="${esc(opts.business||'')}">Undo</button></div>`).join('')+'</details>':'';
-  return `<div class="ec-box"><h3>${opts.owner?esc(p.name)+' · ':''}Estimate check</h3>
-    <p class="ec-rule">Every customer who calls gets an estimate or a booking. A call that ends with neither shows up below until you send one or say why.</p>
-    <div class="ec-head"><span class="ec-rate ${cls}">${w0.rate==null?'–':w0.rate+'%'}</span><span>${w0.booked+w0.estimate} of ${counted} calls in the last 7 days ended in a booking or an estimate${w0.excused?` (${w0.excused} excused)`:''}</span></div>
-    ${(p.missed||[]).length?`<div style="font-size:13.5px;font-weight:800;color:#b91c1c;margin:8px 0 2px;">${p.missed.length} call${p.missed.length===1?'':'s'} with no estimate or booking (last 14 days)</div>${miss}`:`<div class="ec-ok">No calls waiting. Every call in the last 14 days ended in an estimate, a booking, or a reason.</div>`}
-    <div class="avb-scroll" style="margin-top:10px;"><table class="cap-table pd-table"><thead><tr><th>Period</th><th class="num">Calls</th><th class="num">Booked</th><th class="num">Estimate sent</th><th class="num">Excused</th><th class="num">Missed</th><th class="num">Rate</th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${exc}</div>`;
+  const box=w=>{
+    const cls=w.rate==null?'':w.rate>=90?'good':w.rate>=75?'warn':'bad';
+    return `<div class="ec-stat"><div class="ec-lbl">${esc(w.label)}</div>
+      <div class="ec-rate ${cls}">${w.rate==null?'–':w.rate+'%'}</div>
+      <div class="ec-sub">${w.calls?`${w.booked+w.estimate} of ${w.calls} calls got an estimate or a booking`:'No calls yet'}</div>
+      ${w.calls?`<div class="ec-sub" style="${w.missed?'color:#b91c1c;font-weight:700;':''}">${w.missed} with no estimate</div>`:''}</div>`;
+  };
+  return `<div class="ec-box"><h3>${opts.owner?esc(p.name)+' · ':''}Estimates sent to callers</h3>
+    <p class="ec-rule">Every customer who calls gets an estimate or a booking.</p>
+    <div class="ec-grid">${(p.windows||[]).map(box).join('')}</div></div>`;
 }
-function bindEstimateCheck(root, reload){
-  root.querySelectorAll('[data-ec-start]').forEach(b=>b.addEventListener('click',()=>openNewBooking({ _estimateOnly:true })));
-  root.querySelectorAll('.ec-miss').forEach(row=>{
-    const sel=row.querySelector('[data-ec-reason]'), note=row.querySelector('[data-ec-note]');
-    sel.addEventListener('change',()=>{ note.style.display=sel.value==='other'?'':'none'; });
-    row.querySelector('[data-ec-save]').addEventListener('click',async ev=>{
-      if(!sel.value){ toast('Pick a reason first'); return; }
-      const [kind,id]=row.dataset.ecrow.split(':');
-      ev.target.disabled=true;
-      try{ await api('estimate_excuse',{ method:'POST', body:{ kind, id, reason:sel.value, note:note.value, business:row.dataset.ecbiz } }); toast('Saved'); reload(); }
-      catch(err){ ev.target.disabled=false; toast(err.message||'Could not save that'); }
-    });
-  });
-  root.querySelectorAll('[data-ec-undo]').forEach(b=>b.addEventListener('click',async()=>{
-    const [kind,id]=b.dataset.ecUndo.split(':');
-    try{ await api('estimate_excuse',{ method:'POST', body:{ kind, id, reason:'', business:b.dataset.ecbiz } }); reload(); }
-    catch(err){ toast(err.message||'Could not undo that'); }
-  }));
-}
-
 // ── Analytics > Phone Desk: phone-booked sales, ticket and add-ons vs the form ──
 // Read-only. api/_lib/phone-desk.js does the math.
 let _pdReq=0;
@@ -10555,7 +10525,6 @@ async function renderPhoneDesk(){
   });
   h+='</div>';
   view.innerHTML=h;
-  bindEstimateCheck(view, renderPhoneDesk);
 }
 
 // ── Analytics > Capacity: idle tech time and open slots, by city ───────────────
@@ -11061,7 +11030,6 @@ async function renderMyCallPerformance(){
     </div>
   </div>`;
   view.querySelectorAll('[data-mp]').forEach(b=>b.addEventListener('click',()=>{ _mpRange=b.dataset.mp; renderMyCallPerformance(); }));
-  bindEstimateCheck(view, renderMyCallPerformance);
   view.querySelectorAll('[data-cdd-date]').forEach(el=>el.addEventListener('click',()=>{
     const dateStr=el.dataset.cddDate;
     let lbl=dateStr; try{ lbl=new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }catch(_){}
@@ -15234,14 +15202,12 @@ async function renderGreeting(){
     if(wantsCallPerf){
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:0 }}).catch(()=>null));
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
-      reqs.push(api('estimate_check').catch(()=>null));
     }
     const [s,newEst,rc,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
     if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
     const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
-    const ecMissed = wantsCallPerf && rest[2] && rest[2].people && rest[2].people[0] ? (rest[2].people[0].missed||[]).length : 0;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
     greetingData={
@@ -15258,7 +15224,6 @@ async function renderGreeting(){
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
       lowStockTechs: lowStockCount(bracketInv),
       callPerf,
-      estimateCheckMissed: ecMissed,
     };
     paintGreeting();
     { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
@@ -15327,17 +15292,6 @@ function staleEstimateAlertHtml(){
       ${estStale.oldestPhone?`<a class="ca-call" href="tel:${esc(estStale.oldestPhone)}">📞 Call ${esc(estStale.oldestPhone)}</a>`:''}
       <button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="goToEstimates()">📋 Go to estimate →</button>
     </div>
-  </div>`;
-}
-// Secretary banner: calls in the last 14 days that ended with no estimate and
-// no booking. Clears as she sends one or excuses the call.
-function estimateCheckAlertHtml(){
-  const n=(greetingData&&greetingData.estimateCheckMissed)||0;
-  if(role==='owner' || !n) return '';
-  return `<div class="crit-alert">
-    <div class="ca-h">⚠ Every caller gets an estimate</div>
-    <div class="ca-b"><strong>${n} call${n===1?'':'s'}</strong> from the last 14 days ended with no estimate and no booking. Send an estimate to each one, or say why one is not needed.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="document.querySelector('[data-nav=&quot;mycallperf&quot;]').click()">📞 Review these calls →</button></div>
   </div>`;
 }
 function goToEstimates(){ const b=document.querySelector('[data-nav="estimates"]'); if(b) b.click(); }
@@ -15450,7 +15404,6 @@ function paintGreeting(){
   el.innerHTML=
     addressAlertHtml()+
     estimateAlertHtml()+
-    estimateCheckAlertHtml()+
     staleEstimateAlertHtml()+
     // One dense line: date, local time, then the day's summary. The
     // "Good afternoon <name>" header and the "Today is… It's currently…"
