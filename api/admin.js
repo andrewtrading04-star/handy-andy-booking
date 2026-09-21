@@ -6513,6 +6513,17 @@ async function insightsOverview(req, res, db, auth) {
       }
     }
   }
+  // Headline totals are counted once per BOOKING. Summing the per-tech rows would
+  // count a two-tech job under both techs (full price twice) and leave out jobs
+  // with no tech or with a tech who has since been deactivated.
+  const totals = { jobs_30d: 0, completed_30d: 0, revenue_30d: 0, late_30d: 0 };
+  for (const b of bkRows || []) {
+    if (new Date(b.scheduled_at).getTime() < cur30 || b.status === 'cancelled') continue;
+    totals.jobs_30d++;
+    if (b.status === 'completed') { totals.completed_30d++; totals.revenue_30d += Number(b.price) || 0; }
+    if (b.metadata && b.metadata.staff_late_notified_at) totals.late_30d++;
+  }
+  totals.revenue_30d = Math.round(totals.revenue_30d);
   const avg = arr => arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
   const techs = [...techStats.values()].map(s => ({
     id: s.id, name: s.name, jobs_30d: s.jobs_30d, revenue_30d: Math.round(s.revenue_30d),
@@ -6556,7 +6567,7 @@ async function insightsOverview(req, res, db, auth) {
   }
 
   flags.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
-  return res.status(200).json({ flags, metros, techs, estimate_funnel: estimateFunnel, revenue: { this_week: Math.round(revCur), trailing_weekly_avg: Math.round(revAvgWeekly), pct_change: revPct } });
+  return res.status(200).json({ flags, metros, techs, totals, estimate_funnel: estimateFunnel, revenue: { this_week: Math.round(revCur), trailing_weekly_avg: Math.round(revAvgWeekly), pct_change: revPct } });
 }
 const SEVERITY_ORDER = { high: 0, med: 1, low: 2, good: 3 };
 
