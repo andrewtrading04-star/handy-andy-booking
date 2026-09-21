@@ -400,6 +400,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: r.ok, configured: r.configured, status: r.status, error: r.ok ? null : (r.body || null) });
       }
       case 'launch_status':        return await launchStatus(req, res, db, auth);
+      case 'launch_traffic':       return await launchTraffic(req, res, db, auth);
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
       case 'launch_market_checklist_set': return await launchMarketChecklistSet(req, res, db, auth, body);
       case 'launch_market_address_set': return await launchMarketAddressSet(req, res, db, auth, body);
@@ -2368,6 +2369,47 @@ async function launchMarketRows(db) {
       url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist, notes,
     };
   }));
+}
+
+// GET ?action=launch_traffic — daily unique sessions for each business's own
+// site over the last 30 days, for the sparkline on every Launch card. Counts
+// page_view events from web_events (same source and bot filter as the market
+// analytics above), one session counted once per day, bucketed in Central time.
+async function launchTraffic(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const DAYS = 30;
+  const TZ = 'America/Chicago';
+  const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: TZ });
+  const days = [];
+  for (let i = DAYS - 1; i >= 0; i--) days.push(dayKey(Date.now() - i * 24 * 60 * 60 * 1000));
+  const since = new Date(Date.now() - (DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: businesses, error } = await db.from('businesses').select('slug, url');
+  if (error) throw error;
+  const pub = serviceClientPublic();
+  const series = {};
+  await Promise.all((businesses || []).map(async (biz) => {
+    let host = '';
+    try { host = new URL(biz.url).hostname.replace(/^www\./, ''); } catch { host = ''; }
+    if (!host) return;
+    try {
+      const rows = await fetchAllPages((cols, opts) =>
+        pub.from('web_events').select(cols || 'session_id, created_at, user_agent', opts)
+          .eq('event_type', 'page_view')
+          .ilike('page_url', `%${host}%`)
+          .gte('created_at', since), { maxPages: 12 });
+      const perDay = new Map(days.map(d => [d, new Set()]));
+      for (const r of rows) {
+        if (isBotUserAgent(r.user_agent)) continue;
+        const set = perDay.get(dayKey(r.created_at));
+        if (set) set.add(r.session_id);
+      }
+      series[biz.slug] = days.map(d => perDay.get(d).size);
+    } catch (e) {
+      series[biz.slug] = null; // unknown, not zero
+    }
+  }));
+  return res.status(200).json({ days, series });
 }
 
 async function launchStatus(req, res, db, auth) {

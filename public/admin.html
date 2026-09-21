@@ -7673,6 +7673,34 @@ function launchContactHtml(b){
   if(!bits.length) return '';
   return `<div style="font-size:11px;color:var(--mute);margin-top:2px;">${bits.join(' &middot; ')}</div>`;
 }
+// ── Launch traffic sparkline ─────────────────────────────────────────────────
+// Daily unique sessions on each business's own site, last 30 days. Fetched once
+// per Launch load (launch_traffic) and drawn as a small line chart inside every
+// card; cards re-render from this cache, so ticking a box never refetches.
+let _launchTraffic=null; // { days:[...], series:{slug:[n x30]|null} }
+function launchSparkHtml(slug){
+  if(!_launchTraffic) return '<div style="font-size:11px;color:var(--mute);">Loading traffic…</div>';
+  const pts=_launchTraffic.series&&_launchTraffic.series[slug];
+  if(!pts) return '<div style="font-size:11px;color:var(--mute);">Traffic unavailable</div>';
+  const W=300,H=44,P=3,n=pts.length,max=Math.max(1,...pts),total=pts.reduce((a,b)=>a+b,0);
+  const x=i=>P+(n>1?i*(W-2*P)/(n-1):0), y=v=>H-P-(v/max)*(H-2*P);
+  const line=pts.map((v,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const area=`${line} L${x(n-1).toFixed(1)},${H-P} L${x(0).toFixed(1)},${H-P} Z`;
+  const first=_launchTraffic.days[0]||'', last=_launchTraffic.days[n-1]||'';
+  return `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mute);margin-bottom:2px;"><span>Daily sessions · 30 days</span><span><b style="color:var(--ink-2);">${total}</b> total · peak ${Math.max(0,...pts)}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;" role="img" aria-label="Daily sessions, ${esc(first)} to ${esc(last)}: ${total} total">
+      <path d="${area}" fill="rgba(37,99,235,0.10)"/>
+      <path d="${line}" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+}
+async function loadLaunchTraffic(){
+  try{
+    _launchTraffic=await api('launch_traffic',{timeoutMs:45000});
+  }catch(e){
+    _launchTraffic={days:[],series:{}};
+  }
+  document.querySelectorAll('[data-launch-spark]').forEach(el=>{ el.innerHTML=launchSparkHtml(el.dataset.launchSpark); });
+}
 function launchCardHtml(b, items){
   const { passed, total, blocked } = launchScoreOf(b, items);
   const nextText = esc(launchNextAction(b, items));
@@ -7688,6 +7716,7 @@ function launchCardHtml(b, items){
         ${launchContactHtml(b)}
       </div>
     </div>
+    <div class="launch-spark" data-launch-spark="${esc(b.slug)}" style="margin-top:10px;">${launchSparkHtml(b.slug)}</div>
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${nextInner}</p>
     <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
     <div class="launch-detail" style="display:none;"></div>
@@ -7821,6 +7850,7 @@ async function renderLaunch(){
   catch(e){ if(request!==_launchRequest||!onScreen('launch'))return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="launchRetry">Try again</button></div>`;view.querySelector('#launchRetry').addEventListener('click',renderLaunch); return; }
   if(request!==_launchRequest||!onScreen('launch'))return;
 
+  loadLaunchTraffic(); // refreshes on every visit; fills the sparklines when it lands
   const items=data.items||[];
   const businesses=data.businesses||[];
   const marketItems=data.marketItems||[];
@@ -8128,7 +8158,7 @@ function renderPayrollData(d){
     <details class="ap-lg" style="margin-bottom:14px;">
       <summary style="cursor:pointer; font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px;">Lead-gen brands <span id="apLgSum" style="color:var(--ink); text-transform:none; letter-spacing:0; font-size:14px;">${payFmtUSD(ap.lead_gen_total||0)}</span></summary>
       <div style="display:flex; gap:10px 20px; flex-wrap:wrap; margin-top:10px;">
-        ${(businesses||[]).filter(b=>!OWN_CHIP_SLUGS.includes(b.slug)).sort((a,b)=>(a.slug==='mile-high'?-1:0)-(b.slug==='mile-high'?-1:0)||String(a.name).localeCompare(String(b.name))).map(b=>`<div style="min-width:250px;">
+        ${(businesses||[]).filter(b=>!OWN_CHIP_SLUGS.includes(b.slug)).sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(b=>`<div style="min-width:250px;">
           <div style="font-size:12px; color:var(--mute); margin-bottom:4px;">${esc(b.name)}</div>
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="color:var(--mute);">$</span>
@@ -8142,7 +8172,6 @@ function renderPayrollData(d){
     <div style="border-top:1px solid var(--line); padding-top:10px;">
       <div style="font-size:12px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.5px;">Total I made</div>
       <div id="apTotalMade" style="font-size:22px; font-weight:800; color:var(--ink);">${ap.total_made!=null?payFmtUSD(ap.total_made):'—'}</div>
-      <div id="apMath" style="font-size:12.5px; color:var(--mute); margin-top:2px;">${ap.total_made!=null?`${payFmtUSD(ap.doms_stripe_payout)} Dom's + ${payFmtUSD(ap.handy_andy_stripe_payout)} Handy Andy + ${payFmtUSD(ap.lead_gen_total||0)} lead-gen brands − ${payFmtUSD(ap.tech_pay)} tech pay`:''}</div>
     </div>
   </div>`;
   const wireActualProfit = () => {
@@ -8153,10 +8182,7 @@ function renderPayrollData(d){
       // Lead-gen brands: blank = $0, summed into one figure.
       let lg=0; content.querySelectorAll('.ap-lg-input').forEach(i=>{ const n=Number(i.value); if(i.value!==''&&!isNaN(n)) lg+=n; });
       const lgEl=document.getElementById('apLgSum'); if(lgEl) lgEl.textContent=payFmtUSD(lg);
-      const okAll=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp));
-      totalEl.textContent=okAll ? payFmtUSD(ds+ha+lg-tp) : '—';
-      const mathEl=document.getElementById('apMath');
-      if(mathEl) mathEl.textContent=okAll ? `${payFmtUSD(ds)} Dom's + ${payFmtUSD(ha)} Handy Andy + ${payFmtUSD(lg)} lead-gen brands − ${payFmtUSD(tp)} tech pay` : '';
+      totalEl.textContent=(ds!=null&&ha!=null&&tp!=null&&!isNaN(ds)&&!isNaN(ha)&&!isNaN(tp)) ? payFmtUSD(ds+ha+lg-tp) : '—';
     };
     content.querySelectorAll('.ap-input,.ap-lg-input').forEach(inp=>inp.addEventListener('input', recalcApTotal));
     content.querySelectorAll('.ap-lg-save').forEach(btn=>{
@@ -13814,7 +13840,7 @@ function paintEstimates(){
     if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
     const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
     const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
-    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email&&!e.customer_phone?' · <b style="color:#b45309;">No phone or email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email?' · <b style="color:#b45309;">No email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
     // wire controls
@@ -18781,12 +18807,12 @@ async function renderCallWiz(){
     // reluctant caller for a name and two contact details to hear a number is
     // how the estimate gets lost entirely — so one way to reach them is all
     // that's required, and it goes out on whichever they gave.
-    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. Would a text or an email be easier?")}
+    body.innerHTML=`${callWizScript("No problem at all — I can send the estimate over. What's the best email for it? I'll text it too if you like.")}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(draft.estimateContact.phone)}">
         <input class="search" id="cwEmail" style="margin:0;" placeholder="Email" value="${esc(draft.estimateContact.email)}">
       </div>
-      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Text is best.</b> Ask every caller for a mobile number to text the estimate to. An email is a nice extra. One is enough to send.</div>
+      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Ask every caller for an email</b>, even if they take the text. One is enough to send. No email means we cannot follow up by email later.</div>
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>${TEXTS_ON_LABEL}</span></label>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
