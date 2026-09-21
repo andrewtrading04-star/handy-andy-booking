@@ -1614,14 +1614,8 @@
   .ins-cities{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
   .ins-city{ border:1px solid var(--line); border-radius:12px; padding:14px 10px; text-align:center; }
   .ins-city h4{ font-size:14px; font-weight:800; } .ins-city small{ display:block; font-size:11.5px; color:var(--mute); margin:2px 0 6px; }
-  .ins-ring{ position:relative; width:84px; height:84px; margin:0 auto 6px; }
-  .ins-ring svg{ width:84px; height:84px; transform:rotate(-90deg); display:block; }
-  .ins-ring circle{ fill:none; }
-  .ins-ring-track{ stroke:#f0f3f8; stroke-width:7; }
-  .ins-ring-week{ stroke-width:7; stroke-linecap:round; stroke:var(--accent); }
-  .ins-ring-week.good{ stroke:var(--ins-good); } .ins-ring-week.bad{ stroke:var(--ins-bad); }
-  .ins-ring-usual{ stroke:#202c43; stroke-width:2; opacity:.4; }
-  .ins-ring b{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:800; }
+  .ins-big{ font-size:34px; font-weight:800; line-height:1.1; margin:6px 0 2px; }
+  .ins-big.good{ color:var(--ins-good); } .ins-big.bad{ color:var(--ins-bad); }
   .ins-quiet{ margin-top:12px; padding:10px 12px; border:1px dashed var(--line); border-radius:8px; font-size:12.5px; color:var(--mute); }
   .ins-tw{ overflow-x:auto; } .ins-tw table{ min-width:560px; }
   /* On a phone the table scrolls sideways; keep the tech name pinned so the flagged
@@ -5838,13 +5832,6 @@ function insDelta(p, usual){
   if(p==null) return `<span class="ins-delta flat">no trend yet</span>`;
   return `<span class="ins-delta ${insTone(p,usual)}">${p>0?'&#9650; +':p<0?'&#9660; ':''}${p}%</span>`;
 }
-function insRingSvg(week, usual, tone){
-  const R=36, C=2*Math.PI*R, R2=27, C2=2*Math.PI*R2, top=Math.max(week, usual, 1);
-  return `<svg viewBox="0 0 84 84" aria-hidden="true"><circle class="ins-ring-track" cx="42" cy="42" r="${R}"/>`
-    +(week>0?`<circle class="ins-ring-week ${tone}" cx="42" cy="42" r="${R}" stroke-dasharray="${(C*week/top).toFixed(2)} ${C.toFixed(2)}"/>`:'')
-    +(usual>0?`<circle class="ins-ring-usual" cx="42" cy="42" r="${R2}" stroke-dasharray="${(C2*usual/top).toFixed(2)} ${C2.toFixed(2)}"/>`:'')
-    +`</svg>`;
-}
 function insightsStripHtml(d){
   const metros=d.metros||[], techs=d.techs||[];
   const week=metros.reduce((n,m)=>n+(Number(m.bookings_this_week)||0),0);
@@ -5894,11 +5881,12 @@ function insightsCitiesHtml(metros){
     const p=m.pct_change==null?null:m.pct_change, tone=insTone(p,us(m));
     const label=`${m.name}: ${wk(m)} bookings this week, usual ${us(m)}${p==null?'':`, ${p>0?'up':p<0?'down':'flat'} ${Math.abs(p)}%`}`;
     return `<div class="ins-city" data-ins-city="${esc(m.name)}" role="group" aria-label="${esc(label)}">
-      <div class="ins-ring">${insRingSvg(wk(m),us(m),tone)}<b>${wk(m)}</b></div>
-      <h4>${esc(m.name)}</h4><small>usual ${us(m)}/wk</small>${insDelta(p,us(m))}
+      <h4>${esc(m.name)}</h4>
+      <div class="ins-big ${tone}">${wk(m)}</div>
+      <small>this week &middot; usual ${us(m)}/wk</small>${insDelta(p,us(m))}
     </div>`;
   };
-  return `<div class="section card"><h2 class="ins-h">Cities <small>thick ring = this week &middot; thin ring = usual week</small></h2>
+  return `<div class="section card"><h2 class="ins-h">Cities <small>bookings this week vs a usual week</small></h2>
     ${live.length?`<div class="ins-cities">${live.map(card).join('')}</div>`:`<div class="empty">No bookings in any city yet.</div>`}
     ${quiet.length?`<p class="ins-quiet">${quiet.length} cit${quiet.length===1?'y':'ies'} with no bookings yet: ${quiet.map(m=>esc(m.name)).join(', ')}</p>`:''}
   </div>`;
