@@ -5944,7 +5944,13 @@ async function analyticsOverview(req, res, db, auth) {
     if (tag) tagToBiz.set(tag, b);
   }
 
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Range picker (owner, 2026-09-21): last 7 days, last 30 days, or all time.
+  // The field names below still end in _30d for the older client; they now mean
+  // "in the chosen range". All time starts 2026-06-01, before any tracker data.
+  const rangeParam = ['7', '30', 'all'].includes(String(req.query.range || '30')) ? String(req.query.range || '30') : '30';
+  const ALL_SINCE = '2026-06-01T00:00:00.000Z';
+  const rangeDays = rangeParam === '7' ? 7 : rangeParam === 'all' ? Math.max(30, Math.ceil((Date.now() - Date.parse(ALL_SINCE)) / 86400000)) : 30;
+  const since = rangeParam === 'all' ? ALL_SINCE : new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString();
   const stats = new Map(); // tag -> { n30, lastSeen }
   if (tagToBiz.size) {
     const pub = serviceClientPublic();
@@ -6051,7 +6057,7 @@ async function analyticsOverview(req, res, db, auth) {
   // Dense, zero-filled 30-day axis so a quiet day reads as a real zero in the
   // sparkline instead of being compressed out of the line entirely.
   const dayKeys = [];
-  for (let i = 29; i >= 0; i--) dayKeys.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+  for (let i = rangeDays - 1; i >= 0; i--) dayKeys.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
 
   // ── Multi-market businesses ───────────────────────────────────────────────
   // One domain covering several metros (today only ihandyandy.com) is really
@@ -6094,7 +6100,7 @@ async function analyticsOverview(req, res, db, auth) {
           pub.from('web_events').select(cols || 'session_id, page_url, created_at, user_agent', opts)
             .eq('event_type', 'page_view')
             .ilike('page_url', `%${host}%`)
-            .gte('created_at', since), { maxPages: 12 });
+            .gte('created_at', since), { maxPages: rangeParam === 'all' ? 60 : 12 });
         for (const r of pvRows) {
           if (isBotUserAgent(r.user_agent)) continue;
           let path;
@@ -6215,7 +6221,7 @@ async function analyticsOverview(req, res, db, auth) {
           has_traffic_backend: true, has_gsc: false,
           events_30d: events,
           visitors_30d: v,
-          avg_visitors_day: Math.round((v / 30) * 10) / 10,
+          avg_visitors_day: Math.round((v / rangeDays) * 10) / 10,
           visitors_by_day: dayKeys.map(d => (byDay.get(d) ? byDay.get(d).size : 0)),
           book_visits_30d: bookVisitors.size,
           book_by_day: dayKeys.map(d => (bookByDay.get(d) ? bookByDay.get(d).size : 0)),
@@ -6250,7 +6256,7 @@ async function analyticsOverview(req, res, db, auth) {
       visitors_30d: visitors30,
       // Averaged over the full 30-day window, not just days with traffic, so a
       // site that saw one visitor on one day reads as 0.0/day rather than 1/day.
-      avg_visitors_day: Math.round((visitors30 / 30) * 10) / 10,
+      avg_visitors_day: Math.round((visitors30 / rangeDays) * 10) / 10,
       visitors_by_day: s ? dayKeys.map(d => (s.byDay.get(d) ? s.byDay.get(d).size : 0)) : dayKeys.map(() => 0),
       // Booking page: people who actually opened the widget, and what came of it.
       book_visits_30d: s ? s.bookVisitors.size : 0,
@@ -6284,7 +6290,7 @@ async function analyticsOverview(req, res, db, auth) {
   const bookings_by_day_total = dayKeys.map((_, i) => businesses.reduce((n, b) => n + b.bookings_by_day[i], 0));
 
   return res.status(200).json({
-    businesses, since, days: dayKeys,
+    businesses, since, days: dayKeys, range: rangeParam, range_days: rangeDays,
     totals: {
       visitors_30d: visitors_30d_total,
       book_visits_30d: book_visits_30d_total,

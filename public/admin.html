@@ -5857,11 +5857,17 @@ function drawInsights(){
     drawInsights();
   }));
 }
+// Range picker: last 7 days / last 30 days / all time. The server field names
+// still end in _30d; they mean "in the chosen range".
+let anaOverviewRange='30';
+const ANA_RANGES={ '7':'Last 7 days', '30':'Last 30 days', all:'All time' };
+function anaRangeNoun(){ return anaOverviewRange==='all'?'all time':anaOverviewRange==='7'?'last 7 days':'last 30 days'; }
+function anaRangeDaysText(){ return anaOverviewRange==='all'?'the whole period since tracking began':anaOverviewRange==='7'?'the full 7 days':'the full 30 days'; }
 async function renderAnalyticsOverview(){
   const view=document.getElementById('view');
   view.innerHTML=`<div class="ana"><div class="loading">Loading…</div></div>`;
   try{
-    const d=await api('analytics_overview');
+    const d=await api('analytics_overview',{ params:{ range:anaOverviewRange }});
     anaOverviewData=d.businesses||[];
     anaOverviewTotals=d.totals||null;
     anaOverviewDays=d.days||[];
@@ -5948,7 +5954,7 @@ function anaSpark(series){
   const last=pts[pts.length-1];
   const peak=max.toLocaleString();
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img"
-    aria-label="Visitors per day over the last 30 days, peak ${peak}" style="display:block;overflow:visible;">
+    aria-label="Visitors per day, ${anaRangeNoun()}, peak ${peak}" style="display:block;overflow:visible;">
     <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"
       stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="var(--accent)"/>
@@ -5967,7 +5973,7 @@ function bookedTooltip(b){
 }
 function anaOverviewSubtitle(shownCount,totalVisitors){
   const base=`${shownCount} site${shownCount===1?'':'s'} & markets`+(anaOverviewSearch.trim()?` matching "${anaOverviewSearch.trim()}"`:'')+
-    ` · last 30 days · ${totalVisitors.toLocaleString()} visitors across the portfolio · sorted by ${(ANA_OV_COLS.find(c=>c.key===anaOverviewSort.key)||{label:'visitors'}).label.toLowerCase()}${anaOverviewSort.dir==='desc'?' (high to low)':' (low to high)'}`;
+    ` · ${anaRangeNoun()} · ${totalVisitors.toLocaleString()} visitors across the portfolio · sorted by ${(ANA_OV_COLS.find(c=>c.key===anaOverviewSort.key)||{label:'visitors'}).label.toLowerCase()}${anaOverviewSort.dir==='desc'?' (high to low)':' (low to high)'}`;
   return base;
 }
 // Body-only render so the search box can repaint on every keystroke without
@@ -6040,7 +6046,10 @@ function drawAnaOverview(){
   view.innerHTML=`<div class="ana">
     <div class="ana-head"><div><h1>Analytics</h1>
       <div class="ana-sub" id="anaOvSub">${esc(anaOverviewSubtitle(rows.length,totalVisitors))}</div></div>
-      <input class="search" type="search" id="anaOverviewSearch" placeholder="Search businesses…" value="${esc(anaOverviewSearch)}" style="width:220px;margin:0;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div class="rc-seg" role="group" aria-label="Date range">${Object.entries(ANA_RANGES).map(([k,l])=>`<button type="button" class="rc-seg-btn ${anaOverviewRange===k?'on':''}" aria-pressed="${anaOverviewRange===k}" data-anarange="${k}">${l}</button>`).join('')}</div>
+        <input class="search" type="search" id="anaOverviewSearch" placeholder="Search businesses…" value="${esc(anaOverviewSearch)}" style="width:220px;margin:0;">
+      </div>
     </div>
     <div class="grid kpis" style="grid-template-columns:repeat(4,1fr);">
       ${tile('','All businesses',anaOverviewData.length)}
@@ -6051,7 +6060,7 @@ function drawAnaOverview(){
     <div class="section card" id="anaBookChartWrap" style="padding:16px 18px;">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:2px;">
         <div>
-          <div style="font-weight:700;font-size:15px;">Booking page, last 30 days</div>
+          <div style="font-weight:700;font-size:15px;">Booking page, ${anaRangeNoun()}</div>
           <div style="font-size:12px;color:var(--mute);margin-top:2px;">
             Everything else on this page is upstream of this line.
           </div>
@@ -6107,7 +6116,7 @@ function drawAnaOverview(){
       <div style="font-weight:700;color:var(--ink);margin-bottom:6px;">What these columns mean</div>
       <div><b>Visitors</b> — distinct people, not clicks. One person browsing the
         booking widget can fire 20+ events, and someone who comes back next week
-        still counts once. <b>Avg/day</b> divides by the full 30 days, so a site
+        still counts once. <b>Avg/day</b> divides by ${anaRangeDaysText()}, so a site
         with a single visitor on a single day reads 0.0, not 1.0.</div>
       <div style="margin-top:5px;"><b>Reached /book</b> — people who actually
         opened the booking widget, deduped, so reloading the page does not
@@ -6146,6 +6155,10 @@ function drawAnaOverview(){
   </div>`;
   // Click a column to sort by it. Same column again reverses; a new column
   // starts descending for counts (biggest first) and ascending for names.
+  view.querySelectorAll('[data-anarange]').forEach(el=>el.addEventListener('click',()=>{
+    if(anaOverviewRange===el.dataset.anarange) return;
+    anaOverviewRange=el.dataset.anarange; renderAnalyticsOverview();
+  }));
   view.querySelectorAll('[data-anasort]').forEach(el=>el.addEventListener('click',()=>{
     const key=el.dataset.anasort;
     const col=ANA_OV_COLS.find(c=>c.key===key);
