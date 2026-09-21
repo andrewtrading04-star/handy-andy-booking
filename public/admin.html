@@ -10428,7 +10428,7 @@ async function renderPhoneDesk(){
   let h='<div class="cap-wrap">';
   h+=`<div class="pd-rules"><b>Phone desk rules for this week</b><ol>
     <li>Close on the call. An estimate is the exception, not the default.</li>
-    <li>Ask the widget's add-on questions on every TV call: bracket, hiding wires, soundbar, second TV.</li>
+    <li>Ask the widget's add-on questions on every TV call: bracket, hiding wires, second TV.</li>
     <li>Every quote goes out in writing within 5 minutes. Ask for an email address on every call.</li>
     <li>Callers who did not book: call back about 3 hours later and again the next morning.</li>
     <li>Call open estimates under 14 days old first. Close the ones over 30 days old.</li></ol></div>`;
@@ -10442,13 +10442,12 @@ async function renderPhoneDesk(){
       `<div class="cap-chip pd-chip"><b>${pdMoney(l4.avg_ticket)}</b><span>Average phone ticket</span>${pdDelta(l4.avg_ticket,bs.avg_ticket)}</div>`+
       `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.bracket_pct)}</b><span>Phone bracket rate</span><small class="flat">form: ${pdPct(f.last8.bracket_pct)}</small></div>`+
       `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.inwall_pct)}</b><span>Phone in-wall rate</span><small class="flat">form: ${pdPct(f.last8.inwall_pct)}</small></div>`+
-      `<div class="cap-chip pd-chip"><b>${pdPct(p.last8.soundbar_pct)}</b><span>Phone soundbar rate</span><small class="flat">form: ${pdPct(f.last8.soundbar_pct)}</small></div>`+
     '</div>';
-    h+='<div class="cap-h">Week by week</div><div class="avb-scroll"><table class="cap-table pd-table"><thead><tr><th>Week of</th><th class="num">Phone jobs</th><th class="num">Phone sales</th><th class="num">Avg ticket</th><th class="num">Bracket</th><th class="num">In-wall</th><th class="num">Soundbar</th><th class="num">Form jobs</th><th class="num">Form ticket</th></tr></thead><tbody>'+
+    h+='<div class="cap-h">Week by week</div><div class="avb-scroll"><table class="cap-table pd-table"><thead><tr><th>Week of</th><th class="num">Phone jobs</th><th class="num">Phone sales</th><th class="num">Avg ticket</th><th class="num">Bracket</th><th class="num">In-wall</th><th class="num">Form jobs</th><th class="num">Form ticket</th></tr></thead><tbody>'+
       p.weeks.map((w,i)=>{
         const fw=f.weeks[i]||{};
         const l=capDayLabel(w.start);
-        return `<tr class="${w.current?'cur':''}"><td>${esc(l.md)}${w.current?' · this week':''}</td><td class="num">${w.jobs}</td><td class="num">${pdMoney(w.sales)}</td><td class="num">${pdMoney(w.avg_ticket)}</td><td class="num">${pdPct(w.bracket_pct)}</td><td class="num">${pdPct(w.inwall_pct)}</td><td class="num">${pdPct(w.soundbar_pct)}</td><td class="num">${fw.jobs==null?'–':fw.jobs}</td><td class="num">${pdMoney(fw.avg_ticket)}</td></tr>`;
+        return `<tr class="${w.current?'cur':''}"><td>${esc(l.md)}${w.current?' · this week':''}</td><td class="num">${w.jobs}</td><td class="num">${pdMoney(w.sales)}</td><td class="num">${pdMoney(w.avg_ticket)}</td><td class="num">${pdPct(w.bracket_pct)}</td><td class="num">${pdPct(w.inwall_pct)}</td><td class="num">${fw.jobs==null?'–':fw.jobs}</td><td class="num">${pdMoney(fw.avg_ticket)}</td></tr>`;
       }).join('')+'</tbody></table></div>';
     const e=b.estimates;
     h+=`<div class="cap-h">Estimates, last 90 days</div><div class="cap-chips">`+

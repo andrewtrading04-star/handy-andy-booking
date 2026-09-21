@@ -55,9 +55,8 @@ assert.equal(wk.avg_ticket, 260);
 assert.equal(wk.tv_jobs, 2);
 assert.equal(wk.bracket_pct, 50);                 // p1 yes, p2 own-bracket line does not count
 assert.equal(wk.inwall_pct, 50);
-assert.equal(wk.soundbar_pct, 0);
 const fw = ha.form.weeks.find(w => w.start === addDaysStr(sunday, -7));
-assert.equal(fw.jobs, 1); assert.equal(fw.bracket_pct, 100); assert.equal(fw.soundbar_pct, 100);
+assert.equal(fw.jobs, 1); assert.equal(fw.bracket_pct, 100);
 assert.equal(ha.estimates.open, 2);
 assert.equal(ha.estimates.open_quoted, 135 + 100 + 300);
 assert.equal(ha.estimates.buckets[0].count, 1);

@@ -11,8 +11,9 @@
 //   sales   = price + tip of a non-cancelled job scheduled in the week
 //   week    = Sunday-first, in America/Denver
 //   TV job  = a job with a TV-size line item
-//   add-on  = a line with money on it: bracket (tilt/full motion/fixed/flat),
-//             in-wall wire hiding, soundbar
+//   add-on  = a line with money on it: bracket (tilt/full motion/fixed/flat)
+//             or in-wall wire hiding. Soundbars are deliberately NOT tracked:
+//             the customer either has one or does not, it is not an upsell.
 import { localDateStr, dayOfWeekFor, todayStr } from './availability.js';
 import { addDaysStr } from './time.js';
 
@@ -25,25 +26,24 @@ const RE_SIZE = /\d{2}\s*["“”″–-]|\binch\b/i;
 const RE_BRACKET = /tilt|full.?motion|fixed|flat/i;
 const RE_OWN_BRACKET = /\bown\b|customer|in the box|comes with|bring/i;
 const RE_INWALL = /behind the wall|in-?wall/i;
-const RE_SOUNDBAR = /soundbar/i;
 
 const sundayOf = (ds) => addDaysStr(ds, -dayOfWeekFor(ds));
 const rate = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
 
-function blank() { return { jobs: 0, sales: 0, tv_jobs: 0, bracket: 0, inwall: 0, soundbar: 0 }; }
+function blank() { return { jobs: 0, sales: 0, tv_jobs: 0, bracket: 0, inwall: 0 }; }
 function fin(a) {
   return {
     jobs: a.jobs, sales: Math.round(a.sales),
     avg_ticket: a.jobs ? Math.round(a.sales / a.jobs) : null,
     tv_jobs: a.tv_jobs,
-    bracket_pct: rate(a.bracket, a.tv_jobs), inwall_pct: rate(a.inwall, a.tv_jobs), soundbar_pct: rate(a.soundbar, a.tv_jobs),
+    bracket_pct: rate(a.bracket, a.tv_jobs), inwall_pct: rate(a.inwall, a.tv_jobs),
   };
 }
 function add(a, j) {
   a.jobs++; a.sales += j.sales;
-  if (j.tv) { a.tv_jobs++; if (j.bracket) a.bracket++; if (j.inwall) a.inwall++; if (j.soundbar) a.soundbar++; }
+  if (j.tv) { a.tv_jobs++; if (j.bracket) a.bracket++; if (j.inwall) a.inwall++; }
 }
-function merge(list) { const a = blank(); for (const x of list) { a.jobs += x.jobs; a.sales += x.sales; a.tv_jobs += x.tv_jobs; a.bracket += x.bracket; a.inwall += x.inwall; a.soundbar += x.soundbar; } return a; }
+function merge(list) { const a = blank(); for (const x of list) { a.jobs += x.jobs; a.sales += x.sales; a.tv_jobs += x.tv_jobs; a.bracket += x.bracket; a.inwall += x.inwall; } return a; }
 
 // Money on the estimate = sum of qty * unit_price across its line items.
 function quoteOf(est) {
@@ -79,12 +79,11 @@ export async function phoneDesk(db) {
       .select('booking_id, name, line_total').in('booking_id', ids.slice(i, i + 150));
     if (lErr) throw lErr;
     for (const l of (li || [])) {
-      const f = flags.get(l.booking_id) || { tv: false, bracket: false, inwall: false, soundbar: false };
+      const f = flags.get(l.booking_id) || { tv: false, bracket: false, inwall: false };
       const name = String(l.name || ''), paid = Number(l.line_total) > 0;
       if (RE_SIZE.test(name)) f.tv = true;
       if (paid && RE_BRACKET.test(name) && !RE_OWN_BRACKET.test(name)) f.bracket = true;
       if (paid && RE_INWALL.test(name)) f.inwall = true;
-      if (paid && RE_SOUNDBAR.test(name)) f.soundbar = true;
       flags.set(l.booking_id, f);
     }
   }
@@ -97,7 +96,7 @@ export async function phoneDesk(db) {
     const ch = b.source === 'manual' ? 'phone' : 'form';
     const date = localDateStr(TZ, b.scheduled_at);
     const f = flags.get(b.id) || {};
-    const j = { sales: (Number(b.price) || 0) + (Number(b.tip) || 0), tv: !!f.tv, bracket: !!f.bracket, inwall: !!f.inwall, soundbar: !!f.soundbar };
+    const j = { sales: (Number(b.price) || 0) + (Number(b.tip) || 0), tv: !!f.tv, bracket: !!f.bracket, inwall: !!f.inwall };
     const bucket = get(slug, ch);
     const ws = sundayOf(date);
     if (!bucket.weeks.has(ws)) bucket.weeks.set(ws, blank());
@@ -159,7 +158,7 @@ export async function phoneDesk(db) {
   return {
     generated_at: new Date().toISOString(),
     baseline: { from: BASE_FROM, to: BASE_TO },
-    note: 'Phone = jobs entered by the office (Heather, Joey, Admin). Form = jobs booked on the website. Weeks are Sunday to Saturday, Denver time, counted by the day the work is scheduled. Add-on rates are the share of TV jobs with a paid bracket, in-wall wire hiding, or soundbar line.',
+    note: 'Phone = jobs entered by the office (Heather, Joey, Admin). Form = jobs booked on the website. Weeks are Sunday to Saturday, Denver time, counted by the day the work is scheduled. Add-on rates are the share of TV jobs with a paid bracket or in-wall wire hiding line.',
     brands,
   };
 }
