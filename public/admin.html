@@ -309,6 +309,34 @@
   .avpill.on{color:#fff;}
   .avpill.exc{box-shadow:0 0 0 2px #fff,0 0 0 3px var(--amber);}
 
+  /* Analytics > Capacity: idle tech time and open slots, by city */
+  .cap-wrap{padding:16px 18px;max-width:1100px;}
+  .cap-note{font-size:12.5px;color:var(--mute);margin:0 0 14px;line-height:1.5;}
+  .cap-city{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:18px;}
+  .cap-city h3{margin:0 0 4px;font-size:20px;font-weight:800;color:var(--ink);}
+  .cap-sub{font-size:12.5px;color:var(--mute);margin-bottom:12px;}
+  .cap-chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;}
+  .cap-chip{background:#f6f8fb;border:1px solid var(--line2);border-radius:10px;padding:9px 13px;min-width:130px;}
+  .cap-chip b{display:block;font-size:22px;font-weight:800;color:var(--ink);line-height:1.15;}
+  .cap-chip span{font-size:11.5px;color:var(--mute);font-weight:700;text-transform:uppercase;letter-spacing:.4px;}
+  .cap-chip.hot b{color:#b45309;} .cap-chip.good b{color:#15803d;} .cap-chip.bad b{color:#b91c1c;}
+  .cap-h{font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px;}
+  .cap-table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  .cap-table th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--mute);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);}
+  .cap-table td{padding:7px 8px;border-bottom:1px solid var(--line2);}
+  .cap-table tr.cur td{background:#f0f6ff;font-weight:700;}
+  .cap-table tr.fut td{color:var(--mute);}
+  .cap-bar{display:inline-block;height:9px;border-radius:5px;background:#e7ebf0;width:110px;vertical-align:middle;margin-right:8px;overflow:hidden;}
+  .cap-bar i{display:block;height:100%;background:var(--accent);}
+  .cap-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;}
+  .cap-day{border:1px solid var(--line2);border-radius:9px;padding:7px 8px;text-align:center;background:#fff;}
+  .cap-day small{display:block;font-size:11px;color:var(--mute);font-weight:700;}
+  .cap-day b{font-size:17px;font-weight:800;}
+  .cap-day.open{background:#f0faf3;border-color:#bfe5c9;} .cap-day.open b{color:#15803d;}
+  .cap-day.full{background:#fff1f1;border-color:#f5c2c2;} .cap-day.full b{color:#b91c1c;}
+  .cap-day.none{background:#f6f7f9;} .cap-day.none b{color:#aeb7c3;}
+  @media (max-width:640px){ .cap-days{grid-template-columns:repeat(4,minmax(0,1fr));} .cap-bar{width:60px;} }
+
   /* generic content (bookings / customers / technicians render here) */
   .wrap{padding:16px 18px;max-width:1100px;}
   .section-title{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;font-weight:700;}
@@ -10294,6 +10322,7 @@ const CALL_TABS=[
 const HANDYMAN_SLUGS = new Set(['handy-andy', 'doms', 'austin']);
 const ANALYTICS_TABS=[
   { id:'insights', label:'Insights', screen:'insights', show:()=>role==='owner', render:()=>renderInsights() },
+  { id:'capacity', label:'Capacity', screen:'capacity', show:()=>role==='owner', render:()=>renderCapacity() },
   { id:'overview', label:'Overview', screen:'analyticsoverview', show:()=>role==='owner', render:()=>renderAnalyticsOverview() },
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
@@ -10367,6 +10396,70 @@ async function renderCallHub(){
 }
 async function renderAnalyticsHub(){
   await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); });
+}
+
+// ── Analytics > Capacity: idle tech time and open slots, by city ───────────────
+// Read-only. api/_lib/capacity.js does the math; this only lays it out.
+let _capReq=0, capData=null;
+function capDayLabel(ds){
+  const d=new Date(ds+'T12:00:00Z');
+  return { dow:d.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short'}), md:d.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric'}) };
+}
+function capWhen(fo){
+  if(!fo) return 'None in 14 days';
+  const d=capDayLabel(fo.date);
+  const slot=fo.slot_key?((capData.slots.find(s=>s.key===fo.slot_key)||{}).label||'').split(' – ')[0]:'';
+  const when=fo.days_out===0?'Today':fo.days_out===1?'Tomorrow':d.dow+' '+d.md;
+  return when+(slot?' · '+slot:'');
+}
+async function renderCapacity(){
+  const view=document.getElementById('view');
+  const req=++_capReq;
+  if(!capData) view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{
+    const d=await api('capacity_overview');
+    if(req!==_capReq || !onScreen('capacity')) return;
+    capData=d;
+  }catch(err){ if(req===_capReq) view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; return; }
+  const cities=capData.cities||[];
+  if(!cities.length){ view.innerHTML='<div class="wrap"><div class="empty">No active technicians.</div></div>'; return; }
+  const utilClass=u=>u==null?'':u<30?'bad':u<60?'hot':'good';
+  let h='<div class="cap-wrap">';
+  h+=`<p class="cap-note"><b>Idle time</b> is bookable slots a tech offered but nobody booked. A slot is one of the five arrival windows. Denver counts Handy Andy and Dom's techs together, since they share one crew. ${esc(capData.note||'')}</p>`;
+  cities.forEach(c=>{
+    const l4=c.last4||{}, avgIdle=l4.weeks?Math.round(l4.idle/l4.weeks):0, avgOff=l4.weeks?Math.round(l4.offered/l4.weeks):0;
+    h+=`<div class="cap-city"><h3>${esc(c.name)}</h3><div class="cap-sub">${c.techs.map(t=>esc(t.name)+(t.status==='off'?' (off)':'')).join(', ')}</div>`;
+    h+='<div class="cap-chips">'+
+      `<div class="cap-chip ${utilClass(l4.util)}"><b>${l4.util==null?'–':l4.util+'%'}</b><span>Slots used, last 4 wks</span></div>`+
+      `<div class="cap-chip"><b>${avgIdle}</b><span>Idle slots / week</span></div>`+
+      `<div class="cap-chip"><b>${avgOff}</b><span>Offered / week</span></div>`+
+      `<div class="cap-chip ${c.first_open&&c.first_open.days_out>2?'hot':''}"><b style="font-size:16px;">${esc(capWhen(c.first_open))}</b><span>First open slot</span></div>`+
+      `<div class="cap-chip ${c.full_days.length?'bad':'good'}"><b>${c.full_days.length}</b><span>Full days, next 14</span></div>`+
+    '</div>';
+
+    h+='<div class="cap-h">Open slots, next 14 days</div><div class="cap-days">'+c.next.map(x=>{
+      const l=capDayLabel(x.date);
+      const cls=x.offered===0?'none':x.open===0?'full':'open';
+      const tip=x.offered===0?'Nobody offered':x.open+' open of '+x.offered+' offered';
+      return `<div class="cap-day ${cls}" title="${esc(tip)}"><small>${esc(l.dow)} ${esc(l.md)}</small><b>${x.offered===0?'–':x.open}</b><small>${x.offered===0?'no one':'of '+x.offered}</small></div>`;
+    }).join('')+'</div>';
+
+    h+='<div class="cap-h">Week by week</div><div class="avb-scroll"><table class="cap-table"><thead><tr><th>Week of</th><th>Offered</th><th>Used</th><th>Idle</th><th>Used %</th></tr></thead><tbody>'+
+      c.weeks.map(w=>{
+        const l=capDayLabel(w.start);
+        const cls=w.state==='current'?'cur':w.state==='future'?'fut':'';
+        const tag=w.state==='current'?' · this week':w.state==='future'?' · booked so far':'';
+        return `<tr class="${cls}"><td>${esc(l.md)}${tag}</td><td>${w.offered}</td><td>${w.used}</td><td>${w.idle}</td>`+
+          `<td><span class="cap-bar"><i style="width:${w.util||0}%"></i></span>${w.util==null?'–':w.util+'%'}</td></tr>`;
+      }).join('')+'</tbody></table></div>';
+
+    h+='<div class="cap-h">By technician, last 4 weeks</div><div class="avb-scroll"><table class="cap-table"><thead><tr><th>Tech</th><th>Offered</th><th>Used</th><th>Idle</th><th>Used %</th></tr></thead><tbody>'+
+      c.per_tech.map(t=>`<tr><td><b>${esc(t.name)}</b>${t.status==='off'?' <span class="avb-offtag">OFF</span>':''}</td><td>${t.offered}</td><td>${t.used}</td><td>${t.idle}</td><td>${t.util==null?'–':t.util+'%'}</td></tr>`).join('')+
+      '</tbody></table></div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  view.innerHTML=h;
 }
 // days/offset per the auditReport API: offset shifts the window back in whole
 // days (0 = ending today), days is the window size. Today and Yesterday are
