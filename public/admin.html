@@ -18660,6 +18660,20 @@ async function renderCallWiz(){
       }else{
         head=callWizScript('Do you have a promo code?');
       }
+      // Yes or no first. No skips straight to the next step; Yes opens the code box.
+      if(!committed && !callWiz._couponHas){
+        body.innerHTML=`${clawback()}${head}
+          <div style="display:flex;gap:8px;">
+            <button type="button" id="cwNoCode" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">No</button>
+            <button type="button" id="cwHasCode" class="btn" style="flex:1;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;">Yes</button>
+          </div>
+          ${cwBackBtnHtml('Back')}`;
+        cwWireLadderCommon(body);
+        cwOn('cwNoCode','click',()=>cwAdvance(cwNextRung()));
+        cwOn('cwHasCode','click',()=>{ callWiz._couponHas=true; renderCallWiz(); });
+        cwWireLadderBack();
+        return;
+      }
       body.innerHTML=`${clawback()}${head}
         ${secTitle('Promo code they read out')}
         <div style="display:flex;gap:6px;margin-bottom:6px;">
@@ -18692,7 +18706,7 @@ async function renderCallWiz(){
     }else if(moved && cents){
       head=callWizScript(`The absolute best I can do is ${cwMoneyCents(cwCloseTotal())} before tax.`);
     }else{
-      head=callWizScript('Let me see what else I have on this one, hang on one second.');
+      head=callWizScript('Let me see how much room we have on this one. Hang on for just a second.');
     }
     body.innerHTML=`${clawback()}${head}
       ${secTitle(room>0?'You can give a discount as much as '+cwMoney(room):'You are at the floor. There is nothing left to give on this job.')}
