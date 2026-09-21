@@ -21,7 +21,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { GRASSHOPPER_LINES, prettyPhone } from './_lib/grasshopper.js';
-import { localDateStartUTC, localDateTimeUTC, addDaysStr } from './_lib/time.js';
+import { localDateStartUTC, localDateTimeUTC, addDaysStr, localDayStartUTC } from './_lib/time.js';
 
 // Grasshopper always displays call times in Central, regardless of which
 // market the line serves (Denver, Austin and Houston lines all show Central
@@ -87,6 +87,7 @@ export default async function handler(req, res) {
     switch (action) {
       case 'day':          return await day(req, res, db, auth);
       case 'week':         return await week(req, res, db, auth);
+      case 'conversion':   return await conversion(req, res, db);
       case 'day_save':     return await daySave(req, res, db, auth, body);
       case 'audit_save':   return await auditSave(req, res, db, auth, body);
       case 'audit_delete': return await auditDelete(req, res, db, auth, body);
@@ -96,6 +97,37 @@ export default async function handler(req, res) {
     console.error('[audit]', action, e);
     return res.status(500).json({ error: e.message || 'Server error' });
   }
+}
+
+// The two secretaries' 7-day conversion, for the bars at the top of the portal.
+// Same rules as the secretary's own greeting card (api/admin.js myCallPerformance):
+// live script-taken calls only, an opened-and-abandoned greet screen is not a call.
+// Counts and percentages only. No money, no customer names.
+const SECRETARIES = [
+  { slug: 'handy-andy', business: 'Handy Andy', name: process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather' },
+  { slug: 'doms',       business: "Dom's",      name: process.env.DOMS_SECRETARY_NAME || 'Joey' },
+];
+async function conversion(req, res, db) {
+  const people = [];
+  for (const s of SECRETARIES) {
+    const { data: b } = await db.from('businesses').select('id, timezone').eq('slug', s.slug).limit(1);
+    const biz = b && b[0];
+    if (!biz) continue;
+    const tz = biz.timezone || 'America/Denver';
+    const windowFor = async (offset) => {
+      const since = localDayStartUTC(tz, offset - 6), until = localDayStartUTC(tz, offset + 1);
+      const { data, error } = await db.from('calls').select('booking_id, resolution, reached_step')
+        .eq('business_id', biz.id).eq('kind', 'live').eq('handled_by', s.name)
+        .gte('occurred_at', since.toISOString()).lt('occurred_at', until.toISOString());
+      if (error) throw error;
+      const rows = (data || []).filter(r => !!r.booking_id || !!r.resolution || (r.reached_step && r.reached_step !== 'greet'));
+      const booked = rows.filter(r => !!r.booking_id || r.resolution === 'booked').length;
+      return { calls: rows.length, booked, conversion: rows.length ? Math.round((booked / rows.length) * 1000) / 10 : 0 };
+    };
+    const [thisWeek, lastWeek] = await Promise.all([windowFor(0), windowFor(-7)]);
+    people.push({ name: s.name, business: s.business, tz, thisWeek, lastWeek });
+  }
+  return res.status(200).json({ people });
 }
 
 async function login(req, res, body) {

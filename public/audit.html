@@ -230,6 +230,19 @@
     .dtp.open .dtp-back{display:block;position:fixed;inset:0;background:rgba(20,26,34,.5);z-index:60;}
     .dtp-head,.dtp-foot{padding-left:6px;padding-right:6px;}
   }
+  .conv-wrap{display:grid;gap:12px;margin:0 0 14px;}
+  .conv-card{background:linear-gradient(135deg,#243041,#0b1220);border-radius:14px;padding:18px 22px;color:#fff;display:grid;grid-template-columns:180px minmax(0,1fr);align-items:center;column-gap:32px;row-gap:14px;}
+  .conv-who{grid-column:1/-1;font-family:ui-monospace,monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#fff;opacity:.9;}
+  .conv-eyebrow{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#fff;opacity:.92;}
+  .conv-pct{font-family:ui-monospace,monospace;font-size:40px;font-weight:700;letter-spacing:-.025em;line-height:1;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .conv-stats{display:flex;justify-content:space-evenly;gap:20px;flex-wrap:wrap;}
+  .conv-stat{display:flex;flex-direction:column;gap:5px;}
+  .conv-lab{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:#fff;opacity:.72;white-space:nowrap;}
+  .conv-val{font-family:ui-monospace,monospace;font-size:17px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;}
+  .conv-track{grid-column:1/-1;height:9px;border-radius:5px;background:rgba(0,0,0,.28);}
+  .conv-fill{height:100%;border-radius:5px;}
+  .conv-foot{grid-column:1/-1;font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:#fff;opacity:.72;}
+  @media (max-width:600px){.conv-card{grid-template-columns:1fr;gap:12px;}.conv-pct{font-size:34px;}.conv-stats{gap:12px;justify-content:center;}}
 </style>
 </head>
 <body>
@@ -256,6 +269,9 @@
         <button class="btn ghost" id="outBtn">Sign out</button>
       </div>
     </div>
+
+    <!-- Secretary conversion -->
+    <div class="conv-wrap" id="convWrap"></div>
 
     <!-- Stat tiles -->
     <div class="tiles">
@@ -1257,6 +1273,32 @@ $('fCall').onchange=()=>{
 $('fLine').onchange=renderScore;
 $('fSvc').onchange=renderScore;
 
+// Same colour ramp as the secretary's own card: red at or below 25%, amber near
+// 40%, green from 50% up.
+function convHue(p){
+  if(p<=25) return 2;
+  if(p<=40) return 2+(p-25)/15*50;
+  if(p<=50) return 52+(p-40)/10*100;
+  return 152;
+}
+function renderConversion(d){
+  const wrap=$('convWrap'); if(!wrap) return;
+  wrap.innerHTML=((d&&d.people)||[]).map(p=>{
+    const tw=p.thisWeek, lw=p.lastWeek, pc=Number(tw.conversion)||0;
+    const h=convHue(pc), color='hsl('+h+' 70% 56%)', glow='hsl('+h+' 70% 56% / .45)';
+    const prev=lw&&lw.calls?Number(lw.conversion)||0:null;
+    let delta='';
+    if(prev!=null){ const dl=Math.round((pc-prev)*10)/10; delta='<div class="conv-stat"><span class="conv-lab">vs last week</span><span class="conv-val" style="color:'+(dl>=0?'#5ef0a0':'#ff9b9b')+';">'+(dl>=0?'+':'')+dl.toFixed(1)+' pts</span></div>'; }
+    return '<div class="conv-card"><div class="conv-who">'+esc(p.name)+' · '+esc(p.business)+'</div>'
+      +'<div><div class="conv-eyebrow">Conversion · 7 day</div><div class="conv-pct" style="color:'+color+';">'+pc.toFixed(1)+'%</div></div>'
+      +'<div class="conv-stats"><div class="conv-stat"><span class="conv-lab">Calls received</span><span class="conv-val">'+tw.calls+'</span></div>'
+      +'<div class="conv-stat"><span class="conv-lab">Calls booked</span><span class="conv-val">'+tw.booked+'</span></div>'+delta+'</div>'
+      +'<div class="conv-track"><div class="conv-fill" style="width:'+Math.max(0,Math.min(100,pc))+'%;background:'+color+';box-shadow:0 0 9px 1px '+glow+',0 0 22px 3px '+glow+';"></div></div>'
+      +'<div class="conv-foot">7-day rolling</div></div>';
+  }).join('');
+}
+async function loadConversion(){ try{ renderConversion(await api('conversion')); }catch(_){ const w=$('convWrap'); if(w) w.innerHTML=''; } }
+
 async function load(){
   const date=$('date').value;
   if(!date) return;
@@ -1270,7 +1312,7 @@ async function load(){
     ]);
     data=d; weekData=w;
     $('who').textContent=data.auditor+' · '+new Date(date+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
-    renderLines(); renderAudits(); renderDashboard();
+    renderLines(); renderAudits(); renderDashboard(); loadConversion();
     $('formCard').classList.add('hidden');
   }catch(e){ $('dayErr').textContent=e.message; }
 }
