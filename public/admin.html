@@ -7766,6 +7766,51 @@ function launchMarketCardHtml(m, items){
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
+// ── Hub map drawing ──────────────────────────────────────────────────────────
+// The ring around a city hub: one arc per status, sized by how many of the
+// city's businesses are in it. The SVG is rotated -90deg in CSS so arcs start
+// at 12 o'clock.
+function launchHubRingSvg(n){
+  const R=70, C=2*Math.PI*R, total=n.live+n.progress+n.blocked;
+  let at=0, arcs='';
+  for(const st of ['live','progress','blocked']){
+    if(!n[st]) continue;
+    const len=C*n[st]/total;
+    arcs+=`<circle data-launch-status="${st}" cx="74" cy="74" r="${R}" fill="none" stroke="var(--c)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${Math.max(len-(n[st]===total?0:4),1)} ${C}" stroke-dashoffset="${-at}"/>`;
+    at+=len;
+  }
+  return `<svg viewBox="0 0 148 148" aria-hidden="true"><circle cx="74" cy="74" r="${R}" fill="none" stroke="#eef1f6" stroke-width="6"/>${arcs}</svg>`;
+}
+// One wire per card, from the hub's edge to the card's header. Wide: curves
+// fan out left and right. Narrow (the MAP's width, not the window's, since the
+// sidebar eats space): hub sits on top and a trunk drops down with a branch to
+// each card. Dashes animate toward the hub because the path starts there.
+function launchDrawWires(root){
+  root.querySelectorAll('.launch-hub-map').forEach(map=>{
+    if(!map.offsetParent) return;
+    const narrow=map.clientWidth<720;
+    map.classList.toggle('is-narrow',narrow);
+    const m=map.getBoundingClientRect(), h=map.querySelector('.launch-hub').getBoundingClientRect();
+    const cx=h.left-m.left+h.width/2, cy=h.top-m.top+h.height/2, r=h.width/2;
+    let out='';
+    map.querySelectorAll('.launch-card').forEach(card=>{
+      const k=card.getBoundingClientRect(), ey=k.top-m.top+Math.min(k.height/2,34);
+      let d, ex;
+      if(narrow){
+        ex=k.left-m.left;
+        d=`M${cx} ${cy+r} L${cx} ${ey-10} Q${cx} ${ey} ${cx+10} ${ey} L${ex} ${ey}`;
+      }else{
+        ex = k.left+k.width/2 < h.left+r ? k.right-m.left : k.left-m.left;
+        const a=Math.atan2(ey-cy,ex-cx), sx=cx+r*Math.cos(a), sy=cy+r*Math.sin(a), mx=(sx+ex)/2;
+        d=`M${sx} ${sy} C${mx} ${sy} ${mx} ${ey} ${ex} ${ey}`;
+      }
+      out+=`<g data-launch-status="${card.dataset.launchStatus||''}"><path class="launch-wire-base" d="${d}"/><path class="launch-wire" d="${d}"/><circle class="launch-wire-end" cx="${ex}" cy="${ey}" r="4"/></g>`;
+    });
+    map.querySelector('.launch-wires').innerHTML=out;
+  });
+}
+let _launchCity='All';
+let _launchWireObserver=null;
 let _launchRequest=0;
 async function renderLaunch(){
   const view=document.getElementById('view');
@@ -7786,58 +7831,83 @@ async function renderLaunch(){
   // "launch entries" — each carries its own card-renderer and city, so the
   // completed/incomplete split and the city grouping below don't need to know
   // which kind of thing they're looking at.
-  const scoredBiz=businesses.map(b=>({ s:launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) }));
-  const scoredMarket=markets.map(m=>({ s:launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) }));
-  const all=[...scoredBiz, ...scoredMarket];
+  // `score` is a function, not a snapshot: ticking a box changes it, and sync()
+  // below re-reads it to recolour the card, its wire, the hub ring and the tiles.
+  const entries=[
+    ...businesses.map(b=>({ sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
+    ...markets.map(m=>({ sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
+  ];
+  const statusOf=s=>s.blocked ? 'blocked' : (s.passed===s.total ? 'live' : 'progress');
 
-  const isReady=x=>!x.s.blocked && x.s.passed===x.s.total;
-  const blockedCount=all.filter(x=>x.s.blocked).length;
-  const readyCount=all.filter(isReady).length;
-  const progressCount=all.filter(x=>!isReady(x) && !x.s.blocked).length;
+  // Hub map: each city is a hub and its businesses feed into it. A market whose
+  // city isn't in LAUNCH_CITY_ORDER still gets a hub, after the known ones.
+  const byCity={};
+  for(const x of entries) (byCity[x.city]=byCity[x.city]||[]).push(x);
+  const cities=[...LAUNCH_CITY_ORDER.filter(c=>byCity[c]), ...Object.keys(byCity).filter(c=>!LAUNCH_CITY_ORDER.includes(c))];
+  if(!cities.includes(_launchCity)) _launchCity='All';
 
-  // Both sections group by city now — completed AND incomplete — so a city's
-  // work-in-progress lives right below its finished businesses instead of
-  // getting scattered into one long incomplete list with everything else.
-  const groupByCity=(list)=>{
-    const byCity={};
-    for(const x of list) (byCity[x.city]=byCity[x.city]||[]).push(x);
-    return byCity;
-  };
-  const completed=all.filter(isReady);
-  const incomplete=all.filter(x=>!isReady(x));
-  const completedByCity=groupByCity(completed);
-  const incompleteByCity=groupByCity(incomplete);
-
-  const statTile=(label,value)=>`<div class="ch-stat"><span>${esc(label)}</span><strong>${value}</strong></div>`;
-  const grid=(html)=>`<div class="launch-grid">${html}</div>`;
-
-  const section=(byCity)=>{
-    const cities=LAUNCH_CITY_ORDER.filter(c=>byCity[c] && byCity[c].length);
-    return cities.map(city=>{
-      const rows=byCity[city];
-      return `<div style="margin-bottom:18px;">
-        <p style="font-size:12px;font-weight:800;color:var(--mute);margin:0 0 8px;">${esc(city)} &middot; ${rows.length}</p>
-        ${grid(rows.map(x=>x.html).join(''))}
-      </div>`;
-    }).join('');
+  const hubHtml=(city)=>{
+    const rows=byCity[city], half=Math.ceil(rows.length/2);
+    return `<section class="launch-city" data-launch-city="${esc(city)}"><div class="launch-hub-map">
+      <svg class="launch-wires" aria-hidden="true"></svg>
+      <div class="launch-hub-row"><button type="button" class="launch-hub" data-launch-hub="${esc(city)}"></button><span class="launch-hub-side">${esc(city)}</span></div>
+      <div class="launch-hub-col is-left">${rows.slice(0,half).map(x=>x.html).join('')}</div>
+      <div class="launch-hub-col is-right">${rows.slice(half).map(x=>x.html).join('')}</div>
+    </div></section>`;
   };
 
   view.innerHTML=`<div class="wrap">
-    <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Check each business, clear blockers, and keep launch details in one place.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
-    <div class="launch-stats">
-      ${statTile('Live',readyCount,'var(--green)')}
-      ${statTile('In progress',progressCount,'#f2b84b')}
-      ${statTile('Blocked',blockedCount,'#ff6b6b')}
-      ${statTile('Total',all.length,'#9aa4bd')}
+    <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Each city is a hub. Its businesses feed into it. Open a business to review checks and notes.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
+    <div class="launch-stats"></div>
+    <div class="launch-chips">
+      <button type="button" class="launch-chip" data-launch-filter="All">All cities</button>
+      ${cities.map(c=>`<button type="button" class="launch-chip" data-launch-filter="${esc(c)}"><span class="launch-dot"></span>${esc(c)} &middot; ${byCity[c].length}</button>`).join('')}
     </div>
-    <p style="color:var(--mute);font-size:12.5px;margin:0 0 16px;">
-      Open a business to review checks and notes. Blocked means a payment, email, or booking check needs attention.
-    </p>
-    <h3 class="ch-section-label">Completed &middot; ${completed.length}</h3>
-    ${completed.length ? section(completedByCity) : '<p style="font-size:12px;color:var(--mute);margin:0 0 22px;">None yet.</p>'}
-    <h3 class="ch-section-label">Needs attention &middot; ${incomplete.length}</h3>
-    ${incomplete.length ? section(incompleteByCity) : '<p style="font-size:12px;color:var(--mute);">None.</p>'}
+    ${cities.length ? cities.map(hubHtml).join('') : '<p style="font-size:12px;color:var(--mute);">No businesses yet.</p>'}
   </div>`;
+
+  const statTile=(label,value)=>`<div class="ch-stat"><span>${esc(label)}</span><strong>${value}</strong></div>`;
+  const sync=()=>{
+    const totals={live:0,progress:0,blocked:0}, perCity={};
+    for(const x of entries){
+      const st=statusOf(x.score());
+      totals[st]++;
+      (perCity[x.city]=perCity[x.city]||{live:0,progress:0,blocked:0})[st]++;
+      const card=view.querySelector(x.sel);
+      if(card) card.dataset.launchStatus=st;
+    }
+    view.querySelector('.launch-stats').innerHTML=statTile('Live',totals.live)+statTile('In progress',totals.progress)+statTile('Blocked',totals.blocked)+statTile('Total',entries.length);
+    for(const city of cities){
+      const n=perCity[city], total=byCity[city].length;
+      const worst=n.blocked ? 'blocked' : (n.progress ? 'progress' : 'live');
+      view.querySelectorAll('[data-launch-hub],[data-launch-filter]').forEach(el=>{
+        if((el.dataset.launchHub||el.dataset.launchFilter)!==city) return;
+        el.dataset.launchStatus=worst;
+        if(el.dataset.launchHub){
+          el.innerHTML=`${launchHubRingSvg(n)}<b>${esc(city)}</b><small>${n.live}/${total} live</small>`;
+          el.setAttribute('aria-label',`${city}: ${n.live} of ${total} live, ${n.progress} in progress, ${n.blocked} blocked. Show only ${city}.`);
+        }
+      });
+    }
+    launchDrawWires(view);
+  };
+  const applyFilter=()=>{
+    view.querySelectorAll('[data-launch-city]').forEach(s=>{ s.style.display = (_launchCity==='All'||s.dataset.launchCity===_launchCity) ? '' : 'none'; });
+    view.querySelectorAll('[data-launch-filter]').forEach(c=>c.classList.toggle('on', c.dataset.launchFilter===_launchCity));
+    launchDrawWires(view);
+  };
+  view.querySelectorAll('[data-launch-filter]').forEach(c=>c.addEventListener('click',()=>{ _launchCity=c.dataset.launchFilter; applyFilter(); }));
+  // Clicking a hub isolates its city; clicking it again goes back to all.
+  view.querySelectorAll('[data-launch-hub]').forEach(h=>h.addEventListener('click',()=>{ _launchCity = _launchCity===h.dataset.launchHub ? 'All' : h.dataset.launchHub; applyFilter(); }));
+  sync();
+  applyFilter();
+  // Wires are measured from the DOM, so anything that moves a card (window
+  // resize, a checklist opening, the sidebar collapsing) has to redraw them.
+  if(_launchWireObserver) _launchWireObserver.disconnect();
+  if(window.ResizeObserver){
+    _launchWireObserver=new ResizeObserver(()=>launchDrawWires(view));
+    view.querySelectorAll('.launch-hub-map').forEach(m=>_launchWireObserver.observe(m));
+  }
 
   view.querySelector('#launchRefresh').addEventListener('click',renderLaunch);
   view.querySelectorAll('[data-launch-card]').forEach(card=>{
@@ -7871,6 +7941,7 @@ async function renderLaunch(){
                 const s=launchScoreOf(b, items);
                 card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
                 paint();
+                sync();
               }
               catch(e){ cb.checked=!value; toast(e.message||'Could not save'); cb.disabled=false; }
             });
@@ -7910,6 +7981,7 @@ async function renderLaunch(){
               card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
               const s=launchMarketScoreOf(m, marketItems);
               card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
+              sync();
             }
             catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
             finally{ cb.disabled=false; }

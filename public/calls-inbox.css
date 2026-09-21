@@ -57,6 +57,43 @@
 .launch-score.blocked{color:#b53343;background:#fceff1}
 .launch-workspace .launch-detail input,.launch-workspace .launch-detail textarea{min-width:0;accent-color:#315ad7}
 .launch-workspace .launch-detail label{min-height:40px}
+/* Launch hub map: each city is a hub, its businesses feed in on wires. Status
+   colours are their own tokens because .launch-workspace remaps --green to blue. */
+.launch-workspace{--launch-live:#1f9d57;--launch-progress:#c07a12;--launch-blocked:#b53343}
+[data-launch-status="live"]{--c:var(--launch-live)}[data-launch-status="progress"]{--c:var(--launch-progress)}[data-launch-status="blocked"]{--c:var(--launch-blocked)}
+.launch-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px}
+.launch-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:6px 14px;border:1px solid #dce2ec;border-radius:999px;background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:#536277;cursor:pointer}
+.launch-chip:hover{border-color:#536277}
+.launch-chip.on{background:#202c43;border-color:#202c43;color:#fff}
+.launch-dot{width:8px;height:8px;border-radius:50%;background:var(--c,#dce2ec);flex:none}
+.launch-city{margin:0 0 18px;border:1px solid #dce2ec;border-radius:14px;background:#fff radial-gradient(#e9edf4 1px,transparent 1px) 0 0/18px 18px}
+.launch-hub-map{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 160px minmax(0,1fr);gap:14px 60px;align-items:center;padding:28px 24px}
+.launch-wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.launch-wire{fill:none;stroke:var(--c);stroke-width:2;stroke-linecap:round;stroke-dasharray:3 7;opacity:.9;animation:launch-flow 1.4s linear infinite}
+.launch-wire-base{fill:none;stroke:var(--c);stroke-width:2;opacity:.18}
+.launch-wire-end{fill:#fff;stroke:var(--c);stroke-width:2}
+@keyframes launch-flow{to{stroke-dashoffset:20}}
+.launch-hub-row{grid-column:2;grid-row:1;display:flex;justify-content:center;position:relative;z-index:1}
+.launch-hub-col{display:flex;flex-direction:column;gap:14px;min-width:0;position:relative;z-index:1;grid-row:1}
+.launch-hub-col.is-left{grid-column:1}.launch-hub-col.is-right{grid-column:3}
+.launch-hub{position:relative;width:148px;height:148px;border:0;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font:inherit;color:#202c43;cursor:pointer;box-shadow:0 10px 28px #202c431f;transition:transform 160ms}
+.launch-hub:hover{transform:scale(1.03)}
+.launch-hub svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.launch-hub b{font-size:17px;font-weight:800;line-height:1.1;max-width:108px}
+.launch-hub small{margin-top:4px;font-size:11.5px;font-weight:700;color:#536277}
+.launch-hub-side{display:none}
+.launch-hub-map .launch-card{padding:14px 16px!important;border-left:3px solid var(--c,#dce2ec)!important}
+.launch-card[data-launch-status="progress"] .launch-score:not(.blocked){color:var(--launch-progress);background:#fbf3e4}
+.launch-card[data-launch-status="live"] .launch-score{color:var(--launch-live);background:#e8f6ee}
+.launch-hub-map.is-narrow{display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:16px 14px 16px 16px}
+.is-narrow .launch-hub-row{justify-content:flex-start;align-items:center;gap:12px}
+.is-narrow .launch-hub{width:64px;height:64px;box-shadow:0 4px 12px #202c431f}
+.is-narrow .launch-hub b{display:none}
+.is-narrow .launch-hub small{margin:0;font-size:12px;font-weight:800;color:#202c43}
+.is-narrow .launch-hub-side{display:block;font-size:17px;font-weight:800;color:#202c43}
+.is-narrow .launch-hub-col{margin-left:52px;gap:12px}
+.is-narrow .launch-hub-col:empty{display:none}
+@media(prefers-reduced-motion:reduce){.launch-wire{animation:none}.launch-hub{transition:none}.launch-hub:hover{transform:none}}
 .number-volume{margin:24px 0;padding-bottom:16px;border-bottom:1px solid #dce2ec}
 .number-chart{display:flex;gap:6px;align-items:flex-end;margin:24px 0 12px}
 .number-week{flex:1;min-width:0;text-align:center;color:#536277;font-size:12px}
