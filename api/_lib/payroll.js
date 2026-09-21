@@ -282,6 +282,14 @@ function matchItem(name, lt) {
   if (/\bring\b.*\b(camera|doorbell)\b|\b(camera|doorbell)\b.*\bring\b/i.test(name)) {
     return { key: 'ring device installation', juan: 65, other: 65 };
   }
+  // HARD RULE (owner, 9/21): the OneConnect-box install (customer pays $350) is a
+  // SET price, never hourly: $170 to the tech on EVERY business/job/tech. It can
+  // arrive under any label — the ticket editors used to relabel it "Samsung Frame
+  // TV" — so match on "OneConnect" wording, or a Frame-named line charged >= $300
+  // (a real in-box bracket line never exceeds ~$40).
+  if (/one\s*connect/i.test(name) || (/\bsamsung\s*frame\b/i.test(name) && Number(lt) >= 300)) {
+    return { key: 'oneconnect box', juan: 170, other: 170 };
+  }
   // Hard-coded Frame-TV in-box bracket: flat $15, all techs/jobs/locations.
   if (isFrameInBoxBracket(name, lt)) return { key: 'frame in-box bracket', juan: 15, other: 15 };
   // Wire/cord concealment worded outside the standard keys ("Hide Cords in Wall",
@@ -1173,8 +1181,10 @@ function runSelfTests() {
       { name: '60"-69"', line_total: 119 },
       { name: 'Samsung Frame TV', line_total: 350 },
     ] }), 'Juan');
-    eq(r.pay !== 80 + 15, true, 'mislabeled $350 "Samsung Frame TV" line must NOT resolve to the $15 in-box-bracket rate');
-    eq(r.flags.length > 0, true, 'mislabeled $350 "Samsung Frame TV" line is flagged for owner review');
+    eq(r.pay, 80 + 170, 'mislabeled $350 "Samsung Frame TV" line = OneConnect box = flat $170 (not $15, not hourly)');
+    eq(r.flags.length, 0, 'mislabeled $350 "Samsung Frame TV" line: no review flag');
+    eq(computeJobPay(job({ line_items: [{ name: '60"-69"', line_total: 119 },
+      { name: 'Install OneConnect Box', line_total: 350 }] }), 'Kregg').pay, 70 + 170, 'OneConnect box = $170 for every tech');
   }
   // A genuinely small ($0/$25) Samsung Frame in-box bracket line still gets
   // its flat $15 exactly as before — the price gate only excludes implausibly
