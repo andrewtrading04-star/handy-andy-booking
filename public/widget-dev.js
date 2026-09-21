@@ -639,7 +639,7 @@
     return `
       <div style="text-align:center!important;">
         <p style="${S.sub};text-align:center!important;font-size:15px!important;">Enter your zip code to see if we service your area</p>
-        <input type="text" id="ha-zip" style="${S.input}" placeholder="e.g. 77001" maxlength="5" inputmode="numeric">
+        <input type="text" id="ha-zip" style="${S.input}" placeholder="Enter your zip code" maxlength="5" inputmode="numeric">
         <div style="text-align:center!important;">
           <button id="btn-zip" style="${S.btnPri};padding:12px 36px!important;font-size:16px!important;">Check Area →</button>
         </div>
