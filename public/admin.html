@@ -16612,12 +16612,7 @@ function callWizScript(line, amt){
 // The beat after an offer. The single most common way a concession gets wasted
 // is the secretary talking through the customer's answer and stacking the next
 // discount on top before they have said a word.
-function cwWaitBar(){
-  return `<div style="background:#fdecec;border:1.5px solid #f3c2c2;border-radius:10px;padding:11px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;color:#b91c1c;">
-    <span style="flex-shrink:0;width:22px;height:22px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;" aria-hidden="true">II</span>
-    <span><b style="font-size:15px;font-weight:800;">Wait!</b> <span style="font-size:13.5px;font-weight:700;">Let them speak first.</span></span>
-  </div>`;
-}
+function cwWaitBar(){ return ''; }
 // Operator-facing guidance. NEVER spoken, and visually unmistakable from the
 // script bubble for exactly that reason: "you have $15 left to give" read out
 // loud hands the customer the number to ask for.
@@ -18531,8 +18526,7 @@ async function renderCallWiz(){
       <div style="display:flex;gap:8px;">
         <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
         <button type="button" id="cwYes" class="btn" style="flex:1;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;">${esc(yesLabel||'They said yes')}</button>
-      </div>
-      ${nextLabel?`<div style="font-size:12px;color:var(--mute);text-align:center;margin-top:8px;">If no, next up is ${esc(nextLabel)}.</div>`:''}`;
+      </div>`;
 
     // Always available, on every rung, below a hairline. A customer who says
     // "just email it to me" must never be trapped behind an uncommitted draft.
@@ -18632,12 +18626,12 @@ async function renderCallWiz(){
         head=callWizScript('I hear you. Let me see what I can do for you. How did you hear about us?');
       }
       body.innerHTML=`${clawback()}${head}
-        ${secTitle('Where they heard about us', effSource>0?'-'+cwMoney(effSource):(loading?'':'no money left on this one'))}
+        ${committed?'':`${secTitle('Where they heard about us', effSource>0?'-'+cwMoney(effSource):(loading?'':'no money left on this one'))}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
           ${CW_SOURCES.map(src=>{const on=callWiz.discSource===src;return `<button type="button" data-cwsrc="${esc(src)}" style="font-family:inherit;display:flex;align-items:center;gap:10px;text-align:left;background:${on?'#161b22':'#fff'};border:1.5px solid ${on?'#161b22':'#d9dee6'};border-radius:10px;padding:13px;font-size:15px;font-weight:${on?700:600};color:${on?'#fff':'var(--ink)'};cursor:pointer;min-width:0;">
             <span style="flex-shrink:0;width:19px;height:19px;border-radius:50%;border:2px solid ${on?'#fff':'#d9dee6'};position:relative;display:inline-block;">${on?'<span style="position:absolute;inset:3px;border-radius:50%;background:#fff;display:block;"></span>':''}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(src)}</span></button>`;}).join('')}
-        </div>
+        </div>`}
         ${loading?cwOpNote('Working','Checking what this ticket can give.'):''}
         ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
         ${committed?`${priceCard()}
