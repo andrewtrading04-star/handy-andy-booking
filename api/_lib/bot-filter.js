@@ -44,6 +44,20 @@ const INTERNAL_UA = /(Claude\/|ClaudeSEO|Electron\/|vercel-screenshot|vercel-fav
 const US_TZ = /^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Juneau|Sitka|Nome|Yakutat|Metlakatla|Menominee|Adak|Indianapolis|Louisville|Indiana\/.*|Kentucky\/.*|North_Dakota\/.*)|Pacific\/Honolulu)$/;
 export function isUsTimezone(tz) { return US_TZ.test(String(tz || '')); }
 
+// Blog pages are worthless traffic (owner rule 2026-09-22): never counted for
+// Dom's or Handy Andy. Dom's blog lives under /blog/*; ihandyandy's Blog menu
+// is /blog-posts plus the articles it lists, which sit at the site root.
+// Mirrors public.launch_is_blog_path (migration 0130).
+const BLOG_ROOT_PAGES = new Set([
+  '/dolby-atmos-flexconnect-wireless-surround-sound', '/how-to-connect-tv-to-wifi-without-remote',
+  '/how-to-mount-a-tv-on-a-brick-or-concrete-wall', '/micro-rgb-vs-oled-2026', '/mounting-tv-in-apartment',
+  '/qned-vs-oled', '/tv-above-fireplace-heat', '/tv-height-calculator', '/tv-technology-guide-2026',
+]);
+export function isBlogPath(path) {
+  const p = String(path || '').replace(/\/+$/, '');
+  return /^\/blog(\/|-posts|$)/i.test(p) || BLOG_ROOT_PAGES.has(p);
+}
+
 export function isBotUserAgent(ua) {
   if (!ua) return false; // absent UA stays human: see the conservatism note above
   const s = String(ua);

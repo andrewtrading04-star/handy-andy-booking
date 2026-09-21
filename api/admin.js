@@ -32,7 +32,7 @@ import { enRouteMessage, DEFAULT_ETA_MINUTES } from './_lib/en-route.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { localDayStartUTC, localDateStartUTC, startOfWeekUTC, startOfMonthUTC, addDaysStr } from './_lib/time.js';
-import { isBotUserAgent, isInternalContact, isUsTimezone } from './_lib/bot-filter.js';
+import { isBotUserAgent, isInternalContact, isUsTimezone, isBlogPath } from './_lib/bot-filter.js';
 import { capacityOverview } from './_lib/capacity.js';
 import { phoneDesk } from './_lib/phone-desk.js';
 import { estimateCheckFor, setExcuse } from './_lib/estimate-check.js';
@@ -6198,6 +6198,7 @@ async function analyticsOverview(req, res, db, auth) {
           let path;
           try { path = new URL(r.page_url).pathname.replace(/\/+$/, '') || '/'; }
           catch { continue; }
+          if (isBlogPath(path)) continue; // blog traffic is not counted
           let e = sess.get(r.session_id);
           if (!e) { e = { paths: new Set(), days: new Map(), views: new Map(), last: null }; sess.set(r.session_id, e); }
           e.paths.add(path);
