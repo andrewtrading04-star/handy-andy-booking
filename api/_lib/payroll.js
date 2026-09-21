@@ -803,6 +803,17 @@ export function computeJobPay(job, techName) {
       continue;
     }
 
+    // A TV the business SELLS to the customer ("Samsung 55in 4K smart TV") is a
+    // product the owner paid for, not labor: $0 tech pay (owner rule 2026-09-22).
+    // Without this it fell through to the custom-job branch below and paid the
+    // techs hours off the TV's retail price. Anything about mounting, a stand or
+    // setup is still work and is NOT caught here.
+    if (/\b(samsung|lg|sony|tcl|hisense|vizio|roku|insignia|toshiba|philips|panasonic)\b.*\btv\b|\bsmart\s*tv\b|\b(4k|8k|oled|qled|uhd)\b.*\btv\b/i.test(name)
+        && !/mount|install|stand|set\s*up|setup|hang|assembl|remov|recycl|haul/i.test(name)) {
+      if (lt > 0) flags.push(`TV sold to the customer "${name}" ($${round0(lt)}) — product, $0 tech pay`);
+      continue;
+    }
+
     // Anything else that reached here with a real charge is a CUSTOM JOB (e.g.
     // "Mounting of Dry Erase Board"). All custom work is billed hourly at $85/hr
     // to the customer, so the tech earns $65/hr. Infer the hours from the line
