@@ -1649,6 +1649,8 @@
   .payrep .pr-tbl th.r, .payrep .pr-tbl td.r{ text-align:right; }
   .payrep .pr-tbl tbody td{ padding:10px 13px; border-bottom:1px solid var(--line2); color:var(--ink-2); vertical-align:top; }
   .payrep .pr-tbl tbody tr.z td{ background:#fafbfc; }
+  .payrep .pr-tbl tbody tr[data-pr-job]{ cursor:pointer; }
+  .payrep .pr-tbl tbody tr[data-pr-job]:hover td{ background:var(--accent-soft); }
   .payrep .pr-tbl tr.pr-total td{ background:var(--accent-soft); font-weight:800; color:var(--ink); border-top:1px solid var(--line); border-bottom:none; }
   .payrep .pr-money{ font-weight:700; color:var(--ink); white-space:nowrap; }
   .payrep .pr-name{ font-weight:600; color:var(--ink); }
@@ -2868,6 +2870,31 @@ function renderBadAlerts(alerts){
     if(!el.querySelector('.bad-alert')){ el.classList.add('hidden'); }
     try{ await api('bad_review_dismiss',{ method:'POST', body:{ business:node.dataset.slug, id:node.dataset.id }}); }catch(_){}
   }));
+}
+// Payroll rows open the job in the normal job modal ON TOP of the payroll page —
+// no navigation, so the report and scroll position stay put. A job from the
+// other business temporarily points `current` at that business (the modal's
+// photo/note/edit calls all key off current.slug) and restores it on close.
+document.addEventListener('click', e=>{
+  const tr=e.target.closest && e.target.closest('tr[data-pr-job]');
+  if(tr) openPayrollJob(tr.dataset.prJob, tr.dataset.prSlug);
+});
+async function openPayrollJob(id, slug){
+  const biz=businesses.find(b=>b.slug===slug) || current;
+  if(!biz) return;
+  const prev=current;
+  try{
+    const d=await api('bookings',{ params:{ business:biz.slug, id }});
+    const b=(d.bookings||[])[0];
+    if(!b){ toast('Could not open that job'); return; }
+    if(!current || current.slug!==biz.slug){
+      current=biz;
+      const m=document.getElementById('bkModal');
+      const mo=new MutationObserver(()=>{ if(m.classList.contains('hidden')){ mo.disconnect(); current=prev; } });
+      mo.observe(m,{ attributes:true, attributeFilter:['class'] });
+    }
+    openBooking(b);
+  }catch(e){ current=prev; toast(e.message); }
 }
 async function openAlertJob(slug, id){
   const biz = businesses.find(b=>b.slug===slug);
@@ -8176,7 +8203,7 @@ function renderPayrollData(d){
         const bd = (job.breakdown&&job.breakdown.length)
           ? job.breakdown.map(b=>`${esc(b.label)} ${payFmtUSD(b.amount)}`).join('  ·  ')
           : '—';
-        html+=`<tr class="${i%2?'z':''}">
+        html+=`<tr class="${i%2?'z':''}"${job.id&&!String(job.id).startsWith('bonus-')&&!String(job.id).startsWith('review-bonus-')?` data-pr-job="${esc(job.id)}" data-pr-slug="${esc(job.business_slug||'')}" title="Open this job"`:''}>
           <td style="white-space:nowrap; color:var(--mute);">${esc(job.time)}</td>
           <td><span class="pr-name">${esc(job.customer_name)}</span>${bizBadge(job)}<div class="pr-li">${esc(job.service)}</div></td>
           <td><div class="pr-li" style="margin-top:0;">${bd}</div></td>
