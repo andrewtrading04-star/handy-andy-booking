@@ -2412,8 +2412,9 @@ async function launchTraffic(req, res, db, auth) {
   const zero = () => ({ s: new Array(DAYS).fill(0), v: new Array(DAYS).fill(0) });
   const series = {}, marketSeries = {};
   for (const b of (businesses || [])) {
-    // Dom's and the Handy Andy parent have no single-site tracker key.
-    series[b.slug] = (b.slug === 'doms' || b.slug === 'handy-andy') ? null : (bucket[`site:${siteKeyOf(b.slug)}`] || zero());
+    // The Handy Andy parent has no single-site key (it is charted per location).
+    // Dom's reports to web_events_doms, which the SQL function returns as site 'doms'.
+    series[b.slug] = (b.slug === 'handy-andy') ? null : (bucket[`site:${siteKeyOf(b.slug)}`] || zero());
   }
   for (const m of (markets || [])) {
     marketSeries[m.slug] = marketPath[m.slug] ? (bucket[`path:${marketPath[m.slug]}`] || zero()) : null;
