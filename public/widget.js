@@ -53,8 +53,8 @@
   // below — its own identity, no longer austin's indigo),
   // austinmountingpros is antique brass #8a6a2c, austintvinstall is deep teal
   // #0d7a68 — so widget and site read as one brand.
-  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'tvmountinglosangeles':'#155dfc', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#c9803d', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68', 'houstontvmountingpros':'#c9a25c', 'houstonperfectviewtvmounting':'#1f4fd8' }[BUSINESS] || '#ff6600';
-  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'tvmountinglosangeles':'#60a5fa', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#e0a165', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97', 'houstontvmountingpros':'#e2c37f', 'houstonperfectviewtvmounting':'#3d6bf0' }[BUSINESS] || '#ff9944';
+  const ACCENT       = { 'handy-andy':'#ff6600', 'mile-high':'#1d9e75', 'austin':'#1e56e0', 'precision':'#0288d1', 'tvmountingdenver':'#017aff', 'tvmountinglosangeles':'#155dfc', 'houstonmounting':'#0f766e', 'houstontvinstallation':'#b91c1c', 'tvhanginghouston':'#6d28d9', 'htvmounting':'#166534', 'atxmountpros':'#e8570a', 'atxtvmount':'#c9803d', 'austinmountingpros':'#8a6a2c', 'austintvinstall':'#0d7a68', 'houstontvmountingpros':'#155dfc', 'houstonperfectviewtvmounting':'#1f4fd8' }[BUSINESS] || '#ff6600';
+  const ACCENT_LIGHT = { 'handy-andy':'#ff9944', 'mile-high':'#4ade80', 'austin':'#4d7ef0', 'precision':'#4fc3f7', 'tvmountingdenver':'#4da6ff', 'tvmountinglosangeles':'#60a5fa', 'houstonmounting':'#14b8a6', 'houstontvinstallation':'#ef4444', 'tvhanginghouston':'#8b5cf6', 'htvmounting':'#22c55e', 'atxmountpros':'#fb7a3d', 'atxtvmount':'#e0a165', 'austinmountingpros':'#b8934a', 'austintvinstall':'#2fae97', 'houstontvmountingpros':'#60a5fa', 'houstonperfectviewtvmounting':'#3d6bf0' }[BUSINESS] || '#ff9944';
   // Deep "ink" tones, driven by BUSINESS -- every ${INK}/${INK_DEEP}
   // reference throughout the widget's inline styles (modal header gradients,
   // panel titles, the bracket-diagram SVGs) reads from these two instead of a
@@ -62,9 +62,9 @@
   // not listed keeps the exact original navy (#1a2f6b/#12224f) byte-for-byte
   // via the || default, so their live embeds are visually unchanged. Only the
   // four Austin lead-gen quad brands get their own deep tones.
-  const INK      = { 'tvmountinglosangeles':'#0f172b', 'atxmountpros':'#7c2d12', 'atxtvmount':'#2b2b30', 'austinmountingpros':'#4a3a18', 'austintvinstall':'#0b3d36', 'houstontvmountingpros':'#1f1d19', 'houstonperfectviewtvmounting':'#101826' }[BUSINESS] || '#1a2f6b';
-  const INK_DEEP = { 'tvmountinglosangeles':'#020618', 'atxmountpros':'#5a1f0c', 'atxtvmount':'#18181c', 'austinmountingpros':'#2f2410', 'austintvinstall':'#07271f', 'houstontvmountingpros':'#131210', 'houstonperfectviewtvmounting':'#0a1020' }[BUSINESS] || '#12224f';
-  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'tvmountinglosangeles':'21,93,252', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'201,128,63', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104', 'houstontvmountingpros':'201,162,92', 'houstonperfectviewtvmounting':'31,79,216' }[BUSINESS] || '255,102,0';
+  const INK      = { 'tvmountinglosangeles':'#0f172b', 'atxmountpros':'#7c2d12', 'atxtvmount':'#2b2b30', 'austinmountingpros':'#4a3a18', 'austintvinstall':'#0b3d36', 'houstontvmountingpros':'#0f172b', 'houstonperfectviewtvmounting':'#101826' }[BUSINESS] || '#1a2f6b';
+  const INK_DEEP = { 'tvmountinglosangeles':'#020618', 'atxmountpros':'#5a1f0c', 'atxtvmount':'#18181c', 'austinmountingpros':'#2f2410', 'austintvinstall':'#07271f', 'houstontvmountingpros':'#020618', 'houstonperfectviewtvmounting':'#0a1020' }[BUSINESS] || '#12224f';
+  const ACCENT_RGB   = { 'handy-andy':'255,102,0', 'mile-high':'29,158,117', 'austin':'30,86,224', 'precision':'2,136,209', 'tvmountingdenver':'1,122,255', 'tvmountinglosangeles':'21,93,252', 'houstonmounting':'15,118,110', 'houstontvinstallation':'185,28,28', 'tvhanginghouston':'109,40,217', 'htvmounting':'22,101,52', 'atxmountpros':'232,87,10', 'atxtvmount':'201,128,63', 'austinmountingpros':'138,106,44', 'austintvinstall':'13,122,104', 'houstontvmountingpros':'21,93,252', 'houstonperfectviewtvmounting':'31,79,216' }[BUSINESS] || '255,102,0';
   // Hardcoded fallback ONLY for the business this widget shipped with, so a
   // stripe_config fetch failure can never break the live Handy Andy widget.
   // Every other business has no fallback -- ensureStripe() must fetch its real
@@ -165,7 +165,7 @@
   // deliberately the one dark Austin widget: it's the specialist/hard-installs
   // brand, and the dark charcoal surface (T_DARK) is what separates it from
   // its three light-card siblings at a glance.
-  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'tvmountinglosangeles' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall' || BUSINESS === 'houstonperfectviewtvmounting') ? T_LIGHT : T_DARK;
+  const T = (BUSINESS === 'austin' || BUSINESS === 'precision' || BUSINESS === 'tvmountingdenver' || BUSINESS === 'tvmountinglosangeles' || BUSINESS === 'houstonmounting' || BUSINESS === 'houstontvinstallation' || BUSINESS === 'tvhanginghouston' || BUSINESS === 'htvmounting' || BUSINESS === 'atxmountpros' || BUSINESS === 'austinmountingpros' || BUSINESS === 'austintvinstall' || BUSINESS === 'houstonperfectviewtvmounting' || BUSINESS === 'houstontvmountingpros') ? T_LIGHT : T_DARK;
 
   // ── Native booking mode ───────────────────────────────────────────────────
   // The widget always books through the CRM's own service-area / slots / book

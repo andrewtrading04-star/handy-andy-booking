@@ -198,7 +198,7 @@ export const EMAIL_BRANDS = {
   'houstontvinstallation': { slug: 'houstontvinstallation', name: 'Houston TV Installation',  accent: '#0288D1', website: 'houstontvinstallation.com' },
   'tvhanginghouston':      { slug: 'tvhanginghouston',      name: 'TV Hanging Houston',       accent: '#0288D1', website: 'tvhanginghouston.com' },
   'htvmounting':           { slug: 'htvmounting',           name: 'HTV Mounting',             accent: '#0288D1', website: 'htvmounting.com' },
-  'houstontvmountingpros':   { slug: 'houstontvmountingpros',   name: 'H-Town TV Mounting',       accent: '#c9a25c', website: 'houstontvmountingpros.com' },
+  'houstontvmountingpros':   { slug: 'houstontvmountingpros',   name: 'H-Town TV Mounting',       accent: '#155DFC', website: 'houstontvmountingpros.com' },
   'houstonperfectviewtvmounting': { slug: 'houstonperfectviewtvmounting', name: 'PerfectView TV Mounting', accent: '#1f4fd8', website: 'houstonperfectviewtvmounting.com' },
   // Austin lead-gen quad: accents match each site's own --accent token
   // (app/globals.css in each <slug>-site repo) so the email, widget and site
