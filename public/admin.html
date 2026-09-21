@@ -7709,11 +7709,19 @@ function launchSparkHtml(key){
       ${dots}${ticks}
     </svg>`;
 }
+function launchTrafficTotal(key){
+  if(!_launchTraffic||!key) return -1;
+  const d=key.startsWith('m:') ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key];
+  return d ? d.s.reduce((p,c)=>p+c,0) : -1;
+}
 async function loadLaunchTraffic(){
   if(_launchTraffic && Date.now()-_launchTrafficAt<120000) return; // cards already drew from the cache
   try{
     _launchTraffic=await api('launch_traffic',{timeoutMs:30000});
     _launchTrafficAt=Date.now();
+    // Cards are ordered by traffic, so repaint once it is known, unless a
+    // checklist is open (a repaint would close it).
+    if(_launchLastData && onScreen('launch') && !document.querySelector('.launch-open[aria-expanded="true"]')){ _launchFresh=_launchLastData; renderLaunch(); return; }
   }catch(e){
     if(!_launchTraffic) _launchTraffic={days:[],series:{},marketSeries:{}};
   }
@@ -7865,7 +7873,7 @@ function launchDrawWires(root){
 let _launchCity='All';
 let _launchWireObserver=null;
 let _launchRequest=0;
-let _launchFresh=null;
+let _launchFresh=null, _launchLastData=null;
 async function renderLaunch(){
   const view=document.getElementById('view');
   const request=++_launchRequest;
@@ -7891,6 +7899,7 @@ async function renderLaunch(){
   catch(e){ if(request!==_launchRequest||!onScreen('launch'))return; view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div><button type="button" class="rc-btn ghost" id="launchRetry">Try again</button></div>`;view.querySelector('#launchRetry').addEventListener('click',renderLaunch); return; }
   if(request!==_launchRequest||!onScreen('launch'))return;
 
+  _launchLastData=data;
   loadLaunchTraffic(); // refreshes on every visit; fills the sparklines when it lands
   const items=data.items||[];
   const businesses=data.businesses||[];
@@ -7905,8 +7914,8 @@ async function renderLaunch(){
   // `score` is a function, not a snapshot: ticking a box changes it, and sync()
   // below re-reads it to recolour the card, its wire, the hub ring and the tiles.
   const entries=[
-    ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
-    ...markets.map(m=>({ sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
+    ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ traffic:b.slug, sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
+    ...markets.map(m=>({ traffic:'m:'+m.slug, sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
   ];
   const statusOf=s=>s.blocked ? 'blocked' : (s.passed===s.total ? 'live' : 'progress');
 
@@ -7918,12 +7927,14 @@ async function renderLaunch(){
   if(!cities.includes(_launchCity)) _launchCity='All';
 
   const hubHtml=(city)=>{
-    const rows=byCity[city], half=Math.ceil(rows.length/2);
+    // Busiest first (30-day sessions), dealt left-right so the top row of a hub
+    // is its two busiest sites. Before traffic has loaded the order is as-is.
+    const rows=_launchTraffic ? [...byCity[city]].sort((a,b)=>launchTrafficTotal(b.traffic)-launchTrafficTotal(a.traffic)) : byCity[city];
     return `<section class="launch-city" data-launch-city="${esc(city)}"><div class="launch-hub-map">
       <svg class="launch-wires" aria-hidden="true"></svg>
       <div class="launch-hub-row"><button type="button" class="launch-hub" data-launch-hub="${esc(city)}"></button><span class="launch-hub-side">${esc(city)}</span></div>
-      <div class="launch-hub-col is-left">${rows.slice(0,half).map(x=>x.html).join('')}</div>
-      <div class="launch-hub-col is-right">${rows.slice(half).map(x=>x.html).join('')}</div>
+      <div class="launch-hub-col is-left">${rows.filter((_,i)=>i%2===0).map(x=>x.html).join('')}</div>
+      <div class="launch-hub-col is-right">${rows.filter((_,i)=>i%2===1).map(x=>x.html).join('')}</div>
     </div></section>`;
   };
 
