@@ -24,6 +24,7 @@
 import { sendEmail } from './_lib/email.js';
 import { sendSMS } from './_lib/sms.js';
 import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -99,6 +100,9 @@ export default async function handler(req, res) {
   // EMAILED (a real customer asking a second time must never be lost), just
   // not texted, so a flood can't keep buzzing the owner's phone. This form
   // has no `email` field in its contract, so tracked by ip + phone only.
+  // Sitewide block list: a blocked number is a scammer on every business. Answer
+  // like a success so it learns nothing, and do nothing (no record, no alert).
+  if (await isBlockedPhone(phone)) return res.status(200).json({ ok: true });
   const ip = clientIp(req);
   const repeatSender = overSpeedLimit('la-lead', { ip, phone });
   if (repeatSender) console.warn('[la-lead] over the speed limit — emailed only, not texted', { ip, ...who });

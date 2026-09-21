@@ -335,6 +335,25 @@
   .cap-day.open{background:#f0faf3;border-color:#bfe5c9;} .cap-day.open b{color:#15803d;}
   .cap-day.full{background:#fff1f1;border-color:#f5c2c2;} .cap-day.full b{color:#b91c1c;}
   .cap-day.none{background:#f6f7f9;} .cap-day.none b{color:#aeb7c3;}
+  /* Calls: one card per caller number */
+  .cg-pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
+  .cg-pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;background:#f3f4f6;color:var(--mute);border:1px solid var(--line);}
+  .cg-pill.rec{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;}
+  .cg-pill.vm{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+  .cg-pill.txt{background:#ede9fe;color:#5b21b6;border-color:#c4b5fd;}
+  .cg-pill.blk{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}
+  .cg-pill.cnt{background:#111827;color:#fff;border-color:#111827;}
+  .cg-have{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 14px;}
+  .cg-have>div{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#f9fafb;color:var(--mute);}
+  .cg-have>div b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.4px;}
+  .cg-have>div span{font-size:15px;font-weight:800;}
+  .cg-have>div.on.rec{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
+  .cg-have>div.on.vm{background:#fffbeb;border-color:#fcd34d;color:#92400e;}
+  .cg-have>div.on.txt{background:#f5f3ff;border-color:#c4b5fd;color:#5b21b6;}
+  .cg-blocked{background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:11px 13px;margin:0 0 14px;color:#991b1b;font-size:13.5px;line-height:1.5;}
+  .cg-earlier{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fff;}
+  .cg-earlier .cg-top{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:700;}
+  @media (max-width:640px){ .cg-have{grid-template-columns:1fr;} }
   /* Estimate check (My Call Performance + Analytics > Phone Desk) */
   .ec-box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 18px;}
   .ec-box h3{margin:0 0 4px;font-size:17px;font-weight:800;}
@@ -11411,7 +11430,63 @@ function cwStatusBox(icon,label,on,neutral){
       : 'background:#f3f4f6;color:var(--mute);border:1px solid var(--line);';
   return `<span style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;font-size:12.5px;${style}">${icon} ${esc(label)}</span>`;
 }
-function callCard(r,handled){
+// One card per caller. Every call from the same number (last 10 digits) folds
+// into a single group, newest call first, so a customer who rings five times
+// is one card with a count instead of five. A call with no number stays alone.
+function callerDigitsOf(r){ return String((r&&r.caller_phone)||'').replace(/\D/g,'').slice(-10); }
+function callGroups(rows){
+  const map=new Map(), out=[];
+  for(const r of rows){
+    const d=callerDigitsOf(r);
+    const key=d.length===10?'p'+d:'i'+r.id;
+    let g=map.get(key);
+    if(!g){ g={ key, phone:d.length===10?d:null, rows:[] }; map.set(key,g); out.push(g); }
+    g.rows.push(r);
+  }
+  out.forEach(g=>{
+    g.rows.sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+    g.latest=g.rows[0];
+    g.recordings=g.rows.filter(r=>r.recorded_message).length;
+    g.voicemails=g.rows.filter(r=>r.left_voicemail).length;
+    g.texts=g.latest.text_count||0;
+    g.textsIn=g.latest.text_in||0;
+    g.blocked=g.rows.some(r=>r.blocked);
+    g.open=g.rows.some(r=>!r._handled);
+  });
+  out.sort((a,b)=>a.latest.occurred_at<b.latest.occurred_at?1:-1);
+  return out;
+}
+// What we hold from this caller, as small pills for the list.
+function callPills(g){
+  const p=[];
+  if(g.rows.length>1) p.push(`<span class="cg-pill cnt">${g.rows.length} calls</span>`);
+  if(g.blocked) p.push('<span class="cg-pill blk">🚫 Blocked</span>');
+  if(g.recordings) p.push(`<span class="cg-pill rec">🎙 Recording${g.recordings>1?' ×'+g.recordings:''}</span>`);
+  if(g.voicemails) p.push(`<span class="cg-pill vm">📨 Voicemail${g.voicemails>1?' ×'+g.voicemails:''}</span>`);
+  if(g.texts) p.push(`<span class="cg-pill txt">💬 Text${g.texts>1?' ×'+g.texts:''}</span>`);
+  return p.length?`<div class="cg-pills">${p.join('')}</div>`:'';
+}
+// The detail-side summary: the three things we may have from this caller, each
+// shown even when empty so the office can see at a glance what there is NOT.
+function callHaveBoxes(g){
+  const box=(cls,label,n,txt)=>`<div class="${n?'on ':''}${cls}"><b>${label}</b><span>${n?txt:'None'}</span></div>`;
+  return `<div class="cg-have">
+    ${box('rec','🎙 Recording',g.recordings,g.recordings+(g.recordings===1?' recording':' recordings'))}
+    ${box('vm','📨 Voicemail',g.voicemails,g.voicemails+(g.voicemails===1?' voicemail':' voicemails'))}
+    ${box('txt','💬 Text',g.texts,g.texts+(g.texts===1?' message':' messages')+(g.textsIn?` · ${g.textsIn} from them`:''))}
+  </div>`;
+}
+// A compact row for the older calls folded under the newest one.
+function callEarlierRow(r){
+  const tz=r.tracking_label?shortTrackingLabel(r.tracking_label):'';
+  const line=[r.business?.name, tz?`${tz} line`:null].filter(Boolean).map(esc).join(' · ');
+  const audio=r.recording_url
+    ? `<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+  const tx=r.transcript?`<div style="margin-top:6px;background:var(--line2);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink-2);">${esc(r.transcript)}</div>`:'';
+  return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
+    <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
+}
+function callCard(r,handled,g){
   const isLive=r.kind==='live';
   const isTracked=r.source==='twilio';
 
@@ -11483,6 +11558,10 @@ function callCard(r,handled){
   // back from their own phone. It exists purely to stop two people ringing
   // the same customer: the office kept ringing customers twice because a
   // voicemail Heather was already returning still looked untouched to Joey.
+  // Buttons act on every call in this caller's card that is in the same state
+  // (all the open ones, or all the handled ones), not just the newest.
+  const grpIds=(g?g.rows.filter(x=>!!x._handled===!!handled).map(x=>x.id):[r.id]).join(',');
+  const blockedNow=!!(g?g.blocked:r.blocked);
   const otherHas = r.claim_active && !r.claimed_by_me;
   const claimBtn = !hasPhone ? '' : otherHas
     ? `<button class="rc-call disabled" data-callclaim="${esc(r.id)}" style="border:none;">${esc(r.claimed_by)} is already on this — claim anyway</button>`
@@ -11510,14 +11589,15 @@ function callCard(r,handled){
            </div>`)
     : handled
     ? `<div class="rc-btn-row">
-       <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button>
-       ${hasPhone?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every tracking line">🚫 Block</button>`:''}
+       <button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}" data-callids="${esc(grpIds)}">Reopen</button>
+       ${hasPhone&&!blockedNow?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every business">🚫 Block on every business</button>`:''}
        ${role==='owner'?`<button class="rc-btn ghost" data-calldelete="${esc(r.id)}" title="Permanently remove this call from the log">Delete</button>`:''}</div>`
     : `${claimBtn}${msgBtn}
        <div class="rc-btn-row">
-         <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}">Mark resolved</button>
-         <button class="rc-btn ghost" data-callact="called_back" data-callid="${esc(r.id)}">Log callback</button>
-         <button class="rc-btn ghost" data-callact="ignored" data-callid="${esc(r.id)}">Ignore</button>
+         <button class="rc-btn green" data-callact="resolved" data-callid="${esc(r.id)}" data-callids="${esc(grpIds)}">Mark resolved</button>
+         <button class="rc-btn ghost" data-callact="called_back" data-callid="${esc(r.id)}" data-callids="${esc(grpIds)}">Log callback</button>
+         <button class="rc-btn ghost" data-callact="ignored" data-callid="${esc(r.id)}" data-callids="${esc(grpIds)}">Ignore</button>
+         ${hasPhone&&!blockedNow?`<button class="rc-btn red" data-callblock="${esc(r.id)}" data-callphone="${esc(r.caller_pretty)}" title="Block this number on every business">🚫 Block on every business</button>`:''}
        </div>`;
 
   // The list spans multiple businesses but customer_detail is scoped to the
@@ -11578,6 +11658,12 @@ function callCard(r,handled){
   const durChip = r.duration_sec
     ? `<span style="font-size:12px;font-weight:700;color:var(--mute);background:var(--line2);border-radius:6px;padding:2px 7px;">${esc(callDuration(r.duration_sec))}</span>` : '';
 
+  // A blocked number is a scammer: no callback, no message, no reply. Replace
+  // the follow-up buttons with the verdict (owner can lift it).
+  const blockedActions = blockedNow
+    ? `<div class="rc-meta" style="font-weight:800;color:#b91c1c;text-align:right;">🚫 Blocked</div>
+       ${role==='owner'&&hasPhone?`<div class="rc-btn-row"><button class="rc-btn ghost" data-callunblock="${esc(r.caller_pretty)}" data-callphone="${esc(r.caller_pretty)}">Unblock</button></div>`:''}`
+    : null;
   return `<div class="rc-card" data-call="${esc(r.id)}" style="align-items:flex-start;">
     ${dispIcon}
     <div class="rc-main">
@@ -11589,7 +11675,7 @@ function callCard(r,handled){
     </div>
     <div class="rc-actions">
       <div class="rc-meta" style="text-align:right;font-weight:700;margin-top:0;">${esc(callWhen(r))}</div>
-      ${actions}
+      ${blockedActions||actions}
     </div>
   </div>`;
 }
@@ -11636,20 +11722,27 @@ function callFollowUp(r){
   if(r.status==='called_back') return 'Called back · Follow-up open';
   return 'Needs callback';
 }
-function callInbox(rows){
-  if(_callFocusId && rows.some(r=>r.id===_callFocusId)) _callsSelected=_callFocusId;
-  const selected=rows.find(r=>r.id===_callsSelected)||rows[0];
-  _callsSelected=selected.id;
-  return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a call">
-    ${rows.map(r=>`<button type="button" class="ci-item" data-callselect="${esc(r.id)}" aria-pressed="${r.id===selected.id}">
+function callInbox(groups){
+  if(_callFocusId){ const fg=groups.find(g=>g.rows.some(r=>r.id===_callFocusId)); if(fg) _callsSelected=fg.key; }
+  const selected=groups.find(g=>g.key===_callsSelected)||groups[0];
+  _callsSelected=selected.key;
+  const later=selected.rows.slice(1);
+  return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
+    ${groups.map(g=>{ const r=g.latest; return `<button type="button" class="ci-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
       ${r.customer?`<span>${esc(r.caller_pretty || '')}</span>`:''}
       <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
-      <span>${esc(callWhen(r))}</span><span class="ci-outcome">${esc(callOutcome(r))}</span>
-      <span class="ci-status">${esc(callFollowUp(r))}</span>
+      <span>${g.rows.length>1?'Latest: ':''}${esc(callWhen(r))}</span><span class="ci-outcome">${esc(callOutcome(r))}</span>
+      <span class="ci-status">${esc(g.blocked?'Blocked':callFollowUp(r))}</span>
+      ${callPills(g)}
       ${r.transcript?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
-    </button>`).join('')}
-  </div><section class="ci-detail" aria-label="Selected call details">${callCard(selected,selected._handled)}</section></div>`;
+    </button>`; }).join('')}
+  </div><section class="ci-detail" aria-label="Selected caller details">
+    ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
+    ${callHaveBoxes(selected)}
+    ${callCard(selected.latest, !selected.open, selected)}
+    ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+  </section></div>`;
 }
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
@@ -11690,14 +11783,16 @@ function paintCalls(){
   // Same recorded_message boolean the card's own box uses (recording_url on
   // the row), so the tab and the badge can never disagree about a call.
   const recordedRows=periodRows.filter(r=> r.recorded_message);
+  // One card per caller: the tab counts are callers, not individual rings.
+  const gAll=callGroups(periodRows), gOpen=callGroups(open), gMissed=callGroups(missedRows), gRec=callGroups(recordedRows);
   const VIEWS=[
-    { id:'all',      label:`All (${periodRows.length})` },
-    { id:'callback', label:`Needs callback (${open.length})` },
-    { id:'missed',   label:`Missed (${missedRows.length})` },
-    { id:'recorded', label:`Recordings (${recordedRows.length})` },
+    { id:'all',      label:`All (${gAll.length})` },
+    { id:'callback', label:`Needs callback (${gOpen.length})` },
+    { id:'missed',   label:`Missed (${gMissed.length})` },
+    { id:'recorded', label:`Recordings (${gRec.length})` },
   ];
-  const shown = _callsView==='missed' ? missedRows : _callsView==='callback' ? open
-    : _callsView==='recorded' ? recordedRows : periodRows;
+  const shown = _callsView==='missed' ? gMissed : _callsView==='callback' ? gOpen
+    : _callsView==='recorded' ? gRec : gAll;
   const emptyMsg = _callsView==='callback' ? '🎉 Every call has been handled.'
     : _callsView==='missed' ? 'No missed calls in this period.'
     : _callsView==='recorded' ? 'No recorded calls in this period.' : 'No calls in this period.';
@@ -11743,7 +11838,9 @@ function paintCalls(){
   view.querySelectorAll('[data-callact]').forEach(b=>b.addEventListener('click',async()=>{
     b.disabled=true;
     try{
-      await api('call_update',{ method:'POST', body:{ id:b.dataset.callid, status:b.dataset.callact }});
+      for(const id of (b.dataset.callids||b.dataset.callid).split(',').filter(Boolean)){
+        await api('call_update',{ method:'POST', body:{ id, status:b.dataset.callact }});
+      }
       await renderCalls();
     }catch(e){ toast(e.message||'Could not update'); b.disabled=false; }
   }));
@@ -11769,12 +11866,20 @@ function paintCalls(){
     ev.preventDefault(); openCustomerDetail(a.dataset.callcust);
   }));
   view.querySelectorAll('[data-callblock]').forEach(b=>b.addEventListener('click',async()=>{
-    if(!confirm(`Block ${b.dataset.callphone}? They will be rejected on every tracking line before anyone's phone rings — no ring, no voicemail.`)) return;
+    if(!confirm(`Block ${b.dataset.callphone} on EVERY business?\n\nThey will be rejected on every tracking line for Handy Andy, Dom's and every other brand before anyone's phone rings, and their texts stop too. Only block someone who is a scammer.`)) return;
     b.disabled=true;
     try{
       await api('call_block',{ method:'POST', body:{ id:b.dataset.callblock }});
       toast('Blocked'); await renderCalls();
     }catch(e){ toast(e.message||'Could not block'); b.disabled=false; }
+  }));
+  view.querySelectorAll('[data-callunblock]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm(`Unblock ${b.dataset.callphone}? They will be able to call and text every business again.`)) return;
+    b.disabled=true;
+    try{
+      await api('call_unblock',{ method:'POST', body:{ phone:b.dataset.callunblock }});
+      toast('Unblocked'); await renderCalls();
+    }catch(e){ toast(e.message||'Could not unblock'); b.disabled=false; }
   }));
   view.querySelectorAll('[data-calldelete]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Permanently delete this call from the log? This cannot be undone.')) return;

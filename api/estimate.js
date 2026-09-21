@@ -11,6 +11,7 @@
 // businesses.settings.estimate_notify_phones (owner + secretary), and a
 // customer who ticked the SMS opt-in box gets one opt-in confirmation text.
 import { serviceClient } from './_lib/supabase.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 import { uploadImage } from './_lib/storage.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { sendSMS, toE164, textConsentFor } from './_lib/sms.js';
@@ -230,6 +231,9 @@ async function submit(req, res, db) {
   const customer = body.customer || {};
   const name = (customer.name || '').toString().trim();
   const phone = formatPhoneUS((customer.phone || '').toString().trim());
+  // Sitewide block list: a blocked number is a scammer on every business. Answer
+  // like a success so it learns nothing, and do nothing (no record, no alert).
+  if (await isBlockedPhone(phone)) return res.status(200).json({ ok: true, id: null });
   const zip = (customer.zip || '').toString().trim() || null;
   // Full address — optional (the original quick-quote form only ever asked
   // for a zip). Populated by the request flow, which reuses the same address

@@ -17,6 +17,7 @@
 // each one.
 import { sendSMS } from './_lib/sms.js';
 import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -69,6 +70,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'name and phone are required' });
   }
 
+  // Sitewide block list: a blocked number is a scammer on every business. Answer
+  // like a success so it learns nothing, and do nothing (no record, no alert).
+  if (await isBlockedPhone(phone)) return res.status(200).json({ ok: true });
   const ip = clientIp(req);
   if (overSpeedLimit('doms-lead', { ip, email, phone })) {
     console.warn('[doms-lead] blocked: over the speed limit', { ip, name: name.slice(0, 80), phone });

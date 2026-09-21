@@ -4,6 +4,7 @@ import { NATIVE_BUSINESS } from './_lib/native-businesses.js';
 import { emailNotificationsOn } from './_lib/notify.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor } from './_lib/email.js';
 import { serviceClient } from './_lib/supabase.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 import { parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, SLOTS, dayOfWeekFor } from './_lib/availability.js';
 import { saveCardOnFile, stripeConfigured, createCardSetupIntent, retrieveCard, setDefaultPaymentMethod, stripe } from './_lib/stripe.js';
 import { verifyToken } from './_lib/auth.js';
@@ -758,6 +759,7 @@ async function bookDoms(req, res) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (await isBlockedPhone(customer.phone)) return res.status(400).json({ error: 'We could not complete this booking online. Please call us.' });
   if (hasDigits(customer.first_name) || hasDigits(customer.last_name)) return res.status(400).json({ error: BAD_NAME });
   if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 
@@ -1166,6 +1168,7 @@ async function bookNative(req, res, slug) {
   const customer = b.customer || {};
   if (!customer.email)   return res.status(400).json({ error: 'customer.email required' });
   if (!customer.phone)   return res.status(400).json({ error: 'customer.phone required' });
+  if (await isBlockedPhone(customer.phone)) return res.status(400).json({ error: 'We could not complete this booking online. Please call us.' });
   if (hasDigits(customer.first_name) || hasDigits(customer.last_name)) return res.status(400).json({ error: BAD_NAME });
   if (!isLikelyStreetAddress(customer.address)) return res.status(400).json({ error: BAD_ADDRESS });
 

@@ -489,6 +489,7 @@ export default async function handler(req, res) {
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'call_start':        return await callStart(req, res, db, auth, body);
       case 'call_block':        return await callBlock(req, res, db, auth, body);
+      case 'call_unblock':      return await callUnblock(req, res, db, auth, body);
       case 'call_delete':       return await callDelete(req, res, db, auth, body);
       case 'call_live_start':   return await callLiveStart(req, res, db, auth, body);
       case 'review_calls':      return await reviewCalls(req, res, db, auth);
@@ -8670,6 +8671,39 @@ async function calls(req, res, db, auth) {
 
   const me = auth.name || auth.role || 'office';
 
+  // Per caller number: is it blocked (sitewide, one shared list), and how many
+  // texts have passed between us in the last 60 days. The Calls screen folds
+  // every call from one number into ONE card and shows what we hold from that
+  // person: a recording, a voicemail, a text. Counts only, no message bodies.
+  const callerDigits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+  const callerPhones = [...new Set((rows || []).map(r => callerDigits(r.caller_phone)).filter(p => p.length === 10))];
+  const blockedSet = new Set();
+  const textInfo = new Map();          // digits -> { total, inbound, last }
+  if (callerPhones.length) {
+    try {
+      const { data: bl } = await db.from('blocked_numbers').select('phone').in('phone', callerPhones);
+      for (const b of (bl || [])) blockedSet.add(b.phone);
+    } catch (e) { /* the flag is a nicety; never fail the list over it */ }
+    try {
+      const forms = callerPhones.flatMap(p => [p, '+1' + p]);
+      let mq = db.from('messages').select('customer_phone, direction, created_at')
+        .in('customer_phone', forms).gte('created_at', new Date(Date.now() - 60 * 86400000).toISOString()).limit(3000);
+      if (viewerSlugs) {
+        const { data: vb } = await db.from('businesses').select('id').in('slug', viewerSlugs);
+        const vids = (vb || []).map(b => b.id);
+        mq = mq.or(vids.length ? `business_id.in.(${vids.join(',')}),business_id.is.null` : 'business_id.is.null');
+      }
+      const { data: ms } = await mq;
+      for (const m of (ms || [])) {
+        const d = callerDigits(m.customer_phone);
+        const t = textInfo.get(d) || { total: 0, inbound: 0, last: null };
+        t.total++; if (m.direction === 'in' || m.direction === 'inbound') t.inbound++;
+        if (!t.last || m.created_at > t.last) t.last = m.created_at;
+        textInfo.set(d, t);
+      }
+    } catch (e) { /* same: counts are a nicety */ }
+  }
+
   // Who answers each forwarding number, so a card can say "routed to Joey"
   // instead of ten digits nobody memorises. Matched on digits alone: the
   // tracking rows store E.164 (+1XXXXXXXXXX) while staff_users stores bare
@@ -8717,6 +8751,10 @@ async function calls(req, res, db, auth) {
     contacted: r.kind === 'live' || r.answered === true || r.called_back_at != null,
     left_voicemail: r.answered === false && !!(r.recording_url || r.transcript),
     recorded_message: !!r.recording_url,
+    blocked: blockedSet.has(callerDigits(r.caller_phone)),
+    text_count: (textInfo.get(callerDigits(r.caller_phone)) || {}).total || 0,
+    text_in: (textInfo.get(callerDigits(r.caller_phone)) || {}).inbound || 0,
+    text_last_at: (textInfo.get(callerDigits(r.caller_phone)) || {}).last || null,
   }));
   const open = mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
@@ -8912,6 +8950,25 @@ async function callBlock(req, res, db, auth, body) {
   const { error } = await db.from('blocked_numbers').upsert({
     phone, call_id: id, blocked_by: auth.name || auth.role || 'office', reason: (body.reason || '').toString().slice(0, 200) || null,
   }, { onConflict: 'phone', ignoreDuplicates: false });
+  if (error) throw error;
+  // A blocked number is a scammer: any callback still waiting on it, in ANY
+  // business, is closed out so nobody rings them back.
+  try {
+    await db.from('calls')
+      .update({ status: 'ignored', handled_by: 'Blocked number', handled_at: new Date().toISOString() })
+      .in('caller_phone', [phone, '+1' + phone, '1' + phone]).in('status', CALL_OPEN_STATUSES);
+  } catch (e) { console.warn('[admin] call_block: could not close open callbacks:', e.message); }
+  return res.status(200).json({ ok: true, phone });
+}
+
+// Lift a block (owner only: a block is a scammer verdict, so undoing one is the
+// owner's call, not something every login can do).
+async function callUnblock(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const phone = String(body.phone || '').replace(/\D/g, '').slice(-10);
+  if (phone.length !== 10) return res.status(400).json({ error: 'A 10-digit number is required' });
+  const { error } = await db.from('blocked_numbers').delete().eq('phone', phone);
   if (error) throw error;
   return res.status(200).json({ ok: true, phone });
 }

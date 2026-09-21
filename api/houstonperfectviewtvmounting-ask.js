@@ -5,6 +5,7 @@
 // a question" note, not a lead that needs a same-day callback.
 import { sendEmail } from './_lib/email.js';
 import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -52,6 +53,9 @@ export default async function handler(req, res) {
   // Same connection/phone sending several in ten minutes gets flagged in the
   // logs but is still emailed — a real customer's second question must never
   // be dropped, this only stops a flood from being worth running.
+  // Sitewide block list: a blocked number is a scammer on every business. Answer
+  // like a success so it learns nothing, and do nothing (no record, no alert).
+  if (await isBlockedPhone(phone)) return res.status(200).json({ ok: true });
   const ip = clientIp(req);
   const repeatSender = overSpeedLimit('houstonperfectviewtvmounting-ask', { ip, phone });
   if (repeatSender) console.warn('[houstonperfectviewtvmounting-ask] over the speed limit', { ip, ...who });
