@@ -348,6 +348,7 @@
       <button type="button" data-nav="calls" class="on"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
       <button type="button" data-nav="audit"><span class="nav-ic">📝</span>Audit</button>
       <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
+      <button type="button" data-nav="notes"><span class="nav-ic">📌</span>Notes</button>
     </nav>
     <div class="pages">
 
@@ -355,6 +356,31 @@
          the top of every page; now its own tab, per owner instruction 2026-09-22) ══════════ -->
     <section class="page" data-page="secretaries" id="pageSecretaries">
       <div class="conv-wrap" id="convWrap"></div>
+    </section>
+
+    <!-- ══════════ Page: Notes (owner rule 2026-09-23) -- write Andrew, Heather,
+         or Joey. Same table + same office-side reading/reply UI they already
+         have; this is Jiyah's own way in. ══════════ -->
+    <section class="page" data-page="notes" id="pageNotes">
+      <div class="card" style="max-width:640px;">
+        <div class="sub" style="margin-bottom:10px;">Leave a note for Andrew, Heather, or Joey. It shows on their dashboard until they tick it off, and they can write back.</div>
+        <label for="noteBody" style="display:block;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;">Note</label>
+        <textarea id="noteBody" rows="3" maxlength="2000" placeholder="Anything they need to know…" style="width:100%;min-height:70px;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;resize:vertical;box-sizing:border-box;"></textarea>
+        <div id="notePhotoHost" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:flex-end;">
+          <div style="flex:1;min-width:150px;">
+            <label for="noteTarget" style="display:block;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;">For</label>
+            <select id="noteTarget" style="width:100%;min-height:40px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;">
+              <option value="andrew">Andrew</option>
+              <option value="heather">Heather</option>
+              <option value="joey">Joey</option>
+            </select>
+          </div>
+          <button type="button" class="btn" id="notePost" style="width:auto;">Post note</button>
+        </div>
+      </div>
+      <h3 style="margin:20px 0 8px;font-size:15px;">Sent</h3>
+      <div id="notesSent" class="sub">Loading…</div>
     </section>
 
     <!-- ══════════ Page: Calls (every call, every business, every line) ══════════ -->
@@ -1533,7 +1559,7 @@ async function enter(){
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
   const fromHash=(location.hash||'').replace('#','');
-  showPage(['calls','audit','secretaries'].includes(fromHash)?fromHash:'calls');
+  showPage(['calls','audit','secretaries','notes'].includes(fromHash)?fromHash:'calls');
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
@@ -1545,6 +1571,7 @@ function showPage(p){
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
   if(p==='calls') loadCalls();
+  if(p==='notes') loadNotesSent();
 }
 $('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'); if(b) showPage(b.dataset.nav); });
 
@@ -1832,6 +1859,89 @@ async function gradeFromCall(r){
   try{ renderCtx(); }catch(_){}
   $('formCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
+
+// ── Notes (owner rule 2026-09-23) ──────────────────────────────────────────
+// Same shrink-before-upload step admin.html's own note composer uses, so a
+// phone photo doesn't sit unsent for a minute on a slow connection.
+function compressImage(file,maxDim=1600,quality=0.8){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{ let w=img.width,h=img.height;
+        if(w>h && w>maxDim){ h=Math.round(h*maxDim/w); w=maxDim; }
+        else if(h>maxDim){ w=Math.round(w*maxDim/h); h=maxDim; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',quality)); };
+      img.onerror=()=>reject(new Error('Could not read that image.')); img.src=reader.result; };
+    reader.onerror=()=>reject(new Error('Could not read that file.')); reader.readAsDataURL(file);
+  });
+}
+const NOTE_MAX_PHOTOS=4;
+function notePhotoPicker(host){
+  let urls=[], busy=false;
+  const add=document.createElement('button');
+  add.type='button'; add.className='btn ghost sm'; add.style.width='auto'; add.textContent='+ Add photo';
+  const file=document.createElement('input');
+  file.type='file'; file.accept='image/*'; file.multiple=true; file.style.display='none';
+  const status=document.createElement('span'); status.style.cssText='font-size:12px;color:var(--mute);';
+  const thumbs=document.createElement('div'); thumbs.style.cssText='display:flex;gap:6px;flex-wrap:wrap;';
+  host.append(thumbs,add,file,status);
+  const paint=()=>{
+    thumbs.innerHTML=urls.map((u,i)=>'<div style="position:relative;"><img src="'+esc(u)+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);"><button type="button" data-i="'+i+'" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#111;color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer;">&times;</button></div>').join('');
+    thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
+    add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
+  };
+  add.onclick=()=>file.click();
+  file.onchange=async()=>{
+    const files=[...file.files].slice(0,NOTE_MAX_PHOTOS-urls.length); file.value='';
+    for(let i=0;i<files.length;i++){
+      busy=true; status.textContent='Uploading '+(i+1)+' of '+files.length+'…';
+      try{
+        const dataUrl=await compressImage(files[i],1400,0.8);
+        const r=await crm('notes_photo',{},{ method:'POST', body:{ image:dataUrl } });
+        urls.push(r.url); paint();
+      }catch(err){ alert(err.message||'Could not upload that photo'); }
+    }
+    busy=false; status.textContent='';
+  };
+  paint();
+  return { urls:()=>urls.slice(), busy:()=>busy, reset:()=>{ urls=[]; paint(); } };
+}
+const notePicker=notePhotoPicker($('notePhotoHost'));
+$('notePost').onclick=async()=>{
+  const body=$('noteBody').value.trim();
+  if(!body){ $('noteBody').focus(); return; }
+  if(notePicker.busy()){ alert('Wait for the photo to finish uploading'); return; }
+  const btn=$('notePost'); btn.disabled=true; btn.textContent='Posting…';
+  try{
+    await crm('auditor_note_send',{},{ method:'POST', body:{ body, recipient:$('noteTarget').value, photos:notePicker.urls() } });
+    $('noteBody').value=''; notePicker.reset();
+    await loadNotesSent();
+  }catch(err){ alert(err.message||'Could not post that note'); }
+  finally{ btn.disabled=false; btn.textContent='Post note'; }
+};
+async function loadNotesSent(){
+  const wrap=$('notesSent'); if(!wrap) return;
+  wrap.textContent='Loading…';
+  try{
+    const d=await crm('auditor_notes_sent',{});
+    const notes=d.notes||[];
+    if(!notes.length){ wrap.className='sub'; wrap.textContent='No notes sent yet.'; return; }
+    wrap.className='';
+    const who={andrew:'Andrew',heather:'Heather',joey:'Joey',both:'Both secretaries'};
+    wrap.innerHTML=notes.map(n=>{
+      const reads=n.reads||[];
+      const status=reads.length?('Read by '+reads.map(r=>esc(r.reader)).join(', ')):'Not read yet';
+      const replies=reads.filter(r=>r.reply).map(r=>'<div style="margin-top:6px;padding:7px 9px;background:var(--line2);border-radius:8px;font-size:13px;"><b>'+esc(r.reader)+'</b> replied: '+esc(r.reply)+'</div>').join('');
+      const photos=(n.photo_urls||[]).map(u=>'<img src="'+esc(u)+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;margin-top:6px;margin-right:6px;">').join('');
+      return '<div class="call"><div class="call-meta" style="margin-bottom:4px;">To '+esc(who[n.recipient]||n.recipient)+' · '+esc(fmtSentAt(n.created_at))+'</div>'
+        +'<div style="font-size:14px;white-space:pre-wrap;">'+esc(n.body)+'</div>'+photos
+        +'<div class="call-meta" style="margin-top:6px;">'+status+'</div>'+replies+'</div>';
+    }).join('');
+  }catch(err){ wrap.className='err'; wrap.textContent=err.message||'Could not load sent notes.'; }
+}
+
 // An expired or revoked token must drop back to the login form rather than
 // leaving her on an empty page wondering why nothing loads.
 if(token){

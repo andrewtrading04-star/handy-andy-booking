@@ -540,6 +540,8 @@ export default async function handler(req, res) {
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
       case 'call_ticket':       return await callTicket(req, res, db, auth);
+      case 'auditor_note_send': return await auditorNoteSend(req, res, db, auth, body);
+      case 'auditor_notes_sent': return await auditorNotesSent(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -8741,12 +8743,12 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket']);
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent']);
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
 // at all, so her token never even reaches it.
-const AUDITOR_WRITE_ACTIONS = new Set(['call_block']);
+const AUDITOR_WRITE_ACTIONS = new Set(['call_block', 'auditor_note_send', 'notes_photo']);
 // How long a claim ("I am ringing this person now") stays hot. Long enough to
 // cover dialing, a conversation and writing a note; short enough that a claim
 // someone forgot to close does not hide a customer forever. After this the card
@@ -14536,12 +14538,18 @@ function noteReader(auth) {
 // GET — the notes the CURRENT user still has to read. The owner writes these,
 // so the owner never gets them on their own dashboard (owner rule 2026-09-17);
 // they can still see what was sent and who read it on the Notes page.
+// Owner rule 2026-09-23: notes now flow every direction (Andrew, Heather,
+// Joey, and Jiyah can all post; see notesAdd / api/audit.js). Owner used to
+// be excluded here entirely because owner was the only poster -- now the
+// owner reads their own inbox through this SAME endpoint, filtered to
+// to_owner=true instead of target_slug. A person never sees their own note
+// echoed back as something to read.
 async function notesActive(req, res, db, auth) {
-  if (auth.role === 'owner') return res.status(200).json({ notes: [], count: 0 });
   const today = denverToday();
   const reader = noteReader(auth);
+  const isOwner = auth.role === 'owner';
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, send_at, created_by, created_at, photo_urls')
+    .select('id, target_slug, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(100);
@@ -14552,7 +14560,8 @@ async function notesActive(req, res, db, auth) {
 
   const notes = (data || [])
     .filter(n => !seen.has(n.id))
-    .filter(n => !n.target_slug || n.target_slug === auth.scope)
+    .filter(n => (n.created_by || '') !== reader)
+    .filter(n => isOwner ? !!n.to_owner : (!n.to_owner && (!n.target_slug || n.target_slug === auth.scope)))
     .filter(n => noteIsLive(n, today));
 
   return res.status(200).json({ notes, count: notes.length });
@@ -14574,15 +14583,21 @@ async function notesRead(req, res, db, auth, body) {
   return res.status(200).json({ ok: true });
 }
 
-// GET — owner's own view: what was sent recently and who has read it.
+// GET — what was sent recently and who has read it. Owner sees everything
+// (the master view, unchanged). A secretary sees only their OWN sent notes
+// (owner rule 2026-09-23 opened posting to them) -- never another
+// secretary's thread with the owner, which target_slug/to_owner scoping
+// alone wouldn't hide from a shared "recent" list.
 async function notesList(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const today = denverToday();
-  const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, body, mode, show_from, send_at, created_by, created_at, photo_urls')
+  let q = db.from('staff_notes')
+    .select('id, target_slug, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(40);
+  if (auth.role === 'secretary') q = q.eq('created_by', auth.name || '');
+  const { data, error } = await q;
   if (error) throw error;
 
   const ids = (data || []).map(n => n.id);
@@ -14616,31 +14631,86 @@ async function notesRepliesSeen(req, res, db, auth) {
   return res.status(200).json({ ok: true });
 }
 
-// POST { image } — upload one photo for a note (owner only). The browser
-// shrinks it first; the note is then posted with the returned URLs.
+// POST { image } — upload one photo for a note. The browser shrinks it
+// first; the note is then posted with the returned URLs. Owner or secretary
+// (owner rule 2026-09-23: "with pictures just like i can leave them a
+// note"); the auditor path (Jiyah) uses this same action too -- see the
+// auditor-token gate in handler() and AUDITOR_WRITE_ACTIONS.
 async function notesPhoto(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary' && !auth.auditor) return res.status(403).json({ error: 'Not available for this login' });
   const up = await uploadImage(body.image, NOTE_PHOTO_PREFIX);
   return res.status(200).json({ ok: true, url: up.url });
 }
 
-// POST { body, target, mode, photos } — write one.
+// POST { body, target, mode, photos } — write one. Owner or secretary
+// (owner rule 2026-09-23: Heather/Joey can now post too, same as Andrew
+// always could). target: 'handy-andy' | 'doms' | 'owner' | '' (both
+// secretaries). 'owner' means "for Andrew only" (to_owner=true) -- distinct
+// from target_slug, which keeps meaning secretary scope. A person targeting
+// themself is harmless (self-reminder) and not specially blocked.
 async function notesAdd(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const text = (body.body || '').toString().trim();
   if (!text) return res.status(400).json({ error: 'Write something first' });
   if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
-  const target = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+  const toOwner = body.target === 'owner';
+  const target = !toOwner && body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
   const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
   const when = resolveSendAt(body);
   if (when.error) return res.status(400).json({ error: when.error });
   const { data, error } = await db.from('staff_notes')
-    .insert({ body: text, target_slug: target, mode, show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
+    .insert({ body: text, target_slug: target, to_owner: toOwner, mode, show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
     .select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// Jiyah's own path into the SAME notes system (owner rule 2026-09-23) --
+// deliberately thinner than notesAdd: one of three fixed recipients, no
+// scheduling (always 'until_read', so it can't silently expire before
+// anyone sees it), forced created_by. Auth is already mapped to
+// role:'auditor' by the gate in handler(); this writes target_slug/to_owner
+// exactly like a Heather/Joey/Andrew-authored note would, so it rides the
+// existing dashboard banner/reply/photo UI with zero new admin.html code.
+async function auditorNoteSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const text = (body.body || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Write something first' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
+  const recipient = (body.recipient || '').toString();
+  const when = resolveSendAt({}); // always "now" -- Jiyah's composer has no scheduling UI
+  const row = { body: text, mode: 'until_read', show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Jiyah', photo_urls: cleanNotePhotos(body.photos) };
+  if (recipient === 'andrew') { row.to_owner = true; row.target_slug = null; }
+  else if (recipient === 'heather') { row.to_owner = false; row.target_slug = 'handy-andy'; }
+  else if (recipient === 'joey') { row.to_owner = false; row.target_slug = 'doms'; }
+  else return res.status(400).json({ error: 'Pick Andrew, Heather, or Joey' });
+  const { data, error } = await db.from('staff_notes').insert(row).select('id').maybeSingle();
+  if (error) throw error;
+  return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// GET — Jiyah's own sent history, with per-note read status, for her Notes
+// tab. Same read-tracking table as everyone else's notes (staff_note_reads).
+async function auditorNotesSent(req, res, db, auth) {
+  const { data, error } = await db.from('staff_notes')
+    .select('id, target_slug, to_owner, body, created_at, photo_urls')
+    .eq('created_by', auth.name || 'Jiyah').is('deleted_at', null)
+    .order('created_at', { ascending: false }).limit(60);
+  if (error) throw error;
+  const ids = (data || []).map(n => n.id);
+  let readsBy = {};
+  if (ids.length) {
+    const { data: reads } = await db.from('staff_note_reads').select('note_id, reader, read_at, reply').in('note_id', ids);
+    (reads || []).forEach(r => { (readsBy[r.note_id] = readsBy[r.note_id] || []).push(r); });
+  }
+  const notes = (data || []).map(n => ({
+    ...n,
+    recipient: n.to_owner ? 'andrew' : n.target_slug === 'handy-andy' ? 'heather' : n.target_slug === 'doms' ? 'joey' : 'both',
+    reads: (readsBy[n.id] || []).map(r => ({ reader: r.reader, read_at: r.read_at, reply: r.reply || null })),
+  }));
+  return res.status(200).json({ notes });
 }
 
 // Editing a posted note. The composer sends the same fields as a fresh post.
@@ -14670,11 +14740,15 @@ function noteEditPatch(existing, body) {
 // POST { id, body, target, mode, photos, send_date?, send_time? } — edit one.
 async function notesUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
-  const { data: existing } = await db.from('staff_notes').select('id, body, mode, show_from, send_at, photo_urls').eq('id', id).is('deleted_at', null).maybeSingle();
+  const { data: existing } = await db.from('staff_notes').select('id, body, mode, show_from, send_at, photo_urls, created_by').eq('id', id).is('deleted_at', null).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'That note is gone' });
+  // A secretary may only touch what THEY posted (owner rule 2026-09-23: the
+  // notes system opened up to secretaries, but editing someone else's note
+  // -- including the owner's -- stays off limits).
+  if (auth.role === 'secretary' && existing.created_by !== auth.name) return res.status(403).json({ error: 'You can only edit your own notes' });
   const r = noteEditPatch(existing, body);
   if (r.error) return res.status(400).json({ error: r.error });
   const { reshow, ...patch } = r.patch;
@@ -14785,7 +14859,7 @@ async function domainWatchCheck(req, res, db, auth, body) {
 
 // GET — what the composer offers to aim at.
 async function techNotesTargets(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const { data, error } = await db.from('technicians')
     .select('id, name, business:businesses ( slug, name ), area:service_areas ( name )')
     .eq('active', true).order('name');
@@ -14801,7 +14875,7 @@ async function techNotesTargets(req, res, db, auth) {
 // POST { body, target_type, technician_id?, city?, mode, photos } — write one.
 async function techNotesAdd(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const text = (body.body || '').toString().trim();
   if (!text) return res.status(400).json({ error: 'Write something first' });
   if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
@@ -14831,16 +14905,20 @@ async function techNotesAdd(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, id: data && data.id });
 }
 
-// GET — recent tech notes with who has dismissed each, for the owner's list.
+// GET — recent tech notes with who has dismissed each. Owner sees every
+// tech note; a secretary sees only their own (owner rule 2026-09-23, same
+// created_by scoping as notesList).
 async function techNotesList(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const today = denverToday();
-  const { data, error } = await db.from('tech_notes')
-    // tech_notes reaches technicians two ways (technician_id, and through
-    // tech_note_dismissals), so the embed has to name the FK or PostgREST
-    // refuses with "more than one relationship was found".
+  // tech_notes reaches technicians two ways (technician_id, and through
+  // tech_note_dismissals), so the embed has to name the FK or PostgREST
+  // refuses with "more than one relationship was found".
+  let tnq = db.from('tech_notes')
     .select('id, body, target_type, technician_id, city, mode, show_from, send_at, photo_urls, created_by, created_at, tech:technicians!tech_notes_technician_id_fkey ( name )')
     .is('deleted_at', null).order('created_at', { ascending: false }).limit(40);
+  if (auth.role === 'secretary') tnq = tnq.eq('created_by', auth.name || '');
+  const { data, error } = await tnq;
   if (error) throw error;
   const ids = (data || []).map(n => n.id);
   const dismissedBy = {};
@@ -14871,9 +14949,14 @@ async function techNotesList(req, res, db, auth) {
 // POST { id } — pull a tech note back (soft delete; dismissal history stays).
 async function techNotesDelete(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
+  if (auth.role === 'secretary') {
+    const { data: existing } = await db.from('tech_notes').select('created_by').eq('id', id).maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'That note is gone' });
+    if (existing.created_by !== auth.name) return res.status(403).json({ error: 'You can only delete your own notes' });
+  }
   const { error } = await db.from('tech_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
   if (error) throw error;
   return res.status(200).json({ ok: true });
@@ -14882,11 +14965,12 @@ async function techNotesDelete(req, res, db, auth, body) {
 // POST { id, body, target_type, technician_id?, city?, mode, photos, send_* } — edit one.
 async function techNotesUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
-  const { data: existing } = await db.from('tech_notes').select('id, body, mode, show_from, send_at, photo_urls, target_type').eq('id', id).is('deleted_at', null).maybeSingle();
+  const { data: existing } = await db.from('tech_notes').select('id, body, mode, show_from, send_at, photo_urls, target_type, created_by').eq('id', id).is('deleted_at', null).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'That note is gone' });
+  if (auth.role === 'secretary' && existing.created_by !== auth.name) return res.status(403).json({ error: 'You can only edit your own notes' });
   const r = noteEditPatch(existing, body);
   if (r.error) return res.status(400).json({ error: r.error });
   const { reshow, ...patch } = r.patch;
@@ -14912,9 +14996,14 @@ async function techNotesUpdate(req, res, db, auth, body) {
 // POST { id } — pull a note back. Soft delete, so its read history survives.
 async function notesDelete(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const id = (body.id || '').toString();
   if (!id) return res.status(400).json({ error: 'id required' });
+  if (auth.role === 'secretary') {
+    const { data: existing } = await db.from('staff_notes').select('created_by').eq('id', id).maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'That note is gone' });
+    if (existing.created_by !== auth.name) return res.status(403).json({ error: 'You can only delete your own notes' });
+  }
   const { error } = await db.from('staff_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
   if (error) throw error;
   return res.status(200).json({ ok: true });

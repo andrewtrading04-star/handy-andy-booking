@@ -1818,6 +1818,7 @@
       <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="notes" id="navNotes"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
@@ -3107,7 +3108,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes'})[s];
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -3127,6 +3128,7 @@ function navTo(s){
     else if(s==='secretaries') renderSecretaries();
     else if(s==='other') renderOther();
     else if(s==='launch') renderLaunch();
+    else if(s==='notes') renderNotes();
   }
 }
 function refreshCurrent(){
@@ -3155,6 +3157,7 @@ function refreshCurrent(){
   else if(section==='myavailability') renderMyAvailability();
   else if(section==='secretaries') renderSecretaries();
   else if(section==='other') renderOther();
+  else if(section==='notes') renderNotes();
 }
 
 // Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
@@ -9310,10 +9313,16 @@ function notePhotoPicker(host){
 
 async function noteBanner(){
   const host=document.getElementById('noteBanner');
-  if(!host) return;
   let notes=[];
-  try{ const d=await api('notes_active'); notes=d.notes||[]; }
-  catch(_){ host.innerHTML=''; return; }   // never let a notes outage block the dashboard
+  try{ const d=await api('notes_active'); notes=d.notes||[];
+    // Nav badge on the "Notes" sidebar item -- owner rule 2026-09-23: notes
+    // now reach Andrew too (previously notes_active was secretary-only, so
+    // this badge never needed to exist for owner before).
+    const nb=document.getElementById('notesNavBadge');
+    if(nb){ if(notes.length){ nb.textContent=notes.length; nb.style.display=''; } else nb.style.display='none'; }
+  }
+  catch(_){ if(host) host.innerHTML=''; return; }   // never let a notes outage block the dashboard
+  if(!host) return;
   if(!notes.length){ host.innerHTML=''; return; }
   host.innerHTML=notes.map(n=>`
     <div class="note-card" data-note="${esc(n.id)}">
@@ -9436,19 +9445,26 @@ function noteScheduledPill(n){
 
 async function renderNotes(){
   const view=document.getElementById('view');
+  // Owner rule 2026-09-23: notes now go every direction, not just owner ->
+  // staff -- the "For secretaries" pane already covers "leave Andrew a note"
+  // via its own FOR dropdown's Andrew option, so the sub-copy has to speak to
+  // whoever is actually looking at it, not assume they're the owner.
+  const forCopy = role==='owner'
+    ? 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'
+    : 'Leave Andrew or the other secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
   view.innerHTML=`<div class="wrap">
-    <button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>
+    ${role==='owner'?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
     <h2 style="margin:0 0 4px;">Notes</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:14px;">${_notesTab==='tech'
-      ? 'Leave a note for your technicians. It shows at the top of their app until it expires or they tap the X.'
-      : 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'}</div>
+      ? 'Leave a note for the technicians. It shows at the top of their app until it expires or they tap the X.'
+      : forCopy}</div>
     <div class="est-filters" style="margin-bottom:14px;">
-      <button type="button" class="seg-btn ${_notesTab==='staff'?'on':''}" data-notestab="staff">For secretaries</button>
+      <button type="button" class="seg-btn ${_notesTab==='staff'?'on':''}" data-notestab="staff">For the office</button>
       <button type="button" class="seg-btn ${_notesTab==='tech'?'on':''}" data-notestab="tech">For technicians</button>
     </div>
     <div id="notesPane"></div>
   </div>`;
-  document.getElementById('notesBack').onclick=()=>renderOther();
+  const nb=document.getElementById('notesBack'); if(nb) nb.onclick=()=>renderOther();
   view.querySelectorAll('[data-notestab]').forEach(b=>b.onclick=()=>{ _notesTab=b.dataset.notestab; renderNotes(); });
   if(_notesTab==='tech') renderTechNotesPane(); else renderStaffNotesPane();
 }
@@ -9466,8 +9482,9 @@ function renderStaffNotesPane(){
           <label for="noteTarget" style="${NOTE_LABEL_CSS}">FOR</label>
           <select id="noteTarget" style="${NOTE_FIELD_CSS}">
             <option value="">Both secretaries</option>
-            <option value="handy-andy">Handy Andy only</option>
-            <option value="doms">Dom's only</option>
+            <option value="handy-andy">Handy Andy (Heather) only</option>
+            <option value="doms">Dom's (Joey) only</option>
+            ${role!=='owner'?'<option value="owner">Andrew only</option>':''}
           </select>
         </div>
         <div style="flex:1;min-width:150px;">
@@ -9490,7 +9507,7 @@ function renderStaffNotesPane(){
   const editCtl=noteEditMode(document.getElementById('notePost'), clearForm);
   _staffNoteEdit=(n)=>{
     document.getElementById('noteBody').value=n.body||'';
-    document.getElementById('noteTarget').value=n.target_slug||'';
+    document.getElementById('noteTarget').value=n.to_owner?'owner':(n.target_slug||'');
     document.getElementById('noteMode').value=n.mode||'today';
     picker.set(n.photo_urls); sendCtl.set(n.send_at, n.scheduled);
     editCtl.start(n.id);
@@ -9530,7 +9547,7 @@ async function loadNotesRecent(){
     if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
     wrap.className='';
     wrap.innerHTML=notes.map(n=>{
-      const who=n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'Both';
+      const who=n.to_owner ? 'Andrew' : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'Both';
       const reads=n.reads||[];
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
@@ -9542,7 +9559,7 @@ async function loadNotesRecent(){
         <div style="flex:1;min-width:0;">
           <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
           ${notePhotosHtml(n.photo_urls)}
-          <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(who)} · ${esc(NOTE_MODE_LABEL[n.mode]||n.mode)} · ${esc(noteWhen(n.created_at))}</div>
+          <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${role==='owner'?esc(n.created_by||'Office')+' → ':''}${esc(who)} · ${esc(NOTE_MODE_LABEL[n.mode]||n.mode)} · ${esc(noteWhen(n.created_at))}</div>
           ${replies}
         </div>
         ${pill}
