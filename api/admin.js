@@ -463,6 +463,7 @@ export default async function handler(req, res) {
       case 'booking_note_add':     return await bookingNoteAdd(req, res, db, auth, body);
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
+      case 'jiyah_photos':         return await jiyahPhotos(req, res, db, auth);
       case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
       case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
       case 'insights_overview':    return await insightsOverview(req, res, db, auth);
@@ -14738,6 +14739,33 @@ async function auditorNotesSent(req, res, db, auth) {
     reads: (readsBy[n.id] || []).map(r => ({ reader: r.reader, read_at: r.read_at, reply: r.reply || null })),
   }));
   return res.status(200).json({ notes });
+}
+
+// GET — every photo Jiyah has ever attached to a note, across every
+// recipient, gathered into one place. Owner rule 2026-09-23: "give it a new
+// folder only accessible to me called Jiyah Photos" -- owner-only, strictly
+// (not the auditor token itself: Jiyah can see her own Sent list via
+// auditor_notes_sent, but not this aggregated owner view). Flattens
+// staff_notes.photo_urls (several photos can live on one note) into one
+// row per photo, newest note first.
+async function jiyahPhotos(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const { data, error } = await db.from('staff_notes')
+    .select('id, body, photo_urls, created_at, target_slug, to_owner')
+    .eq('created_by', 'Jiyah').is('deleted_at', null)
+    .not('photo_urls', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  const photos = [];
+  for (const n of (data || [])) {
+    const recipient = n.to_owner ? 'Andrew' : n.target_slug === 'handy-andy' ? 'Heather' : n.target_slug === 'doms' ? 'Joey' : 'Both secretaries';
+    for (const url of (n.photo_urls || [])) {
+      if (!url) continue;
+      photos.push({ id: `${n.id}:${photos.length}`, url, note_id: n.id, note_body: n.body, created_at: n.created_at, recipient });
+    }
+  }
+  return res.status(200).json({ photos });
 }
 
 // Editing a posted note. The composer sends the same fields as a fresh post.

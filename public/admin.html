@@ -5504,7 +5504,31 @@ function galleryParamsFor(key){
   return p;
 }
 
+// "Jiyah Photos" (owner rule 2026-09-23: "add these to my photos tab, new
+// folder only accessible to me") -- a parallel, owner-only tab that pulls
+// from the notes system (staff_notes.photo_urls, WHOEVER she addressed the
+// note to) rather than job photos, so it's kept OUT of PHOTO_CATS/the normal
+// photo_gallery action entirely instead of forcing it into that booking-tied
+// shape. Server-gated owner-only too (jiyahPhotos in api/admin.js) -- the
+// button just never renders for anyone else.
+async function loadJiyahPhotos(){
+  if(galleryLoading) return;
+  if(galleryCache.jiyah) return;
+  galleryLoading=true;
+  try{
+    const d=await api('jiyah_photos');
+    galleryCache.jiyah={ photos:d.photos||[], has_more:false };
+  }catch(e){
+    galleryCache.jiyah={ photos:[], has_more:false };
+    toast(e.message||'Could not load Jiyah\'s photos');
+  }finally{
+    galleryLoading=false;
+    if(galleryGroup==='jiyah') drawGallery();
+  }
+}
+
 async function loadGalleryFolder(key,{append=false}={}){
+  if(key==='jiyah') return loadJiyahPhotos();
   if(galleryLoading) return;
   const cached=galleryCache[key];
   if(cached&&!append) return;
@@ -5562,7 +5586,11 @@ function drawGallery(){
       <button class="gal-tab ${crossBiz?'on':''}" data-galbiz="ha">Handy Andy: To Post</button>
     </div>` : '';
   const totalKnown=galleryCounts ? PHOTO_CATS.reduce((n,c)=>n+(galleryCounts[c.key]||0),0) : null;
-  if(totalKnown===0){
+  // Owner always falls through to the full render below (tabs included) even
+  // with zero job photos, so the owner-only "Jiyah Photos" tab is reachable
+  // regardless -- this short-circuit predates that tab and only ever meant
+  // "nothing to show a non-owner, don't even draw folder tabs for it".
+  if(totalKnown===0 && galleryGroup!=='jiyah' && role!=='owner'){
     view.innerHTML=`<div class="wrap">${switcher}<div class="empty">${crossBiz?'Nothing in Handy Andy’s To Post right now.':'No job photos yet. Technicians add photos to each job from their app.'}</div></div>`;
     view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; renderGallery(); }));
     return;
@@ -5583,6 +5611,18 @@ function drawGallery(){
   // Cross-business: the only move allowed is To Post -> Posted (server enforces
   // this regardless), and deleting another company's photo isn't offered at all.
   const moveTargets=crossBiz ? PHOTO_CATS.filter(c=>c.key==='to_post'||c.key==='posted') : PHOTO_CATS;
+  const jiyahView=galleryGroup==='jiyah';
+  // Jiyah Photos card: note photos (staff_notes.photo_urls), not job photos --
+  // no booking/status, so no Move-to or checkbox; src goes through the same
+  // private-bucket proxy the notes system uses (notePhotoSrc, owner rule
+  // 2026-09-23: "i need to be able to view them securely").
+  const jiyahCard=p=>`<figure class="gal-item" data-full="${esc(notePhotoSrc(p.url))}" data-pid="${esc(p.id)}">
+      <img src="${esc(notePhotoSrc(p.url))}" loading="lazy" alt="Jiyah photo">
+      <figcaption><strong>To ${esc(p.recipient)}</strong><br>
+        <span class="sub">${esc(fmtDateTime(p.created_at))}</span><br>
+        ${p.note_body?`<span class="sub" style="display:block;margin-top:2px;white-space:pre-wrap;">${esc(p.note_body.slice(0,140))}${p.note_body.length>140?'…':''}</span>`:''}
+      </figcaption>
+    </figure>`;
   const card=p=>{
     const cur=photoCat(p);
     const opts=moveTargets.map(c=>`<option value="${c.key}" ${c.key===cur?'selected':''}>${c.label}</option>`).join('');
@@ -5598,7 +5638,7 @@ function drawGallery(){
       </figure>`;
   };
   const selCount=gallerySelected.size;
-  const bulkBar=selCount ? `<div class="gal-bulkbar">
+  const bulkBar=(selCount&&!jiyahView) ? `<div class="gal-bulkbar">
       <span>${selCount} selected</span>
       <select id="galBulkMove">${moveTargets.map(c=>`<option value="${c.key}">Move to ${c.label}</option>`).join('')}</select>
       <button type="button" class="gal-bulk-apply" id="galBulkApply">Apply</button>
@@ -5610,13 +5650,14 @@ function drawGallery(){
     <div class="gal-tabs">
       ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
       ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryCounts?` <span class="gal-count">${galleryCounts.logo||0}</span>`:''}</button>`}
+      ${(!crossBiz&&role==='owner')?`<button class="gal-tab ${jiyahView?'on':''}" data-g="jiyah" title="Photos Jiyah has sent, in one place -- only you can see this tab">🔒 Jiyah Photos${galleryCache.jiyah?` <span class="gal-count">${galleryCache.jiyah.photos.length}</span>`:''}</button>`:''}
     </div>
     ${bulkBar}
     ${!page
       ? `<div class="empty">Loading…</div>`
       : shown.length
-        ? `<div class="gallery">${shown.map(card).join('')}</div>`
-        : `<div class="empty">${logoView?'No logo shots tagged yet. The scan runs twice a day over new photos.':'No photos in '+esc(photoCatLabel(galleryGroup))+'.'}</div>`}
+        ? `<div class="gallery">${shown.map(jiyahView?jiyahCard:card).join('')}</div>`
+        : `<div class="empty">${jiyahView?'No photos from Jiyah yet.':logoView?'No logo shots tagged yet. The scan runs twice a day over new photos.':'No photos in '+esc(photoCatLabel(galleryGroup))+'.'}</div>`}
     ${logoView&&!crossBiz&&role==='owner'&&galleryCounts&&galleryCounts.unscanned>0
       ? `<div style="text-align:center;margin:12px 0;">
           <button type="button" id="galScan" ${galleryScanning?'disabled':''}>${galleryScanning?'Scanning…':`Scan ${galleryCounts.unscanned} remaining photo${galleryCounts.unscanned===1?'':'s'} for logo shots`}</button>

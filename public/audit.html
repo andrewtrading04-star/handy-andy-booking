@@ -379,6 +379,8 @@
           <button type="button" class="btn" id="notePost" style="width:auto;">Post note</button>
         </div>
       </div>
+      <h3 style="margin:20px 0 8px;font-size:15px;">Photos I've shared</h3>
+      <div id="notesPhotoGrid" class="sub">Loading…</div>
       <h3 style="margin:20px 0 8px;font-size:15px;">Sent</h3>
       <div id="notesSent" class="sub">Loading…</div>
     </section>
@@ -1928,25 +1930,59 @@ $('notePost').onclick=async()=>{
   }catch(err){ alert(err.message||'Could not post that note'); }
   finally{ btn.disabled=false; btn.textContent='Post note'; }
 };
+// Owner-side, Andrew has his own dedicated "Jiyah Photos" folder (photos tab,
+// api/admin.js jiyahPhotos). Jiyah's own mirror of that -- "photos I've
+// shared", owner rule 2026-09-23 -- reuses the SAME auditor_notes_sent
+// fetch her Sent list already makes below, just flattened into a grid; no
+// second round trip.
+const notesWhoLabel={andrew:'Andrew',heather:'Heather',joey:'Joey',both:'Both secretaries'};
+function renderNotesPhotoGrid(notes){
+  const grid=$('notesPhotoGrid'); if(!grid) return;
+  const photos=[];
+  for(const n of notes){
+    for(const u of (n.photo_urls||[])){
+      if(u) photos.push({url:u, recipient:n.recipient, body:n.body, created_at:n.created_at});
+    }
+  }
+  if(!photos.length){ grid.className='sub'; grid.textContent='No photos shared yet.'; return; }
+  grid.className='';
+  grid.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:8px;">'+photos.map((p,i)=>
+    '<img src="'+esc(notePhotoSrc(p.url))+'" data-photoidx="'+i+'" loading="lazy" style="width:76px;height:76px;object-fit:cover;border-radius:9px;border:1px solid var(--line);cursor:pointer;">'
+  ).join('')+'</div>';
+  grid.querySelectorAll('[data-photoidx]').forEach(img=>img.onclick=()=>openNotePhoto(photos[Number(img.dataset.photoidx)]));
+}
+function openNotePhoto(p){
+  const existing=document.getElementById('viewOverlay'); if(existing) existing.remove();
+  const ov=document.createElement('div'); ov.id='viewOverlay';
+  ov.innerHTML='<div id="viewCard" style="text-align:center;">'
+    +'<div class="spread" style="margin-bottom:8px;text-align:left;"><h2>To '+esc(notesWhoLabel[p.recipient]||p.recipient)+'</h2><button type="button" class="btn ghost" id="viewClose">Close</button></div>'
+    +'<img src="'+esc(notePhotoSrc(p.url))+'" style="max-width:100%;border-radius:10px;">'
+    +(p.body?'<div class="sub" style="margin-top:10px;text-align:left;white-space:pre-wrap;">'+esc(p.body)+'</div>':'')
+    +'<div class="sub" style="margin-top:6px;text-align:left;">'+esc(fmtSentAt(p.created_at))+'</div></div>';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
+  document.getElementById('viewClose').onclick=()=>ov.remove();
+}
 async function loadNotesSent(){
   const wrap=$('notesSent'); if(!wrap) return;
   wrap.textContent='Loading…';
+  const grid=$('notesPhotoGrid'); if(grid) grid.textContent='Loading…';
   try{
     const d=await crm('auditor_notes_sent',{});
     const notes=d.notes||[];
+    renderNotesPhotoGrid(notes);
     if(!notes.length){ wrap.className='sub'; wrap.textContent='No notes sent yet.'; return; }
     wrap.className='';
-    const who={andrew:'Andrew',heather:'Heather',joey:'Joey',both:'Both secretaries'};
     wrap.innerHTML=notes.map(n=>{
       const reads=n.reads||[];
       const status=reads.length?('Read by '+reads.map(r=>esc(r.reader)).join(', ')):'Not read yet';
       const replies=reads.filter(r=>r.reply).map(r=>'<div style="margin-top:6px;padding:7px 9px;background:var(--line2);border-radius:8px;font-size:13px;"><b>'+esc(r.reader)+'</b> replied: '+esc(r.reply)+'</div>').join('');
       const photos=(n.photo_urls||[]).map(u=>'<img src="'+esc(notePhotoSrc(u))+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;margin-top:6px;margin-right:6px;">').join('');
-      return '<div class="call"><div class="call-meta" style="margin-bottom:4px;">To '+esc(who[n.recipient]||n.recipient)+' · '+esc(fmtSentAt(n.created_at))+'</div>'
+      return '<div class="call"><div class="call-meta" style="margin-bottom:4px;">To '+esc(notesWhoLabel[n.recipient]||n.recipient)+' · '+esc(fmtSentAt(n.created_at))+'</div>'
         +'<div style="font-size:14px;white-space:pre-wrap;">'+esc(n.body)+'</div>'+photos
         +'<div class="call-meta" style="margin-top:6px;">'+status+'</div>'+replies+'</div>';
     }).join('');
-  }catch(err){ wrap.className='err'; wrap.textContent=err.message||'Could not load sent notes.'; }
+  }catch(err){ wrap.className='err'; wrap.textContent=err.message||'Could not load sent notes.'; if(grid){ grid.className='err'; grid.textContent=''; } }
 }
 
 // An expired or revoked token must drop back to the login form rather than
