@@ -751,13 +751,23 @@ async function sendMissedCallText(params) {
 
   const db = serviceClient();
   const { data: line, error: lineErr } = await db.from('tracking_numbers')
-    .select('phone, business_slug, active, ai_bot_enabled, ai_bot_v2_enabled, forward_to, after_hours_forward_to, missed_call_text')
+    .select('phone, business_slug, active, ai_bot_enabled, ai_bot_v2_enabled, forward_to, after_hours_forward_to, missed_call_text, missed_call_via_tollfree')
     .eq('phone', to).maybeSingle();
   if (lineErr || !line) { console.log(`${who} skipped: line lookup ${lineErr ? 'failed: ' + lineErr.message : 'found no line'}`); return; }
   const text = line.missed_call_text == null ? '' : String(line.missed_call_text);
   if (!text.trim()) return;   // feature off on this line: silent, the normal case
   if (!line.active) { console.log(`${who} skipped: line inactive`); return; }
   if (line.ai_bot_enabled || line.ai_bot_v2_enabled) { console.log(`${who} skipped: AI bot line`); return; }
+  // Which number the text leaves from. Normally the line itself (it's in the
+  // A2P sender pool). A line whose brand has no A2P registration -- Dom's,
+  // 2026-09-22 (migration 0133) -- can't send as itself, so it borrows the
+  // toll-free sender. The messages row is keyed on that sender too, so the
+  // customer's reply threads with it in Messages instead of landing on a
+  // thread nobody can answer from, and the 24h dedupe below counts what the
+  // customer actually received from that number.
+  const tollfree = tenDigits(process.env.TWILIO_PHONE_NUMBER || '');
+  const sender = line.missed_call_via_tollfree ? tollfree : to;
+  if (!sender) { console.log(`${who} skipped: toll-free sender is not configured`); return; }
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const [ownQ, silentQ, staffQ, blockedQ, optedOut, recentQ, bizQ, custQ] = await Promise.all([
@@ -770,7 +780,7 @@ async function sendMissedCallText(params) {
     // automated send from a tracking line is this one (the rest leave from
     // the toll-free), and the row is inserted BEFORE the send (below), so a
     // Twilio retry of this callback finds it too.
-    db.from('messages').select('id').eq('our_phone', to).eq('customer_phone', from)
+    db.from('messages').select('id').eq('our_phone', sender).eq('customer_phone', from)
       .eq('direction', 'out').eq('sent_by', 'automated').gte('created_at', since).limit(1),
     line.business_slug
       ? db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle()
@@ -799,7 +809,7 @@ async function sendMissedCallText(params) {
   const { data: row, error: insErr } = await db.from('messages').insert({
     business_id: (bizQ && bizQ.data && bizQ.data.id) || null,
     customer_phone: from,
-    our_phone: to,
+    our_phone: sender,
     direction: 'out',
     body: text,
     status: 'queued',
@@ -812,8 +822,9 @@ async function sendMissedCallText(params) {
   const statusCallback = base
     ? `${base}/api/analytics?action=sms_status&token=${encodeURIComponent(signToken({ kind: 'message', message_id: row.id }, 86400))}`
     : undefined;
-  // FROM the tracking line (in the campaign's sender pool), never the toll-free.
-  const r = await sendSMSResult(from, text, { from: to, statusCallback });
+  // FROM the tracking line (in the campaign's sender pool) -- or the toll-free
+  // for a line flagged missed_call_via_tollfree (see `sender` above).
+  const r = await sendSMSResult(from, text, { from: sender, statusCallback });
   if (r.ok) {
     if (r.sid) await db.from('messages').update({ twilio_sid: r.sid }).eq('id', row.id);
     // Only from 'queued': a delivery receipt that raced ahead keeps 'delivered'.
