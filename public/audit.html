@@ -204,9 +204,6 @@
   .dtp-foot .primary{background:var(--ink)!important;color:#fff!important;border-color:var(--ink)!important;}
 
   /* time */
-  .dtp-trow{display:flex;gap:8px;margin-bottom:10px;}
-  .dtp-typed{flex:1;min-width:0;min-height:44px;font-size:16px;font-weight:600;padding:8px 12px;border-radius:10px;}
-  .dtp-typed[aria-invalid="true"]{border-color:var(--bad);background:var(--bad-bg);}
   .dtp-ampm{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none;}
   .dtp-ampm button{min-width:52px;min-height:44px;font-weight:800;font-size:15px;}
   .dtp-ampm button+button{border-left:1px solid var(--line);}
@@ -619,15 +616,11 @@ function initTime(root){
   /* Three scroll-snap wheels (hour 1-12, minute 0-59, AM/PM), like the phone's
      own picker: whatever row settles in the centre band IS the value. Every
      minute is a row (the old grid only had 5-minute steps, so an autofilled
-     2:17 had nowhere to land). The typed box above stays as the fast path. */
+     2:17 had nowhere to land). No typed box: Jiyah asked for wheels only. */
   var hh='', mm='', i;
   for(i=1;i<=12;i++) hh+='<div class="dtp-witem" data-i="'+(i-1)+'">'+i+'</div>';
   for(i=0;i<60;i++) mm+='<div class="dtp-witem" data-i="'+i+'">'+pad(i)+'</div>';
   pop.innerHTML='<div class="dtp-time-pad">'+
-    '<div class="dtp-trow">'+
-      '<input type="text" class="dtp-typed" autocomplete="off" autocapitalize="off" spellcheck="false" '+
-        'inputmode="text" placeholder="e.g. 2:15 PM or 14:15" aria-label="Type a time">'+
-    '</div>'+
     '<div class="dtp-wheels">'+
       '<div class="dtp-wheel-band" aria-hidden="true"></div>'+
       '<div class="dtp-wheel" data-wheel="h" tabindex="0" role="listbox" aria-label="Hour">'+hh+'</div>'+
@@ -639,7 +632,7 @@ function initTime(root){
     '<div class="dtp-foot"><button type="button" data-clear>Clear</button>'+
       '<button type="button" class="primary" data-close>Done</button></div>'+
   '</div>';
-  var typed=pop.querySelector('.dtp-typed'), hint=pop.querySelector('.dtp-hint');
+  var hint=pop.querySelector('.dtp-hint');
   var wheels={h:pop.querySelector('[data-wheel="h"]'),m:pop.querySelector('[data-wheel="m"]'),ap:pop.querySelector('[data-wheel="ap"]')};
   var wsel={h:11,m:0,ap:0};   // row index per wheel; 11 = "12" o'clock
   var quiet=0;                // > now: scroll events are ours (sync), not the user's
@@ -661,7 +654,6 @@ function initTime(root){
     wsel.h=p?((p.h+11)%12):11; wsel.m=p?p.m:0; wsel.ap=(p?p.h>=12:pm)?1:0;
     pm=!!wsel.ap;
     scrollWheel(wheels.h,wsel.h,false); scrollWheel(wheels.m,wsel.m,false); scrollWheel(wheels.ap,wsel.ap,false);
-    typed.value=p?fmt12(p):''; typed.removeAttribute('aria-invalid');
   }
   c.onOpen=function(){
     var p=parts(); if(p) pm=p.h>=12;
@@ -675,7 +667,7 @@ function initTime(root){
   function commitWheels(){
     pm=wsel.ap===1;
     setHM(to24(wsel.h+1),wsel.m);
-    typed.value=fmt12(parts()); setHint('');
+    setHint('');
   }
   function onSettled(key){
     var w=wheels[key], idx=Math.round(w.scrollTop/rowH(w));
@@ -708,31 +700,12 @@ function initTime(root){
     });
   });
 
-  function applyTyped(){
-    var s=typed.value.trim().toLowerCase().replace(/\./g,'');
-    if(!s){ return true; }
-    var m=/^(\d{1,2})(?::?(\d{2}))?\s*(a|p|am|pm)?$/.exec(s);
-    if(!m){ typed.setAttribute('aria-invalid','true'); setHint('Try 2:15 PM, 215p or 14:15.',true); return false; }
-    var h=+m[1], mi=m[2]?+m[2]:0, ap=m[3];
-    var ok=mi<=59;
-    if(ap){ ok=ok&&h>=1&&h<=12; if(ok) h=(h%12)+(ap.charAt(0)==='p'?12:0); }
-    else if(h>23) ok=false;
-    else if(h>=1&&h<=12&&!(m[1].length===2&&m[1].charAt(0)==='0')) h=(h%12)+(pm?12:0); // bare 1-12 follows the AM/PM toggle
-    if(!ok){ typed.setAttribute('aria-invalid','true'); setHint('That is not a valid time.',true); return false; }
-    setHM(h,mi); sync(); setHint(''); return true;
-  }
-  typed.addEventListener('keydown',function(e){
-    if(e.key==='Enter'){ e.preventDefault(); if(applyTyped()) c.close(true); }
-  });
-  typed.addEventListener('change',applyTyped);
-  typed.addEventListener('input',function(){ typed.removeAttribute('aria-invalid'); setHint(''); });
 
   pop.addEventListener('click',function(e){
     var t=e.target.closest('button'); if(!t||!pop.contains(t)) return;
     if(t.hasAttribute('data-clear')){
       c.commit(''); c.close(true);
     }else if(t.hasAttribute('data-close')){
-      if(typed.value.trim() && !applyTyped()) return;
       c.close(true);
     }
   });
