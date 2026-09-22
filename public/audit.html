@@ -1901,9 +1901,15 @@ function notePhotoPicker(host){
     thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
     add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
   };
-  add.onclick=()=>file.click();
-  file.onchange=async()=>{
-    const files=[...file.files].slice(0,NOTE_MAX_PHOTOS-urls.length); file.value='';
+  // Shared by the file picker AND a clipboard paste -- a screenshot pasted
+  // straight into the note box (the obvious way to attach "website
+  // inspiration" images) used to silently do nothing: a plain <textarea>
+  // paste never touches the file input at all. Root-caused 2026-09-23 from
+  // two of Jiyah's real notes that saved with an empty photo_urls -- no
+  // notes_photo upload request anywhere near either POST in the logs, so
+  // she never got a working attach at all, file picker or paste.
+  async function handleFiles(files){
+    files=[...files].slice(0,NOTE_MAX_PHOTOS-urls.length);
     for(let i=0;i<files.length;i++){
       busy=true; status.textContent='Uploading '+(i+1)+' of '+files.length+'…';
       try{
@@ -1913,11 +1919,19 @@ function notePhotoPicker(host){
       }catch(err){ alert(err.message||'Could not upload that photo'); }
     }
     busy=false; status.textContent='';
-  };
+  }
+  add.onclick=()=>file.click();
+  file.onchange=()=>{ const f=file.files; file.value=''; handleFiles(f); };
   paint();
-  return { urls:()=>urls.slice(), busy:()=>busy, reset:()=>{ urls=[]; paint(); } };
+  return { urls:()=>urls.slice(), busy:()=>busy, reset:()=>{ urls=[]; paint(); }, handleFiles };
 }
 const notePicker=notePhotoPicker($('notePhotoHost'));
+// Paste a screenshot straight into the note box -- same upload path as the
+// "+ Add photo" button (owner root-cause, 2026-09-23).
+$('noteBody').addEventListener('paste',e=>{
+  const imgs=[...(e.clipboardData?.items||[])].filter(it=>it.kind==='file'&&it.type.startsWith('image/')).map(it=>it.getAsFile()).filter(Boolean);
+  if(imgs.length){ e.preventDefault(); notePicker.handleFiles(imgs); }
+});
 $('notePost').onclick=async()=>{
   const body=$('noteBody').value.trim();
   if(!body){ $('noteBody').focus(); return; }

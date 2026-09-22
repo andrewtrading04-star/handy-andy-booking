@@ -9344,7 +9344,14 @@ document.addEventListener('click',e=>{
 
 // Photo picker used by both composers. Each photo is shrunk and uploaded the
 // moment it's chosen (notes_photo), so "Post note" only has to send URLs.
-function notePhotoPicker(host){
+// textareaEl (optional): the note body box this picker's photos belong to --
+// wires a paste listener so a pasted screenshot uploads the same way the
+// "+ Add photo" button does. Root-caused 2026-09-23 from two of Jiyah's real
+// notes that saved with an empty photo_urls: nothing in the server logs
+// showed a notes_photo upload anywhere near either post, meaning a plain
+// paste into the textarea (the obvious way to attach a screenshot) was
+// simply doing nothing -- a bare <textarea> never touches a file input.
+function notePhotoPicker(host,textareaEl){
   let urls=[];
   host.innerHTML=`<div class="note-photos np-thumbs"></div>
     <button type="button" class="btn ghost sm np-add" style="width:auto;margin-top:8px;">📷 Add photo</button>
@@ -9356,9 +9363,8 @@ function notePhotoPicker(host){
     thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
     add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
   };
-  add.onclick=()=>file.click();
-  file.onchange=async()=>{
-    const files=[...file.files].slice(0,NOTE_MAX_PHOTOS-urls.length); file.value='';
+  async function handleFiles(list){
+    const files=[...list].slice(0,NOTE_MAX_PHOTOS-urls.length);
     for(let i=0;i<files.length;i++){
       busy.textContent=`Uploading ${i+1} of ${files.length}…`;
       try{
@@ -9368,7 +9374,13 @@ function notePhotoPicker(host){
       }catch(err){ toast(err.message||'Could not upload that photo'); }
     }
     busy.textContent='';
-  };
+  }
+  add.onclick=()=>file.click();
+  file.onchange=()=>{ const f=file.files; file.value=''; handleFiles(f); };
+  if(textareaEl) textareaEl.addEventListener('paste',e=>{
+    const imgs=[...(e.clipboardData?.items||[])].filter(it=>it.kind==='file'&&it.type.startsWith('image/')).map(it=>it.getAsFile()).filter(Boolean);
+    if(imgs.length){ e.preventDefault(); handleFiles(imgs); }
+  });
   paint();
   return { urls:()=>urls.slice(), busy:()=>!!busy.textContent, reset:()=>{ urls=[]; paint(); }, set:(list)=>{ urls=(list||[]).filter(Boolean).slice(0,NOTE_MAX_PHOTOS); paint(); } };
 }
@@ -9572,7 +9584,7 @@ function renderStaffNotesPane(){
     </div>
     <h3 style="margin:24px 0 8px;font-size:15px;">Recent</h3>
     <div id="notesRecent" class="empty">Loading…</div>`;
-  const picker=notePhotoPicker(document.getElementById('notePhotoHost'));
+  const picker=notePhotoPicker(document.getElementById('notePhotoHost'), document.getElementById('noteBody'));
   const sendCtl=noteSendWire('note', document.getElementById('notePost'));
   const clearForm=()=>{ document.getElementById('noteBody').value=''; picker.reset(); sendCtl.reset(); };
   const editCtl=noteEditMode(document.getElementById('notePost'), clearForm);
@@ -9703,7 +9715,7 @@ async function renderTechNotesPane(){
       : techs.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} — ${esc(x.business_name)}${x.city?' · '+esc(x.city):''}</option>`).join('');
   };
   typeEl.onchange=fillWho; fillWho();
-  const picker=notePhotoPicker(document.getElementById('tnPhotoHost'));
+  const picker=notePhotoPicker(document.getElementById('tnPhotoHost'), document.getElementById('tnBody'));
   const sendCtl=noteSendWire('tn', document.getElementById('tnPost'));
   const clearForm=()=>{ document.getElementById('tnBody').value=''; picker.reset(); sendCtl.reset(); };
   const editCtl=noteEditMode(document.getElementById('tnPost'), clearForm);
