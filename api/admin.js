@@ -10967,10 +10967,15 @@ async function estimateSendSms(req, res, db, auth, body) {
 // ── Follow up now ────────────────────────────────────────────────────────────
 // Sent, not approved, and still fresh enough to win. Two groups, best first:
 //   opened   – the customer opened the text/email but did not approve
-//   unopened – sent more than 3 hours ago and never opened
+//   unopened – never opened
+// Owner rule (2026-09-22): an estimate is DUE for a follow-up once 24 hours
+// pass with no response -- and every follow-up we send (Text reminder / Resend
+// text) restarts that 24-hour clock, so the same customer isn't listed every
+// time the page opens. "No response" = not approved; an open is not a response.
 // Read-only. Nothing here changes an estimate.
 // Clean slate (owner, 2026-09-22): only estimates sent from this moment on are listed.
 const FOLLOWUP_STARTS = Date.parse('2026-09-22T00:00:00-06:00');
+const FOLLOWUP_AFTER_MS = 24 * 3600000;
 async function estimateFollowups(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const now = Date.now();
@@ -10989,16 +10994,21 @@ async function estimateFollowups(req, res, db, auth) {
     const sentAt = Math.max(ms(e.contacted_at), ms(e.texted_at), ms(e.emailed_at)) || ms(e.created_at);
     const openedAt = Math.max(ms(e.text_opened_at), ms(e.email_opened_at));
     const rem = [...String(e.notes || '').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/g)].map(m => Date.parse(m[1])).filter(Boolean);
+    const remindedAt = rem.length ? Math.max(...rem) : 0;
     const row = {
       id: e.id, name: e.customer_name || '', phone: e.customer_phone || '', email: e.customer_email || '',
       service: e.service_label || '', total: items.length ? total : null, can_text: !!(e.customer_phone && e.sms_consent === true),
       phone_estimate: e.source === 'manual', sent_at: sentAt ? new Date(sentAt).toISOString() : null,
       opened_at: openedAt ? new Date(openedAt).toISOString() : null,
-      reminded_at: rem.length ? new Date(Math.max(...rem)).toISOString() : null,
+      reminded_at: remindedAt ? new Date(remindedAt).toISOString() : null,
     };
-    if (sentAt < FOLLOWUP_STARTS) continue;
+    if (!sentAt || sentAt < FOLLOWUP_STARTS) continue;
+    // Last time WE reached out: the original send or the latest reminder.
+    // Due only when that was 24h+ ago and the estimate is still young enough to win.
+    const lastTouch = Math.max(sentAt, remindedAt);
+    if (lastTouch > now - FOLLOWUP_AFTER_MS || sentAt < now - 14 * 86400000) continue;
     if (openedAt) opened.push(row);
-    else if (sentAt && sentAt <= now - 3 * 3600000 && sentAt >= now - 14 * 86400000) unopened.push(row);
+    else unopened.push(row);
   }
   opened.sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at));
   unopened.sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));

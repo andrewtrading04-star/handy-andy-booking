@@ -666,6 +666,8 @@
   .est-approval-addons{margin-top:6px;font-size:12.5px;font-weight:700;color:#15803d;line-height:1.4;}
   .est-approval-addons b{color:#0f172a;}
   .est-sent-line{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--mute);}
+  .est-fu-line{margin-top:6px;font-size:12px;color:#b45309;font-weight:600;}
+  .fu-n{display:inline-block;margin-left:5px;min-width:18px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;line-height:18px;text-align:center;}
   .est-opened{color:#15803d;font-weight:700;}
   .est-unopened{color:#b45309;}
   .est-booked-tag{font-size:12.5px;font-weight:700;color:#15803d;padding:6px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;}
@@ -14025,6 +14027,7 @@ function paintEstimates(){
 }
 
 // ── Follow up now: sent estimates the customer opened (or never opened) but did not approve ──
+function fuWhen(iso){ return new Date(iso).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
 function fuAgo(iso){
   const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));
   return m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:`${Math.floor(m/1440)}d ago`;
@@ -14035,7 +14038,7 @@ async function loadEstFollowups(){
     const d=await api('estimate_followups',{ params:{ business:current.slug }});
     if(request!==_estRequest||!onScreen('estimates')) return;
     const n=(d.opened||[]).length+(d.unopened||[]).length;
-    const tab=document.getElementById('fuTabN'); if(tab) tab.textContent=n?' '+n:'';
+    const tab=document.getElementById('fuTabN'); if(tab) tab.innerHTML=n?`<span class="fu-n">${n}</span>`:'';
     paintEstFollowups(d);
   }catch(_){ const box=document.getElementById('estFollow'); if(box) box.innerHTML='<div class="empty">Could not load the follow-up list.</div>'; }
 }
@@ -14044,7 +14047,8 @@ function paintEstFollowups(d){
   const row=(r,kind)=>`<div class="fu-row" data-fu="${esc(r.id)}">
     <div class="fu-who"><b>${esc(r.name||r.phone||'Customer')}${r.phone_estimate?'':' <small style="font-weight:400;color:var(--mute);">website</small>'}</b>
       <span>${esc(r.service||'Estimate')}${r.total!=null?' · '+money2(r.total):''}</span>
-      <span>${kind==='opened'?`Opened ${fuAgo(r.opened_at)}, not approved`:`Sent ${fuAgo(r.sent_at)}, not opened`}${r.reminded_at?` · Reminded ${fuAgo(r.reminded_at)}`:''}</span></div>
+      <span>${kind==='opened'?`Opened ${fuAgo(r.opened_at)}, not approved`:`Sent ${fuAgo(r.sent_at)}, not opened`}</span>
+      ${r.reminded_at?`<span class="est-fu-line">We followed up with customer at ${esc(fuWhen(r.reminded_at))} (${fuAgo(r.reminded_at)})</span>`:''}</div>
     <div class="fu-btns">
       ${r.phone?`<a class="rc-btn ghost" href="tel:${esc(r.phone)}" style="text-decoration:none;">Call</a>`:''}
       ${r.can_text?`<button type="button" class="rc-btn" data-fu-remind="${esc(r.id)}">${r.reminded_at?'Text again':'Text reminder'}</button>`:''}
@@ -14052,10 +14056,10 @@ function paintEstFollowups(d){
     </div></div>`;
   const opened=d.opened||[], unopened=d.unopened||[];
   box.innerHTML=`<div class="fu-box">
-    <div class="fu-head"><div><h3>Follow up now · ${opened.length+unopened.length}</h3><small style="color:var(--mute);">Estimates sent from Sept 22 on.</small></div>
+    <div class="fu-head"><div><h3>Follow up now · ${opened.length+unopened.length}</h3><small style="color:var(--mute);">No response for 24 hours since we last reached out. Estimates sent from Sept 22 on.</small></div>
       <button type="button" class="rc-btn ghost" id="fuCloseBtn">Close old estimates…</button></div>
     ${opened.length?`<div class="fu-sec">Opened, not approved (${opened.length})</div>${opened.map(r=>row(r,'opened')).join('')}`:''}
-    ${unopened.length?`<div class="fu-sec">Sent, not opened after 3 hours (${unopened.length})</div>${unopened.map(r=>row(r,'unopened')).join('')}`:''}
+    ${unopened.length?`<div class="fu-sec">Sent, never opened (${unopened.length})</div>${unopened.map(r=>row(r,'unopened')).join('')}`:''}
     ${opened.length+unopened.length?'':'<div class="fu-none">Nobody to follow up with right now.</div>'}
     <div class="fu-close" id="fuClosePanel" hidden></div></div>`;
   box.querySelectorAll('[data-fu-open]').forEach(b=>b.addEventListener('click',()=>{ _estSelected=b.dataset.fuOpen; _estQuery=''; estOrigin='all'; estFilter='contacted'; renderEstimates(); }));
@@ -14223,7 +14227,13 @@ function estCard(e){
   // Estimates sent before migration 0112 only have the combined contacted_at —
   // fall back to that single line so old rows still show something.
   const legacySentLine=(!e.texted_at&&!e.emailed_at&&e.contacted_at)?`<div class="est-sent-line">✓ Sent to customer by <b>${esc(e.contacted_by||'Office')}</b> · ${esc(fmtSentAt(e.contacted_at))}</div>`:'';
-  const sentLine=textedLine+emailedLine+legacySentLine;
+  // Follow-ups we sent (estimate_remind writes "Reminder texted <iso> by <name>."
+  // into notes) -- the latest one is called out on the card so the office can
+  // see at a glance that this customer was already chased, and when.
+  const fuStamps=[...String(e.notes||'').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?: by ([^.\n]+))?/g)].map(m=>({at:m[1],by:m[2]||''})).filter(x=>Date.parse(x.at));
+  const fuLast=fuStamps.length?fuStamps[fuStamps.length-1]:null;
+  const followedLine=fuLast?`<div class="est-fu-line">↻ We followed up with customer at ${esc(fmtSentAt(fuLast.at))}${fuLast.by?` · ${esc(fuLast.by)}`:''}${fuStamps.length>1?` · ${fuStamps.length} follow-ups`:''}</div>`:'';
+  const sentLine=textedLine+emailedLine+legacySentLine+followedLine;
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);
