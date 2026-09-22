@@ -1592,6 +1592,16 @@ $('cfLine').onchange=e=>{ cf.line=e.target.value; renderCalls(); };
 $('cfWho').onchange=e=>{ cf.who=e.target.value; renderCalls(); };
 $('cfQ').oninput=e=>{ cf.q=e.target.value.trim().toLowerCase(); renderCalls(); };
 
+// Owner rule 2026-09-23: her Calls page defaults to the STAFFED markets only
+// -- Houston, Denver, Austin (the metros with real techs) -- so she isn't
+// buried in lead-gen-only lines from unstaffed markets (LA, Phoenix, San
+// Antonio, DFW/Dallas, a bare "Georgia" number) that nobody actually works.
+// Golden and Greenway are sub-labels within Denver/Houston (their own
+// tracking_numbers.market is already 'Denver'/'Houston' -- see migration
+// 0132), so filtering on r.market alone covers them with no special-casing.
+// A call with no market at all is excluded too -- better to under-show than
+// surface something from a market she was never meant to see.
+const STAFFED_MARKETS=new Set(['Houston','Denver','Austin']);
 async function loadCalls(){
   const req=++callsReq;
   const from=cf.range==='today'?dayStartCT(0):cf.range==='yesterday'?dayStartCT(-1):dayStartCT(-(Number(cf.range)-1));
@@ -1601,7 +1611,9 @@ async function loadCalls(){
     const params={limit:200, from:from.toISOString()}; if(to) params.to=to.toISOString();
     const [d,g]=await Promise.all([crm('calls',params), api('graded_ids',{params:{from:from.toISOString(), ...(to?{to:to.toISOString()}:{})}}).catch(()=>({ids:[]}))]);
     if(req!==callsReq) return;
-    callRows=[...(d.open||[]),...(d.handled||[])].sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+    callRows=[...(d.open||[]),...(d.handled||[])]
+      .filter(r=>STAFFED_MARKETS.has(r.market))
+      .sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
     gradedIds=new Set(g.ids||[]);
     callsLoaded=true;
     fillCallFilters(); renderCalls();
