@@ -11950,10 +11950,12 @@ function callCard(r,handled,g){
   // the same definition; Location is just the market, always shown as a
   // label rather than a toggle since there's no "off" state for a place.
   const statusBoxes = `<dl class="ci-facts">
+    <dt>Business</dt><dd>${esc(r.business?.name || '—')}</dd>
+    <dt>Called</dt><dd>${esc(r._calledLine || '—')}</dd>
+    <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
     <dt>Call outcome</dt><dd>${esc(callOutcome(r))}</dd>
     <dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>
     <dt>Location</dt><dd>${esc(r.market || 'Unrouted')}</dd>
-    <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
   </dl>`;
 
   // Live-wizard outcome and a not-yet-booked callback marker don't fit the 4
@@ -12085,13 +12087,17 @@ function callCard(r,handled,g){
   // to infer it from the business/line label.
   const dialedNum = isTracked && r.grasshopper_number ? fmtPhone(r.grasshopper_number) : null;
   const hasLineLabel = lineLabel && lineLabel !== r.business?.name;
-  const subLine = [
-    r.business?.name,
-    hasLineLabel
-      ? (dialedNum ? `${lineLabel} line (${dialedNum})` : `${lineLabel} line`)
-      : (dialedNum ? 'called ' + dialedNum : null),
-    routedTo ? 'routed to ' + routedTo : (isTracked ? 'not routed' : null),
-  ].filter(Boolean).map(esc).join(' · ');
+  // Business / line / routed-to now live only in the "Business"/"Called"/
+  // "Routed to" rows of the facts list below -- this used to ALSO build a
+  // free-text "Business · Line label (dialed number) · routed to X" line,
+  // which not only duplicated the facts list but wrapped an already-
+  // parenthesized fmtPhone() number in a second pair of parens, e.g.
+  // "Golden line ((720) 637-3707)". Owner report 2026-09-23: "theres an
+  // extra (" plus "i want it to be more organized" / no repeated fields.
+  r._calledLine = hasLineLabel
+    ? (dialedNum ? `${lineLabel} (${dialedNum})` : lineLabel)
+    : (dialedNum || null);
+  const subLine = '';
   // A row with no caller number can never be returned. In practice this is
   // only ever a live-call row: the wizard creates it the instant "Take a
   // Call" opens and the number is filled in later, or not at all. Say it
