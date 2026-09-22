@@ -257,6 +257,47 @@
   .conv-fill{height:100%;border-radius:5px;}
   .conv-foot{grid-column:1/-1;font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:#fff;opacity:.72;}
   @media (max-width:600px){.conv-card{grid-template-columns:1fr;gap:12px;}.conv-pct{font-size:34px;}.conv-stats{gap:12px;justify-content:center;}}
+
+  /* ── Pages (owner plan 2026-09-22: Jiyah gets her own dashboard) ──
+     A left nav like the CRM's. Each page is a <section data-page>; only the
+     active one is shown. Phones: the nav becomes a scrolling row on top. */
+  .shell{display:flex;gap:18px;align-items:flex-start;}
+  .sidenav{flex:0 0 190px;position:sticky;top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;}
+  .sidenav button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;border-radius:9px;
+    padding:10px 11px;font:inherit;font-size:14px;font-weight:600;color:var(--ink-2);cursor:pointer;}
+  .sidenav button:hover{background:var(--line2);}
+  .sidenav button.on{background:var(--accent-soft);color:var(--accent);font-weight:800;}
+  .sidenav .nav-ic{width:20px;text-align:center;font-size:15px;}
+  .sidenav .nav-n{margin-left:auto;min-width:18px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;line-height:18px;text-align:center;}
+  .pages{flex:1;min-width:0;}
+  .page{display:none;} .page.on{display:block;}
+  @media (max-width:760px){
+    .shell{display:block;}
+    .sidenav{position:static;display:flex;gap:4px;overflow-x:auto;margin-bottom:12px;padding:6px;}
+    .sidenav button{width:auto;flex:none;padding:8px 11px;font-size:13px;}
+  }
+
+  /* Calls page */
+  .cf-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+  .cf-row select,.cf-row input{min-height:40px;}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff;}
+  .seg button{border:0;background:none;padding:8px 12px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-2);cursor:pointer;}
+  .seg button+button{border-left:1px solid var(--line);}
+  .seg button.on{background:var(--ink);color:#fff;}
+  .cstat{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;}
+  .cstat .tile{margin:0;}
+  .call{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;background:var(--panel);}
+  .call-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
+  .call-when{font-weight:800;font-size:14.5px;white-space:nowrap;}
+  .call-who{font-weight:700;}
+  .call-meta{color:var(--mute);font-size:12.5px;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:800;background:var(--line2);color:var(--ink-2);}
+  .pill.good{background:#dcfce7;color:#166534;} .pill.bad{background:#fee2e2;color:#991b1b;} .pill.warn{background:#fef3c7;color:#92400e;} .pill.blue{background:var(--accent-soft);color:var(--accent);}
+  .call-body{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .call audio{height:34px;max-width:100%;}
+  .call-tx{margin-top:8px;padding:9px 11px;border-radius:9px;background:var(--line2);font-size:13px;line-height:1.5;white-space:pre-wrap;}
+  .call .btn.sm{padding:7px 11px;font-size:12.5px;}
+  .call.graded{border-color:#86efac;}
 </style>
 </head>
 <body>
@@ -283,6 +324,36 @@
         <button class="btn ghost" id="outBtn">Sign out</button>
       </div>
     </div>
+
+    <div class="shell">
+    <nav class="sidenav" id="sidenav" aria-label="Pages">
+      <button type="button" data-nav="audit" class="on"><span class="nav-ic">📝</span>Audit</button>
+      <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
+    </nav>
+    <div class="pages">
+
+    <!-- ══════════ Page: Calls (every call, every business, every line) ══════════ -->
+    <section class="page" data-page="calls" id="pageCalls">
+      <div class="card">
+        <div class="cf-row">
+          <div class="seg" id="cfRange">
+            <button type="button" data-r="today" class="on">Today</button><button type="button" data-r="yesterday">Yesterday</button><button type="button" data-r="7">7 days</button><button type="button" data-r="30">30 days</button>
+          </div>
+          <select id="cfBiz"><option value="">All businesses</option></select>
+          <select id="cfLine"><option value="">All lines</option></select>
+          <select id="cfWho"><option value="">Anyone</option></select>
+          <div class="seg" id="cfKind">
+            <button type="button" data-k="all" class="on">All</button><button type="button" data-k="answered">Answered</button><button type="button" data-k="missed">Missed</button><button type="button" data-k="voicemail">Voicemail</button><button type="button" data-k="booked">Booked</button><button type="button" data-k="recorded">Recorded</button><button type="button" data-k="ungraded">Not graded</button>
+          </div>
+          <input id="cfQ" type="search" placeholder="Name or phone" style="min-width:160px;">
+        </div>
+        <div class="cstat" id="cfStats"></div>
+        <div id="callsList"><div class="sub">Loading calls…</div></div>
+      </div>
+    </section>
+
+    <!-- ══════════ Page: Audit (the original portal) ══════════ -->
+    <section class="page on" data-page="audit" id="pageAudit">
 
     <!-- Secretary conversion -->
     <div class="conv-wrap" id="convWrap"></div>
@@ -414,6 +485,10 @@
       <button class="btn wide" id="saveAudit">Save this call</button>
       <div class="err" id="formErr"></div>
     </div>
+
+    </section><!-- /page audit -->
+    </div><!-- /pages -->
+    </div><!-- /shell -->
   </div>
 </div>
 
@@ -1432,6 +1507,169 @@ async function enter(){
   $('app').classList.remove('hidden');
   if(!$('date').value) $('date').value=todayStr();
   await load();
+  if(location.hash==='#calls') showPage('calls');
+}
+
+// ── Pages ───────────────────────────────────────────────────────────────────
+// Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
+// "audit" is the original portal; "calls" is every call in the CRM.
+let page='audit';
+function showPage(p){
+  page=p;
+  document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
+  document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
+  try{ history.replaceState(null,'','#'+p); }catch(_){}
+  if(p==='calls') loadCalls();
+}
+$('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'); if(b) showPage(b.dataset.nav); });
+
+// ── Calls page ──────────────────────────────────────────────────────────────
+// Reads the CRM's OWN call handlers (api/admin.js: calls, call_recording) with
+// the auditor token -- the admin API lets that token in for call actions only
+// (AUDITOR_ADMIN_ACTIONS). No second copy of the call logic to drift.
+async function crm(action, params){
+  const qs=new URLSearchParams({action, ...(params||{})});
+  const r=await fetch('/api/admin?'+qs.toString(), {headers:{Authorization:'Bearer '+token}});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||'Could not load calls');
+  return j;
+}
+const CT='America/Chicago';   // the portal's clock, same as the audit form
+function tzOffsetMs(date,tz){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(date);
+  const o={}; parts.forEach(p=>{ o[p.type]=p.value; });
+  return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime();
+}
+function dayStartCT(offsetDays){
+  const now=new Date(), local=new Date(now.getTime()+tzOffsetMs(now,CT));
+  const guess=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate()+offsetDays);
+  return new Date(guess-tzOffsetMs(new Date(guess),CT));
+}
+function ctDateStr(iso){
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:CT,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));
+  return p; // YYYY-MM-DD
+}
+function ctTimeHM(iso){ return new Date(iso).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:CT}); }
+function prettyPhone(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d.length===10?'('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6):(p||''); }
+function fmtDur(s){ s=Number(s)||0; if(!s) return ''; const m=Math.floor(s/60), r=s%60; return m?m+'m '+r+'s':r+'s'; }
+
+const cf={range:'today',biz:'',line:'',who:'',kind:'all',q:''};
+let callRows=[], gradedIds=new Set(), callsReq=0, callsLoaded=false;
+$('cfRange').addEventListener('click',e=>{ const b=e.target.closest('[data-r]'); if(!b) return; cf.range=b.dataset.r; $('cfRange').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); loadCalls(); });
+$('cfKind').addEventListener('click',e=>{ const b=e.target.closest('[data-k]'); if(!b) return; cf.kind=b.dataset.k; $('cfKind').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderCalls(); });
+$('cfBiz').onchange=e=>{ cf.biz=e.target.value; renderCalls(); };
+$('cfLine').onchange=e=>{ cf.line=e.target.value; renderCalls(); };
+$('cfWho').onchange=e=>{ cf.who=e.target.value; renderCalls(); };
+$('cfQ').oninput=e=>{ cf.q=e.target.value.trim().toLowerCase(); renderCalls(); };
+
+async function loadCalls(){
+  const req=++callsReq;
+  const from=cf.range==='today'?dayStartCT(0):cf.range==='yesterday'?dayStartCT(-1):dayStartCT(-(Number(cf.range)-1));
+  const to=cf.range==='yesterday'?dayStartCT(0):null;
+  if(!callsLoaded) $('callsList').innerHTML='<div class="sub">Loading calls…</div>';
+  try{
+    const params={limit:200, from:from.toISOString()}; if(to) params.to=to.toISOString();
+    const [d,g]=await Promise.all([crm('calls',params), api('graded_ids',{params:{from:from.toISOString(), ...(to?{to:to.toISOString()}:{})}}).catch(()=>({ids:[]}))]);
+    if(req!==callsReq) return;
+    callRows=[...(d.open||[]),...(d.handled||[])].sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+    gradedIds=new Set(g.ids||[]);
+    callsLoaded=true;
+    fillCallFilters(); renderCalls();
+  }catch(err){ if(req===callsReq) $('callsList').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }
+}
+function lineLabel(r){ return r.tracking_label || (r.grasshopper_number?prettyPhone(r.grasshopper_number):'') || r.market || ''; }
+function whoLabel(r){ return r.handled_by && r.handled_by!=='Booked' ? r.handled_by : (r.routed_to_name||''); }
+function fillCallFilters(){
+  const keep=(sel,vals,label)=>{
+    const cur=sel.value; const opts=[...new Set(vals.filter(Boolean))].sort();
+    sel.innerHTML='<option value="">'+label+'</option>'+opts.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
+    if(opts.includes(cur)) sel.value=cur; else { sel.value=''; }
+  };
+  keep($('cfBiz'),callRows.map(r=>r.business&&r.business.name),'All businesses'); cf.biz=$('cfBiz').value;
+  keep($('cfLine'),callRows.map(lineLabel),'All lines'); cf.line=$('cfLine').value;
+  keep($('cfWho'),callRows.map(whoLabel),'Anyone'); cf.who=$('cfWho').value;
+}
+function callKind(r){
+  if(r.kind==='live') return {t:'Answered · script',c:'good'};
+  if(r.answered===true) return {t:'Answered',c:'good'};
+  if(r.left_voicemail) return {t:'Voicemail',c:'warn'};
+  if(r.answered===false) return {t:'Missed',c:'bad'};
+  return {t:r.kind||'Call',c:''};
+}
+function callResult(r){
+  if(r.booking){ const when=r.booking.scheduled_at?new Date(r.booking.scheduled_at).toLocaleDateString('en-US',{timeZone:CT,month:'short',day:'numeric'}):''; return {t:'Booked'+(when?' · '+when:'')+(r.booking.technician&&r.booking.technician.name?' · '+r.booking.technician.name:''),c:'good'}; }
+  const m={new:'Needs callback',calling:'Being called',called_back:'Called back',resolved:'Handled',ignored:'Ignored'};
+  return {t:m[r.status]||r.status||'',c:r.status==='new'?'bad':r.status==='called_back'||r.status==='resolved'?'blue':''};
+}
+function renderCalls(){
+  const q=cf.q;
+  const rows=callRows.filter(r=>{
+    if(cf.biz && (r.business&&r.business.name)!==cf.biz) return false;
+    if(cf.line && lineLabel(r)!==cf.line) return false;
+    if(cf.who && whoLabel(r)!==cf.who) return false;
+    const k=cf.kind;
+    if(k==='answered' && !(r.kind==='live'||r.answered===true)) return false;
+    if(k==='missed' && r.answered!==false) return false;
+    if(k==='voicemail' && !r.left_voicemail) return false;
+    if(k==='booked' && !r.booking) return false;
+    if(k==='recorded' && !r.recording_url) return false;
+    if(k==='ungraded' && gradedIds.has(r.id)) return false;
+    if(q && !((r.caller_display||'')+' '+(r.caller_pretty||'')+' '+(r.caller_phone||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const all=callRows;
+  const tile=(l,v,s)=>'<div class="tile"><div class="t-l">'+l+'</div><div class="t-v">'+v+'</div>'+(s?'<div class="t-s">'+s+'</div>':'')+'</div>';
+  $('cfStats').innerHTML=
+    tile('Calls',all.length,cf.range==='today'?'today':cf.range==='yesterday'?'yesterday':'last '+cf.range+' days')+
+    tile('Answered',all.filter(r=>r.kind==='live'||r.answered===true).length)+
+    tile('Missed',all.filter(r=>r.answered===false).length,all.filter(r=>r.left_voicemail).length+' left voicemail')+
+    tile('Booked',all.filter(r=>r.booking).length)+
+    tile('Graded',all.filter(r=>gradedIds.has(r.id)).length,(all.length-all.filter(r=>gradedIds.has(r.id)).length)+' not yet');
+  if(!rows.length){ $('callsList').innerHTML='<div class="sub">No calls match.</div>'; return; }
+  $('callsList').innerHTML=rows.map(r=>{
+    const k=callKind(r), res=callResult(r), graded=gradedIds.has(r.id);
+    const when=new Date(r.occurred_at).toLocaleString('en-US',{timeZone:CT,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    const rec=r.recording_url?'<audio controls preload="none" src="/api/admin?action=call_recording&id='+encodeURIComponent(r.id)+'&token='+encodeURIComponent(token)+'"></audio>':'';
+    return '<div class="call'+(graded?' graded':'')+'" data-call="'+esc(r.id)+'">'+
+      '<div class="call-top"><span class="call-when">'+esc(when)+' CT</span>'+
+        '<span class="call-who">'+esc(r.caller_display||'Unknown caller')+'</span>'+
+        (r.customer&&r.customer.name?'<span class="call-meta">'+esc(r.caller_pretty||'')+'</span>':'')+
+        (r.is_new_caller?'<span class="pill">New caller</span>':'')+(r.blocked?'<span class="pill bad">Blocked</span>':'')+
+        '<span class="pill '+k.c+'">'+esc(k.t)+'</span>'+(r.duration_sec?'<span class="call-meta">'+fmtDur(r.duration_sec)+'</span>':'')+
+        (res.t?'<span class="pill '+res.c+'">'+esc(res.t)+'</span>':'')+
+        (graded?'<span class="pill good">✓ Graded</span>':'')+
+      '</div>'+
+      '<div class="call-meta" style="margin-top:4px;">'+esc((r.business&&r.business.name)||'')+(lineLabel(r)?' · '+esc(lineLabel(r)):'')+(r.service?' · '+esc(r.service):'')+(whoLabel(r)?' · '+esc(whoLabel(r)):'')+(r.text_count?' · '+r.text_count+' text'+(r.text_count===1?'':'s'):'')+'</div>'+
+      '<div class="call-body">'+rec+
+        (r.transcript?'<button type="button" class="btn ghost sm" data-tx>Transcript</button>':'')+
+        '<button type="button" class="btn sm" data-grade>'+(graded?'Grade again':'Grade this call')+'</button>'+
+      '</div>'+
+      (r.transcript?'<div class="call-tx" hidden>'+esc(r.transcript)+'</div>':'')+
+      (r.notes?'<div class="call-meta" style="margin-top:6px;">Office note: '+esc(r.notes)+'</div>':'')+
+    '</div>';
+  }).join('');
+  $('callsList').querySelectorAll('[data-tx]').forEach(b=>b.onclick=()=>{ const t=b.closest('.call').querySelector('.call-tx'); t.hidden=!t.hidden; });
+  $('callsList').querySelectorAll('[data-grade]').forEach(b=>b.onclick=()=>gradeFromCall(callRows.find(r=>r.id===b.closest('.call').dataset.call)));
+}
+// One click from a call to grading it: jump to the Audit page on that call's
+// day and open the form with everything we already know filled in.
+async function gradeFromCall(r){
+  if(!r) return;
+  const day=ctDateStr(r.occurred_at);
+  if($('date').value!==day){ $('date').value=day; await load(); }
+  showPage('audit');
+  openForm(null);
+  const line=(data.lines||[]).find(l=>String(l.number||'').replace(/\D/g,'').slice(-10)===String(r.grasshopper_number||'').replace(/\D/g,'').slice(-10));
+  if(line) $('fLine').value=line.number;
+  if((data.calls||[]).some(c=>c.id===r.id)) $('fCall').value=r.id;
+  const who=whoLabel(r);
+  $('fWho').value=['Heather','Joey'].includes(who)?who:(r.answered===false?'Nobody':'');
+  $('fTime').value=ctTimeHM(r.occurred_at);
+  $('fCallerPhone').value=String(r.caller_phone||'').replace(/\D/g,'').slice(-10);
+  if(r.customer&&r.customer.name) $('fCallerName').value=r.customer.name;
+  if(r.service==='TV Mounting'||r.service==='Handyman') $('fSvc').value=r.service;
+  try{ renderCtx(); }catch(_){}
+  $('formCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
 // An expired or revoked token must drop back to the login form rather than
 // leaving her on an empty page wondering why nothing loads.

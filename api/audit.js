@@ -91,6 +91,7 @@ export default async function handler(req, res) {
       case 'day_save':     return await daySave(req, res, db, auth, body);
       case 'audit_save':   return await auditSave(req, res, db, auth, body);
       case 'audit_delete': return await auditDelete(req, res, db, auth, body);
+      case 'graded_ids':   return await gradedIds(req, res, db);
       default:             return res.status(400).json({ error: 'Unknown action' });
     }
   } catch (e) {
@@ -128,6 +129,18 @@ async function conversion(req, res, db) {
     people.push({ name: s.name, business: s.business, tz, thisWeek, lastWeek });
   }
   return res.status(200).json({ people });
+}
+
+// Which CRM calls already have an audit row, for the Calls page's "Graded"
+// badge and "Not graded" filter. Ids only; the audits themselves come from day().
+async function gradedIds(req, res, db) {
+  const from = (req.query.from || '').toString(), to = (req.query.to || '').toString();
+  let q = db.from('call_audits').select('call_id').not('call_id', 'is', null).limit(3000);
+  if (from) q = q.gte('occurred_at', from);
+  if (to) q = q.lt('occurred_at', to);
+  const { data, error } = await q;
+  if (error) throw error;
+  return res.status(200).json({ ids: (data || []).map(r => r.call_id) });
 }
 
 async function login(req, res, body) {

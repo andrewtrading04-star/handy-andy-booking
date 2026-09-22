@@ -371,7 +371,19 @@ export default async function handler(req, res) {
     // which can't attach a custom header, so it also accepts the exact same
     // signed token via ?token= — same verifyToken() check, just carried the
     // way a browser media request actually can.
-    const auth = verifyToken(action === 'call_recording' ? (getBearer(req) || req.query.token) : getBearer(req));
+    let auth = verifyToken(action === 'call_recording' ? (getBearer(req) || req.query.token) : getBearer(req));
+    // Jiyah's audit portal (public/audit.html, token kind 'auditor' from
+    // api/audit.js) reads the CRM's call data through THESE handlers rather
+    // than a second copy of them (owner rule 2026-09-22: she sees everything
+    // about calls, across every business). Read-only, and only the actions
+    // on this list -- anything else with her token is a 401 like any
+    // stranger. She becomes role 'auditor' with scope 'all' below, so the
+    // business scoping in allowedSlugsFor() treats her like the owner (no
+    // filter) while the owner-only money/staff actions still refuse her.
+    if (auth && auth.kind === 'auditor') {
+      if (!AUDITOR_ADMIN_ACTIONS.has(action) || req.method !== 'GET') return res.status(401).json({ error: 'Unauthorized' });
+      auth = { kind: 'admin', role: 'auditor', scope: 'all', name: auth.name || 'Jiyah', auditor: true };
+    }
     if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
 
     const db = serviceClient();
@@ -8723,6 +8735,9 @@ async function notificationResend(req, res, db, auth, body) {
 // secretary needs to see the voicemails on THEIR extensions regardless of which
 // company the caller was asking about.
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
+// What the call auditor's token may read through this API (see the gate in
+// handler()). All GET, all about calls. Add here to widen her portal.
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail']);
 // How long a claim ("I am ringing this person now") stays hot. Long enough to
 // cover dialing, a conversation and writing a note; short enough that a claim
 // someone forgot to close does not hide a customer forever. After this the card
@@ -11926,7 +11941,7 @@ async function fetchTwilioSmsReadiness() {
 }
 
 async function callNumbers(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && !auth.auditor) return res.status(403).json({ error: 'Owner only' });   // the call auditor may read this too
 
   const [{ data: numbers }, { data: businesses }, voiceUrlByPhone, sms] = await Promise.all([
     db.from('tracking_numbers')
@@ -12202,7 +12217,7 @@ async function callDayDetail(req, res, db, auth) {
     bizId = bizRows[0].id;
     tz = bizRows[0].timezone || 'America/Denver';
     person = displayNameFor(auth.scope);
-  } else if (auth.role === 'owner') {
+  } else if (auth.role === 'owner' || auth.auditor) {   // the call auditor reads any business, like the owner
     let biz; try { biz = await resolveBusiness(db, auth, req.query.business || (req.body && req.body.business)); } catch (e) { return bail(res, e); }
     bizId = biz.id;
     tz = biz.timezone || 'America/Denver';
@@ -12241,7 +12256,7 @@ async function callDayDetail(req, res, db, auth) {
 async function callAnalytics(req, res, db, auth) {
   // Ranks staff against each other on booking rate — the hidden nav button is a
   // convenience, this is the actual gate.
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (auth.role !== 'owner' && !auth.auditor) return res.status(403).json({ error: 'Owner only' });   // the call auditor may read this too
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const RANGE_TO_DAYS = { today: 1, yesterday: 1, '7': 7, '30': 30, '90': 90 };
   const range = String(req.query.range || '30');
