@@ -666,6 +666,7 @@
   .est-approval-addons{margin-top:6px;font-size:12.5px;font-weight:700;color:#15803d;line-height:1.4;}
   .est-approval-addons b{color:#0f172a;}
   .est-sent-line{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--mute);}
+  .est-hours-timer{font-size:32px;font-weight:800;line-height:1.1;color:#16181d;margin:10px 0 6px;}
   .est-fu-line{margin-top:6px;font-size:12px;color:#b45309;font-weight:600;}
   .fu-n{display:inline-block;margin-left:5px;min-width:18px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;line-height:18px;text-align:center;}
   .est-opened{color:#15803d;font-weight:700;}
@@ -14245,6 +14246,13 @@ function estCard(e){
   const agePill = e.status==='new'
     ? `<span class="age-pill ${stale?'stale':'ok'}">${stale?`⚠ ${fmtWaitMinutes(estAgeMinutes(e))} — respond now`:`${fmtWaitMinutes(estAgeMinutes(e))} ago`}</span>`
     : `<span class="age-pill" style="background:${EST_COLOR[e.status]||'#e5e7eb'}22;color:${EST_COLOR[e.status]||'#16181d'};">${esc(EST_STATUS[e.status]||e.status)}</span>`;
+  // Big hours-since-sent timer, owner request 2026-09-23: just the number of
+  // hours since the quote went out, nothing else, bigger than "Waiting on
+  // approval" and sitting right above it. Only makes sense once it's actually
+  // been sent and is still waiting (not approved/declined).
+  const sentAtMs=Math.max(Date.parse(e.texted_at||0)||0,Date.parse(e.emailed_at||0)||0,Date.parse(e.contacted_at||0)||0);
+  const sentTimer=(sentAtMs&&!isApproved&&e.status!=='declined')
+    ? `<div class="est-hours-timer">${Math.floor((Date.now()-sentAtMs)/3600000)} hour${Math.floor((Date.now()-sentAtMs)/3600000)===1?'':'s'}</div>` : '';
   return `<div class="job est-card${stale?' stale':''}${isWeb?' est-card-web':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
     <div class="row" style="align-items:flex-start;gap:12px;">
       <div style="flex:1;min-width:0;">
@@ -14256,6 +14264,7 @@ function estCard(e){
         ${isWeb&&e.notes?`<div class="est-web-src">${esc(e.notes)}</div>`:''}
         ${slotChips}
         ${quote}
+        ${sentTimer}
         ${approved}
         ${sentLine}
       </div>
