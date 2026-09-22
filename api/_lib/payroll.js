@@ -279,6 +279,14 @@ function matchItem(name, lt) {
   // priced consistently), and the generic $85/hr custom-hourly inference
   // guesses hours off whatever the office happened to charge ($129 -> "2h" ->
   // $130 instead of the flat $65 owner rate; Tiffany Weld job, Aug 2026).
+  // Satellite TV setup ("TV Setup 65\" (Direct TV Satellite)"): a free-hand New
+  // Booking label, never a widget catalog item, so it's never priced
+  // consistently -- same reason as the dry erase board and Ring camera above.
+  // Flat $70 per job, all techs (owner rule, 2026-09-23; the generic hourly
+  // inference read a $135 charge as 2h and paid $130 instead -- Keith Evans job).
+  if (/(direct\s*tv|dish\s*network|satellite)\b.*\bsetup\b|\bsetup\b.*\bsatellite\b/i.test(name)) {
+    return { key: 'satellite tv setup', juan: 70, other: 70 };
+  }
   if (/\bring\b.*\b(camera|doorbell)\b|\b(camera|doorbell)\b.*\bring\b/i.test(name)) {
     return { key: 'ring device installation', juan: 65, other: 65 };
   }
