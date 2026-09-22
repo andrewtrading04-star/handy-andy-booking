@@ -20,7 +20,7 @@ export const FOLLOWUP_EMAIL_AFTER_MS = 3 * HOUR;
 // Don't chase quotes that were already old when this shipped, or that have
 // gone stale -- a 5-day-old estimate getting a "did you see it?" reads as spam.
 const LOOKBACK_MS = 3 * 24 * HOUR;
-const STARTS_AT = Date.parse('2026-09-23T00:00:00-06:00');
+const STARTS_AT = Date.parse('2026-09-22T00:00:00-06:00'); // same clean-slate line as the Follow up tab
 
 export async function checkEstimateFollowups(opts = {}) {
   const dryRun = !!opts.dryRun;
