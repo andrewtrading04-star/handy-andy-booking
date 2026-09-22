@@ -1878,6 +1878,13 @@ function compressImage(file,maxDim=1600,quality=0.8){
   });
 }
 const NOTE_MAX_PHOTOS=4;
+// A "priv:" entry is a private-bucket PATH, not a URL (migration 0134,
+// owner rule 2026-09-23: "i need to be able to view them securely") --
+// routes through the same authenticated note_photo proxy on /api/admin
+// her Calls page's recordings already use, with her own bearer token.
+function notePhotoSrc(u){
+  return u.startsWith('priv:') ? '/api/admin?action=note_photo&path='+encodeURIComponent(u)+'&token='+encodeURIComponent(token) : u;
+}
 function notePhotoPicker(host){
   let urls=[], busy=false;
   const add=document.createElement('button');
@@ -1888,7 +1895,7 @@ function notePhotoPicker(host){
   const thumbs=document.createElement('div'); thumbs.style.cssText='display:flex;gap:6px;flex-wrap:wrap;';
   host.append(thumbs,add,file,status);
   const paint=()=>{
-    thumbs.innerHTML=urls.map((u,i)=>'<div style="position:relative;"><img src="'+esc(u)+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);"><button type="button" data-i="'+i+'" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#111;color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer;">&times;</button></div>').join('');
+    thumbs.innerHTML=urls.map((u,i)=>'<div style="position:relative;"><img src="'+esc(notePhotoSrc(u))+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--line);"><button type="button" data-i="'+i+'" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#111;color:#fff;border:none;font-size:12px;line-height:1;cursor:pointer;">&times;</button></div>').join('');
     thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
     add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
   };
@@ -1934,7 +1941,7 @@ async function loadNotesSent(){
       const reads=n.reads||[];
       const status=reads.length?('Read by '+reads.map(r=>esc(r.reader)).join(', ')):'Not read yet';
       const replies=reads.filter(r=>r.reply).map(r=>'<div style="margin-top:6px;padding:7px 9px;background:var(--line2);border-radius:8px;font-size:13px;"><b>'+esc(r.reader)+'</b> replied: '+esc(r.reply)+'</div>').join('');
-      const photos=(n.photo_urls||[]).map(u=>'<img src="'+esc(u)+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;margin-top:6px;margin-right:6px;">').join('');
+      const photos=(n.photo_urls||[]).map(u=>'<img src="'+esc(notePhotoSrc(u))+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;margin-top:6px;margin-right:6px;">').join('');
       return '<div class="call"><div class="call-meta" style="margin-bottom:4px;">To '+esc(who[n.recipient]||n.recipient)+' · '+esc(fmtSentAt(n.created_at))+'</div>'
         +'<div style="font-size:14px;white-space:pre-wrap;">'+esc(n.body)+'</div>'+photos
         +'<div class="call-meta" style="margin-top:6px;">'+status+'</div>'+replies+'</div>';

@@ -64,3 +64,53 @@ export async function deleteImage(path) {
     });
   } catch { /* non-fatal: the DB row is the source of truth */ }
 }
+
+// ── Private bucket (note photos) ────────────────────────────────────────────
+// Owner rule 2026-09-23: "i need to be able to view them securely" -- unlike
+// booking-photos (public bucket, plain URLs), note-photos is a PRIVATE
+// bucket (migration 0134). uploadPrivateImage returns only a `path` -- no
+// browsable URL exists for it at all -- and readPrivateImage fetches the
+// bytes server-side with the service role key, for the note_photo proxy
+// action (api/admin.js) to stream back to an authenticated CRM session only.
+const PRIVATE_BUCKET = 'note-photos';
+export async function uploadPrivateImage(dataUrl, prefix) {
+  const { url, key } = cfg();
+  const { mime, buffer } = decodeDataUrl(dataUrl);
+  const path = `${prefix}/${crypto.randomUUID()}.${extFor(mime)}`;
+  const res = await fetch(`${url}/storage/v1/object/${PRIVATE_BUCKET}/${encodeURI(path)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': mime, 'x-upsert': 'true', 'cache-control': '3600' },
+    body: buffer,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    const e = new Error(`Photo upload failed (${res.status}). ${t.slice(0, 200)}`); e.status = 502; throw e;
+  }
+  // "priv:" prefix marks this as a private-bucket path so the reader (any
+  // photo_urls consumer) can tell it apart from an old public-bucket URL
+  // without a schema change or a lookup.
+  return { path: `priv:${path}` };
+}
+
+// Fetches a private-bucket object's raw bytes + content-type, for proxying.
+// Throws 404-shaped errors the caller can turn into a real 404.
+export async function readPrivateImage(path) {
+  const { url, key } = cfg();
+  const res = await fetch(`${url}/storage/v1/object/${PRIVATE_BUCKET}/${encodeURI(path)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!res.ok) { const e = new Error('Photo not found.'); e.status = 404; throw e; }
+  const contentType = res.headers.get('content-type') || 'image/jpeg';
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType };
+}
+
+export async function deletePrivateImage(path) {
+  if (!path) return;
+  const { url, key } = cfg();
+  try {
+    await fetch(`${url}/storage/v1/object/${PRIVATE_BUCKET}/${encodeURI(path)}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${key}` },
+    });
+  } catch { /* non-fatal */ }
+}

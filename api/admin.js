@@ -90,7 +90,7 @@ function bookingStripePk(slug) {
   }
   return STRIPE_PK_GLOBAL;
 }
-import { uploadImage, deleteImage } from './_lib/storage.js';
+import { uploadImage, deleteImage, uploadPrivateImage, readPrivateImage } from './_lib/storage.js';
 import { denverToday, noteIsLive, noteIsScheduled, resolveSendAt, cleanNotePhotos, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
@@ -371,7 +371,9 @@ export default async function handler(req, res) {
     // which can't attach a custom header, so it also accepts the exact same
     // signed token via ?token= — same verifyToken() check, just carried the
     // way a browser media request actually can.
-    let auth = verifyToken(action === 'call_recording' ? (getBearer(req) || req.query.token) : getBearer(req));
+    // note_photo needs the same query-string exception as call_recording --
+    // it's loaded by a plain <img src>, which can't attach a header either.
+    let auth = verifyToken((action === 'call_recording' || action === 'note_photo') ? (getBearer(req) || req.query.token) : getBearer(req));
     // Jiyah's audit portal (public/audit.html, token kind 'auditor' from
     // api/audit.js) reads the CRM's call data through THESE handlers rather
     // than a second copy of them (owner rule 2026-09-22: she sees everything
@@ -580,6 +582,7 @@ export default async function handler(req, res) {
       case 'domain_watch_dismiss': return await domainWatchDismiss(req, res, db, auth, body);
       case 'domain_watch_check':  return await domainWatchCheck(req, res, db, auth, body);
       case 'notes_photo':  return await notesPhoto(req, res, db, auth, body);
+      case 'note_photo':   return await notePhoto(req, res, db, auth);
       case 'notes_replies_seen': return await notesRepliesSeen(req, res, db, auth);
       case 'tech_notes_targets': return await techNotesTargets(req, res, db, auth);
       case 'tech_notes_add':     return await techNotesAdd(req, res, db, auth, body);
@@ -8743,7 +8746,7 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent']);
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo']);
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
@@ -14636,11 +14639,35 @@ async function notesRepliesSeen(req, res, db, auth) {
 // (owner rule 2026-09-23: "with pictures just like i can leave them a
 // note"); the auditor path (Jiyah) uses this same action too -- see the
 // auditor-token gate in handler() and AUDITOR_WRITE_ACTIONS.
+//
+// Private bucket, not the public booking-photos one (owner rule 2026-09-23:
+// "i need to be able to view them securely") -- uploadPrivateImage returns a
+// path with no browsable URL at all; it only ever comes back as bytes
+// through note_photo below, to an authenticated CRM session. photo_urls
+// keeps its name for compatibility with every existing reader, but a
+// "priv:" entry is a private path, not a URL -- see notePhotoSrc() in
+// public/admin.html / public/audit.html for the one place that matters.
 async function notesPhoto(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'owner' && auth.role !== 'secretary' && !auth.auditor) return res.status(403).json({ error: 'Not available for this login' });
-  const up = await uploadImage(body.image, NOTE_PHOTO_PREFIX);
-  return res.status(200).json({ ok: true, url: up.url });
+  const up = await uploadPrivateImage(body.image, NOTE_PHOTO_PREFIX);
+  return res.status(200).json({ ok: true, url: up.path });
+}
+
+// GET ?path=priv:note-photos/xxx.jpg[&token=...] — streams a private note
+// photo's bytes back. Any signed-in admin/secretary/auditor session may
+// fetch one (same "already passed the note-level access check to even see
+// this path" reasoning call_recording uses -- the path only ever reaches a
+// browser via notesActive/notesList/auditor_notes_sent, which already scope
+// WHICH notes, and therefore which photo paths, a given reader gets back).
+async function notePhoto(req, res, db, auth) {
+  const raw = (req.query.path || '').toString();
+  const path = raw.startsWith('priv:') ? raw.slice(5) : raw;
+  if (!path) return res.status(400).json({ error: 'path required' });
+  const { buffer, contentType } = await readPrivateImage(path);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.status(200).send(buffer);
 }
 
 // POST { body, target, mode, photos } — write one. Owner or secretary

@@ -1745,6 +1745,19 @@
 .note-del{flex:none;background:none;border:0;color:var(--mute);font-size:14px;cursor:pointer;padding:4px}
 .note-del:hover{color:#b91c1c}
 .note-del:disabled{opacity:.4;cursor:default}
+/* Big "who is this for" tab cards on the Notes page -- owner feedback
+   2026-09-23, they were small seg-btn pills easy to miss. */
+.notes-tabrow{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:560px;}
+.notes-tabbtn{display:flex;align-items:center;gap:12px;text-align:left;background:#fff;
+  border:2px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;font-family:inherit;}
+.notes-tabbtn:hover{border-color:#c9cfda;}
+.notes-tabbtn.on{border-color:var(--accent,#2563eb);background:rgba(37,99,235,.06);
+  box-shadow:0 0 0 1px var(--accent,#2563eb);}
+.notes-tabbtn-ic{flex:none;font-size:24px;line-height:1;}
+.notes-tabbtn-t{display:block;font-size:15px;font-weight:800;color:var(--ink);}
+.notes-tabbtn-s{display:block;font-size:12px;color:var(--mute);margin-top:2px;}
+.notes-tabbtn.on .notes-tabbtn-t{color:var(--accent,#2563eb);}
+@media (max-width:520px){.notes-tabrow{grid-template-columns:1fr;}}
 .note-photos{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .note-photos:empty{display:none}
 .note-photos img{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block}
@@ -9270,14 +9283,22 @@ const NOTE_MAX_PHOTOS=4;
 let _notesTab='staff';
 
 // Thumbnails for a note's photos; tapping one opens the shared lightbox.
+// A "priv:" entry is a private-bucket PATH, not a URL (migration 0134, owner
+// rule 2026-09-23: "i need to be able to view them securely") -- it has to
+// go through the authenticated note_photo proxy. A plain entry is an old
+// photo uploaded before this change, still on the public bucket, and
+// renders exactly as before.
+function notePhotoSrc(u){
+  return u.startsWith('priv:') ? `${API}?action=note_photo&path=${encodeURIComponent(u)}&token=${encodeURIComponent(token)}` : u;
+}
 function notePhotosHtml(urls){
   urls=(urls||[]).filter(Boolean);
   if(!urls.length) return '';
-  return `<div class="note-photos">${urls.map(u=>`<img src="${esc(u)}" data-notephoto="${esc(u)}" loading="lazy" alt="Note photo">`).join('')}</div>`;
+  return `<div class="note-photos">${urls.map(u=>`<img src="${esc(notePhotoSrc(u))}" data-notephoto="${esc(u)}" loading="lazy" alt="Note photo">`).join('')}</div>`;
 }
 document.addEventListener('click',e=>{
   const img=e.target.closest&&e.target.closest('[data-notephoto]');
-  if(img) openLightbox(img.getAttribute('data-notephoto'));
+  if(img) openLightbox(notePhotoSrc(img.getAttribute('data-notephoto')));
 });
 
 // Photo picker used by both composers. Each photo is shrunk and uploaded the
@@ -9290,7 +9311,7 @@ function notePhotoPicker(host){
     <span class="np-busy" style="margin-left:8px;font-size:12px;color:var(--mute);"></span>`;
   const thumbs=host.querySelector('.np-thumbs'), add=host.querySelector('.np-add'), file=host.querySelector('.np-file'), busy=host.querySelector('.np-busy');
   const paint=()=>{
-    thumbs.innerHTML=urls.map((u,i)=>`<div class="np-thumb"><img src="${esc(u)}" alt="Photo to attach"><button type="button" data-i="${i}" title="Remove photo" aria-label="Remove photo">×</button></div>`).join('');
+    thumbs.innerHTML=urls.map((u,i)=>`<div class="np-thumb"><img src="${esc(notePhotoSrc(u))}" alt="Photo to attach"><button type="button" data-i="${i}" title="Remove photo" aria-label="Remove photo">×</button></div>`).join('');
     thumbs.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ urls.splice(Number(b.dataset.i),1); paint(); });
     add.style.display=urls.length>=NOTE_MAX_PHOTOS?'none':'';
   };
@@ -9452,16 +9473,25 @@ async function renderNotes(){
   const forCopy = role==='owner'
     ? 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'
     : 'Leave Andrew or the other secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
+  // Two big tab cards instead of small seg-btn pills -- owner feedback
+  // 2026-09-23: "they may miss them". This is the whole reason to be on this
+  // page (who a note goes to), so it gets first billing above the sub-copy,
+  // not a muted row of pills easy to skim past.
+  const notesTabBtn=(tab,icon,label,sub,active)=>`<button type="button" class="notes-tabbtn${active?' on':''}" data-notestab="${tab}">
+      <span class="notes-tabbtn-ic">${icon}</span>
+      <span><span class="notes-tabbtn-t">${label}</span><span class="notes-tabbtn-s">${sub}</span></span>
+    </button>`;
   view.innerHTML=`<div class="wrap">
     ${role==='owner'?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
     <h2 style="margin:0 0 4px;">Notes</h2>
-    <div class="sub" style="color:var(--mute);margin-bottom:14px;">${_notesTab==='tech'
+    <div class="sub" style="color:var(--mute);margin-bottom:14px;">Who is this note for?</div>
+    <div class="notes-tabrow">
+      ${notesTabBtn('staff','🏢','For the office',role==='owner'?'Heather, Joey, or both':'Andrew, the other secretary, or both',_notesTab==='staff')}
+      ${notesTabBtn('tech','🔧','For the techs','One tech, a city, or everyone',_notesTab==='tech')}
+    </div>
+    <div class="sub" style="color:var(--mute);margin:14px 0;">${_notesTab==='tech'
       ? 'Leave a note for the technicians. It shows at the top of their app until it expires or they tap the X.'
       : forCopy}</div>
-    <div class="est-filters" style="margin-bottom:14px;">
-      <button type="button" class="seg-btn ${_notesTab==='staff'?'on':''}" data-notestab="staff">For the office</button>
-      <button type="button" class="seg-btn ${_notesTab==='tech'?'on':''}" data-notestab="tech">For technicians</button>
-    </div>
     <div id="notesPane"></div>
   </div>`;
   const nb=document.getElementById('notesBack'); if(nb) nb.onclick=()=>renderOther();
