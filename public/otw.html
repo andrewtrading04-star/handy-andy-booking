@@ -203,20 +203,29 @@
       .then(function(r){ return r.json(); })
       .then(function(d){
         if (!d || !d.ok){
-          btn.disabled = false;
-          btn.textContent = "I'm running late";
-          return;
+          return lateFail(d && d.reason === 'not_assigned'
+            ? 'This job is not assigned to you anymore. Call the office.'
+            : 'That did not go through. Call the office to say you are running late.');
         }
         btn.textContent = "I'm running late";
-        $('lateConfirm').textContent = d.already
-          ? 'Already reported — the office knows.'
-          : 'Office notified.';
+        $('lateConfirm').style.color = '';
+        $('lateConfirm').textContent = d.moot
+          ? 'This job is already en route or closed. Nothing sent.'
+          : d.already
+            ? 'Already reported — the office knows.'
+            : 'Office notified.';
         $('lateConfirm').classList.remove('hide');
       })
       .catch(function(){
-        btn.disabled = false;
-        btn.textContent = "I'm running late";
+        lateFail('Could not reach the server. Call the office to say you are running late.');
       });
+    function lateFail(msg){
+      btn.disabled = false;
+      btn.textContent = "I'm running late";
+      $('lateConfirm').style.color = '#B0453A';
+      $('lateConfirm').textContent = msg;
+      $('lateConfirm').classList.remove('hide');
+    }
   });
 })();
 </script>

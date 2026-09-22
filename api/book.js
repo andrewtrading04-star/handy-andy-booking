@@ -1697,10 +1697,11 @@ async function reportLate(req, res) {
     .eq('id', t.booking_id).maybeSingle();
   if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
 
-  // Same idempotent shape as otwSend: a job that's already progressed past
-  // "not yet en route" makes a late-report moot, not an error.
+  // A job that's already progressed past "not yet en route" makes a
+  // late-report moot, not an error. `moot` tells the page the office was NOT
+  // texted, so it doesn't claim otherwise.
   if (b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status)) {
-    return res.status(200).json({ ok: true, already: true, customer: b.customer?.name || 'your customer' });
+    return res.status(200).json({ ok: true, already: true, moot: true, customer: b.customer?.name || 'your customer' });
   }
 
   // Only a tech actually on this job may act on it, even with a valid token —
