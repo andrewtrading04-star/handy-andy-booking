@@ -4437,10 +4437,18 @@ async function bookingUpdate(req, res, db, auth, body) {
       // slot is still checked/alerted (see api/_lib/tech-late.js). No grace-
       // period stamp needed here (unlike reassignment): the new scheduled_at
       // itself is the buffer, since the lateness check only fires 30+ min
-      // after whatever scheduled_at currently says.
+      // after whatever scheduled_at currently says. Also drops the 4-stage
+      // markers (stage1-4) and the tech's own late_reported_at/by self-report —
+      // all of that belonged to the OLD time too.
       {
         const existMetaResched = existing.metadata || {};
-        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMetaResched } = existMetaResched;
+        const {
+          late_alert_sent_at, tech_late_notified_ids, otw_nudge_sent_ids, staff_late_notified_at,
+          stage1_sent_ids, stage2_sent_ids, stage3_tech_sent_ids,
+          stage4_tech_sent_ids, stage4_staff_owner_notified_at,
+          late_reported_at, late_reported_by,
+          ...restMetaResched
+        } = existMetaResched;
         // Andrew wants a visible record on the job card when a customer's time
         // changes, not just buried in the notes list. Stamp the time being
         // REPLACED so the card can show "rescheduled from <old time>", only
@@ -4486,10 +4494,18 @@ async function bookingUpdate(req, res, db, auth, body) {
       // landed on them (see api/_lib/tech-late.js). One shared timestamp for
       // the whole booking is deliberate — simpler than tracking a grace
       // period per tech slot, and the only cost is a rare few extra minutes
-      // of delay on a legitimately new lateness incident.
+      // of delay on a legitimately new lateness incident. Also drops the
+      // 4-stage markers (stage1-4) and the tech's own late_reported_at/by
+      // self-report — none of that should follow onto whoever's newly assigned.
       if (primaryChanged || secondaryChanged) {
         const existMetaAssign = existing.metadata || {};
-        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMeta } = existMetaAssign;
+        const {
+          late_alert_sent_at, tech_late_notified_ids, otw_nudge_sent_ids, staff_late_notified_at,
+          stage1_sent_ids, stage2_sent_ids, stage3_tech_sent_ids,
+          stage4_tech_sent_ids, stage4_staff_owner_notified_at,
+          late_reported_at, late_reported_by,
+          ...restMeta
+        } = existMetaAssign;
         patch.metadata = { ...restMeta, reassigned_at: now };
       }
       if (body.technician_id && existing.status === 'confirmed') { patch.status = newStatus = 'assigned'; patch.assigned_at = now; }
@@ -4505,8 +4521,17 @@ async function bookingUpdate(req, res, db, auth, body) {
         // Any lateness alert already sent belongs to whatever happened before
         // this reopen — clear it so the reopened job (protected by its own
         // 30-min reopened_at grace period, see api/_lib/tech-late.js) is still
-        // checked/alerted fresh if it genuinely goes late again.
-        const { late_alert_sent_at, tech_late_notified_ids, staff_late_notified_at, ...restMeta } = existMeta;
+        // checked/alerted fresh if it genuinely goes late again. Also drops the
+        // 4-stage markers (stage1-4) and the tech's own late_reported_at/by
+        // self-report — a reopened job should be checked fresh, not silenced
+        // by a self-report from whatever happened before.
+        const {
+          late_alert_sent_at, tech_late_notified_ids, otw_nudge_sent_ids, staff_late_notified_at,
+          stage1_sent_ids, stage2_sent_ids, stage3_tech_sent_ids,
+          stage4_tech_sent_ids, stage4_staff_owner_notified_at,
+          late_reported_at, late_reported_by,
+          ...restMeta
+        } = existMeta;
         patch.metadata = { ...restMeta, reopened_at: now, reopened_from: 'completed' };
       }
       break;
@@ -6500,9 +6525,10 @@ async function insightsOverview(req, res, db, auth) {
         // staff_late_notified_at (see _lib/tech-late.js), NOT otw_nudge_sent_ids:
         // the nudge is a routine 10-min-before "you on your way?" check-in that
         // fires on nearly every job — not lateness. staff_late_notified_at only
-        // gets set once, 45 minutes AFTER the scheduled start, and only if the
-        // tech still hasn't responded — that's a real confirmed-late event
-        // (owner: "I only care about confirmed late, not the warning"). No
+        // gets set once, at Stage 3 — 30 minutes AFTER the scheduled start, and
+        // only if the tech still hasn't tapped on-the-way — that's a real
+        // confirmed-late event (owner: "I only care about confirmed late, not
+        // the warning"). No
         // per-tech id on a two-tech job (the field is job-level), but none of
         // this business's late jobs are two-tech, so that gap costs nothing today.
         if (b.metadata && b.metadata.staff_late_notified_at) s.late_30d++;

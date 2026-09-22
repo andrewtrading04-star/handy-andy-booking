@@ -39,10 +39,19 @@
     padding:11px 13px;margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--ink);text-align:left;}
   .warn a{color:var(--accent);font-weight:700;text-decoration:none;}
   .hide{display:none;}
+  .lateWrap{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);}
+  .btnSecondary{width:100%;border:1px solid var(--line);border-radius:12px;padding:13px 18px;
+    font:600 14.5px/1 inherit;color:var(--mute);background:transparent;
+    cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .btnSecondary:active{transform:translateY(1px);}
+  .btnSecondary:disabled{opacity:.6;cursor:default;transform:none;}
+  .btnSecondary:focus-visible{outline:3px solid var(--ink);outline-offset:2px;}
+  .lateConfirm{font-size:12.5px;line-height:1.5;color:var(--good);font-weight:700;margin:10px 0 0;}
   @media (prefers-color-scheme: dark){
     :root{--ink:#ECE7DC;--paper:#14181B;--card:#1E2428;--accent:#E08A46;
       --good:#4E9E72;--mute:#9BA3AC;--line:#333A3D;}
     button{color:#14181B;}
+    .btnSecondary{color:var(--mute);}
   }
 </style>
 </head>
@@ -62,6 +71,10 @@
       <div class="warn hide" id="askWarn"></div>
       <button id="go" type="button">Send "on my way"</button>
       <p class="note" id="askNote">This texts the customer that you're en route and marks the job started. Same as the button in the app.</p>
+      <div class="lateWrap">
+        <button id="lateBtn" type="button" class="btnSecondary">I'm running late</button>
+        <p class="lateConfirm hide" id="lateConfirm">Office notified.</p>
+      </div>
     </div>
 
     <div id="done" class="hide">
@@ -117,6 +130,13 @@
         $('go').textContent = 'Mark "on my way" (no text)';
         $('askNote').textContent = 'This marks the job started. Same as the button in the app.';
       }
+      // Reopening the same link after already reporting late: show the same
+      // inline confirmation immediately, already disabled, while the normal
+      // ask/On-My-Way UI still renders beneath it.
+      if (d.already_late){
+        $('lateBtn').disabled = true;
+        $('lateConfirm').classList.remove('hide');
+      }
       show('ask');
     })
     .catch(function(){ fail('Could not reach the server. Check your signal and try again.'); });
@@ -164,6 +184,38 @@
         btn.disabled = false;
         btn.textContent = 'Send "on my way"';
         fail('Could not reach the server. Check your signal and try again.');
+      });
+  });
+
+  // "I'm running late" — secondary action, same token, same link. Does NOT
+  // touch on_the_way_at/status and does NOT disable or hide the main
+  // "Send on my way" button: the tech can still tap that at any time, before
+  // or after reporting late.
+  $('lateBtn').addEventListener('click', function(){
+    var btn = $('lateBtn');
+    btn.disabled = true;
+    btn.textContent = 'Notifying office…';
+    fetch('/api/book?action=report_late', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'report_late', token: token })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok){
+          btn.disabled = false;
+          btn.textContent = "I'm running late";
+          return;
+        }
+        btn.textContent = "I'm running late";
+        $('lateConfirm').textContent = d.already
+          ? 'Already reported — the office knows.'
+          : 'Office notified.';
+        $('lateConfirm').classList.remove('hide');
+      })
+      .catch(function(){
+        btn.disabled = false;
+        btn.textContent = "I'm running late";
       });
   });
 })();

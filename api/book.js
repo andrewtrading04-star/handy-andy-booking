@@ -15,7 +15,8 @@ import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracke
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
-import { textConsentFor } from './_lib/sms.js';
+import { textConsentFor, sendSMSResult } from './_lib/sms.js';
+import { officePhoneFor } from './_lib/tech-late.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 const BAD_NAME = 'Please enter your name using letters only — no numbers.';
@@ -1589,7 +1590,7 @@ async function otwInfo(req, res) {
   if (!t) return res.status(200).json({ ok: false, reason: 'invalid' });
   const db = serviceClient();
   const { data: b } = await db.from('bookings')
-    .select('id, status, on_the_way_at, scheduled_at, service_area_id, sms_consent, business:businesses(name, timezone), customer:customers(name, phone)')
+    .select('id, status, on_the_way_at, scheduled_at, service_area_id, sms_consent, metadata, business:businesses(name, timezone), customer:customers(name, phone)')
     .eq('id', t.booking_id).maybeSingle();
   if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
 
@@ -1607,9 +1608,10 @@ async function otwInfo(req, res) {
     });
   } catch { /* leave null */ }
 
+  const already = !!b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status);
   return res.status(200).json({
     ok: true,
-    already: !!b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status),
+    already,
     customer: b.customer?.name || 'your customer',
     when: whenTxt,
     business: b.business?.name || null,
@@ -1617,6 +1619,9 @@ async function otwInfo(req, res) {
     // they know to call with their ETA instead of assuming the customer knows.
     sms_opt_out: b.sms_consent === false,
     phone: b.customer?.phone || null,
+    // Lets the landing page re-render "Office notified" on reload, e.g. if
+    // the tech already reported late and comes back to the same link.
+    already_late: !already && !!(b.metadata && b.metadata.late_reported_at),
   });
 }
 
@@ -1669,6 +1674,105 @@ async function otwSend(req, res) {
     sms: { sent: !!sms?.ok, skipped: sms?.skipped || null },
     phone: b.customer?.phone || null,
   });
+}
+
+// ── "I'm running late" tech self-report from the SAME tap link ─────────────
+// A second, lower-emphasis action on otw.html next to "Send on my way". This
+// does NOT touch on_the_way_at or status — the job hasn't started from the
+// customer's side — it just stamps metadata.late_reported_at/by (a PERMANENT
+// stop that api/_lib/tech-late.js's checkLateTechs() checks first thing, per
+// booking, before any stage-due computation) and lets the office know once.
+// "Send on my way" keeps working normally afterward (or before), independently.
+async function reportLate(req, res) {
+  const t = otwToken(req);
+  if (!t) return res.status(200).json({ ok: false, reason: 'invalid' });
+  const db = serviceClient();
+
+  const { data: b } = await db.from('bookings')
+    .select(`id, status, on_the_way_at, metadata, scheduled_at, service_area_id, technician_id, secondary_technician_id,
+      technician:technicians!technician_id(name),
+      secondary_technician:technicians!secondary_technician_id(name),
+      customer:customers(name),
+      business:businesses(slug, timezone)`)
+    .eq('id', t.booking_id).maybeSingle();
+  if (!b) return res.status(200).json({ ok: false, reason: 'invalid' });
+
+  // Same idempotent shape as otwSend: a job that's already progressed past
+  // "not yet en route" makes a late-report moot, not an error.
+  if (b.on_the_way_at || !OTW_OPEN_STATUSES.includes(b.status)) {
+    return res.status(200).json({ ok: true, already: true, customer: b.customer?.name || 'your customer' });
+  }
+
+  // Only a tech actually on this job may act on it, even with a valid token —
+  // same "onThisJob" check as otwSend.
+  const tokenTech = String(t.tech_id || '');
+  const onThisJob = tokenTech && (tokenTech === String(b.technician_id) || tokenTech === String(b.secondary_technician_id));
+  if (!onThisJob) return res.status(200).json({ ok: false, reason: 'not_assigned' });
+
+  const existingMeta = b.metadata || {};
+  if (existingMeta.late_reported_at) {
+    // Idempotent re-tap: already reported, nothing else to do.
+    return res.status(200).json({ ok: true, already: true, customer: b.customer?.name || 'your customer' });
+  }
+
+  const nowISO = new Date().toISOString();
+  // Re-read fresh right before writing, same pattern as the cron pass in
+  // _lib/tech-late.js, so a key written elsewhere in the meantime isn't clobbered.
+  const { data: freshRow, error: reErr } = await db.from('bookings').select('metadata').eq('id', b.id).maybeSingle();
+  const freshMeta = (!reErr && freshRow && freshRow.metadata) || existingMeta;
+  const newMeta = { ...freshMeta, late_reported_at: nowISO, late_reported_by: tokenTech };
+  // DB-level conditional, same idea as otwSend's `.is('on_the_way_at', null)`:
+  // if two taps race, only the one that still finds late_reported_at unset
+  // actually writes and updates 0 rows otherwise — no double office SMS.
+  const { data: updRows, error: upErr } = await db.from('bookings')
+    .update({ metadata: newMeta })
+    .eq('id', b.id)
+    .is('metadata->>late_reported_at', null)
+    .select('id');
+  if (upErr) {
+    console.error('[report_late] metadata update failed:', upErr.message);
+    return res.status(200).json({ ok: false, reason: 'error' });
+  }
+  if (!updRows || !updRows.length) {
+    // Lost the race to a concurrent report_late tap — it already wrote
+    // late_reported_at and sent the office text, nothing left to do here.
+    return res.status(200).json({ ok: true, already: true, customer: b.customer?.name || 'your customer' });
+  }
+
+  // Exactly one text, to the office only — no owner cc, no customer text.
+  const slug = b.business?.slug || null;
+  const officePhone = officePhoneFor(slug);
+  if (officePhone) {
+    const techName = tokenTech === String(b.technician_id)
+      ? b.technician?.name
+      : (tokenTech === String(b.secondary_technician_id) ? b.secondary_technician?.name : null);
+    const techFirstName = (techName || '').trim().split(/\s+/)[0] || 'Your tech';
+    const customerName = b.customer?.name || 'the customer';
+    // The job's OWN metro clock, not the business row's generic default — an
+    // Austin/Houston job under handy-andy must read Central, not the
+    // business default of Mountain. Same fallback chain as otwInfo/tech-late.js.
+    let tz = b.business?.timezone || 'America/Denver';
+    if (b.service_area_id) {
+      try {
+        const { data: sa } = await db.from('service_areas').select('timezone').eq('id', b.service_area_id).maybeSingle();
+        if (sa?.timezone) tz = sa.timezone;
+      } catch { /* fall back to business tz */ }
+    }
+    let whenTxt = 'the scheduled time';
+    try {
+      whenTxt = new Date(b.scheduled_at).toLocaleString('en-US', {
+        timeZone: tz, hour: 'numeric', minute: '2-digit',
+      });
+    } catch { /* keep fallback */ }
+    const msg = `${techFirstName} says they're running late to ${customerName}'s job (${whenTxt}).`;
+    const r = await sendSMSResult(officePhone, msg);
+    if (!r.ok) console.warn(`[report_late] office SMS failed for booking ${b.id}:`, r.error || r.skipped);
+  } else {
+    console.warn(`[report_late] no office number configured for business (${slug || b.id}), late report not relayed`);
+  }
+
+  console.log(`[report_late] booking=${b.id} tech=${tokenTech} reported late`);
+  return res.status(200).json({ ok: true, already: false, customer: b.customer?.name || 'your customer' });
 }
 
 // ── Voicemail deep link ─────────────────────────────────────────────────────
@@ -1727,6 +1831,8 @@ export default async function handler(req, res) {
   // Signed voicemail link from the secretary's alert text.
   if (req.method === 'GET' && (req.query || {}).action === 'vm_info') return voicemailInfo(req, res);
   if (req.method === 'POST' && ((req.query || {}).action === 'otw_send' || (req.body || {}).action === 'otw_send')) return otwSend(req, res);
+  // "I'm running late" self-report from the same tap link — see reportLate() above.
+  if (req.method === 'POST' && ((req.query || {}).action === 'report_late' || (req.body || {}).action === 'report_late')) return reportLate(req, res);
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   // Native CRM businesses — branch before any Zenbooker work.

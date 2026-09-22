@@ -786,17 +786,28 @@ export default async function handler(req, res) {
     }
   }
 
-  // Tech lateness alerts. Fires when a booking is 30+ min past scheduled_at
-  // and the tech never tapped "On my way" (see api/_lib/tech-late.js). Secured
-  // by CRON_SECRET, same as send_reminders. Primary trigger is Vercel's own
-  // Cron (vercel.json, every 10 min — reliable now that the project is on
-  // Pro). The GitHub Actions workflow (tech-late-check.yml) still runs on the
-  // same 10-min schedule too, purely as a redundant backup if Vercel Cron
-  // ever has an outage — this handler is idempotent (metadata.tech_late_
-  // notified_ids / staff_late_notified_at), so two overlapping triggers can
-  // never double-text anyone. GitHub's own scheduler used to be the ONLY
-  // trigger and was measured firing every ~88 min on average instead of 10 —
-  // that's why alerts were arriving 90-105 minutes late instead of ~30.
+  // Tech lateness alerts — 4-stage flow (see api/_lib/tech-late.js for the
+  // full design). Relative to a booking's scheduled_at:
+  //   Stage 1 (30 min BEFORE) and Stage 2 (AT start) text the tech only.
+  //   Stage 3 (30 min AFTER) texts the tech AND the office.
+  //   Stage 4 (40 min AFTER) texts the tech AND the office AND the owner.
+  // The tech-facing text at every stage is NEVER suppressed. The office (and
+  // owner) sends at Stage 3/4 ARE suppressed during the 30-min grace period
+  // after a reassignment or reopen. A tech can permanently silence all 4
+  // stages for a booking by tapping "I'm running late" on the same link
+  // (POST /api/book?action=report_late) — that notifies the office once and
+  // stops the cron from touching that booking again. Tapping "Send on my way"
+  // at any point (any stage, or before any stage fires) stops everything too,
+  // the normal way. Secured by CRON_SECRET, same as send_reminders. Primary
+  // trigger is Vercel's own Cron (vercel.json, every 10 min — reliable now
+  // that the project is on Pro). The GitHub Actions workflow
+  // (tech-late-check.yml) still runs on the same 10-min schedule too, purely
+  // as a redundant backup if Vercel Cron ever has an outage — this handler is
+  // idempotent (each stage has its own per-tech/one-shot marker in
+  // bookings.metadata), so two overlapping triggers can never double-text
+  // anyone. GitHub's own scheduler used to be the ONLY trigger and was
+  // measured firing every ~88 min on average instead of 10 — that's why
+  // alerts were arriving far later than the stage timings say.
   //   &dry=1   find + report eligible bookings without sending anything
   if (action === 'tech_late_check') {
     const secret = process.env.CRON_SECRET;
