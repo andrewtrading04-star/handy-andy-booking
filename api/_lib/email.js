@@ -1018,7 +1018,11 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
     .filter(u => u.description);
   const hasUpsells = upsells.length > 0 && !!approveUrl;
 
-  const subject = `Your ${b.name} Estimate`;
+  // followUp: the automatic 3-hour "no response yet" resend
+  // (api/_lib/estimate-followup.js). Same estimate, same approve link -- only
+  // the subject and the opening lines change.
+  const followUp = !!details.followUp;
+  const subject = followUp ? 'We finished your estimate. Did you see it?' : `Your ${b.name} Estimate`;
 
   const serviceRow = serviceLabel
     ? `<div style="font-size:15px;font-weight:800;color:#11181c;margin:0 0 8px;">${esc(serviceLabel)}</div>`
@@ -1065,7 +1069,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"></head>
 <body style="margin:0;padding:0;background:#eef1f5;-webkit-text-size-adjust:100%;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your estimate from ${esc(b.name)}.</div>
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${followUp ? `Your estimate from ${esc(b.name)} is ready and waiting.` : `Your estimate from ${esc(b.name)}.`}</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:28px 12px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;box-shadow:0 6px 24px rgba(16,24,40,.10);">
@@ -1080,8 +1084,10 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
 
         <!-- Intro -->
         <tr><td style="background:${tintBg};padding:30px 28px 26px;">
-          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 10px;">Here's your estimate</div>
-          <div style="font-size:15px;color:#5b6470;line-height:1.6;">Hi ${esc(firstName || 'there')}, thanks for reaching out. Here are the details of the estimate you requested:</div>
+          <div style="font-size:22px;font-weight:800;color:#11181c;margin:0 0 10px;">${followUp ? 'Did you see your estimate?' : "Here's your estimate"}</div>
+          <div style="font-size:15px;color:#5b6470;line-height:1.6;">${followUp
+            ? `Hi ${esc(firstName || 'there')}, we finished your estimate a few hours ago and wanted to make sure it reached you. Here it is again:`
+            : `Hi ${esc(firstName || 'there')}, thanks for reaching out. Here are the details of the estimate you requested:`}</div>
         </td></tr>
 
         <!-- Estimate card -->

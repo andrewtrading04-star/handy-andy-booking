@@ -14049,7 +14049,8 @@ function paintEstFollowups(d){
     <div class="fu-who"><b>${esc(r.name||r.phone||'Customer')}${r.phone_estimate?'':' <small style="font-weight:400;color:var(--mute);">website</small>'}</b>
       <span>${esc(r.service||'Estimate')}${r.total!=null?' · '+money2(r.total):''}</span>
       <span>${kind==='opened'?`Opened ${fuAgo(r.opened_at)}, not approved`:`Sent ${fuAgo(r.sent_at)}, not opened`}</span>
-      ${r.reminded_at?`<span class="est-fu-line">We followed up with customer at ${esc(fuWhen(r.reminded_at))} (${fuAgo(r.reminded_at)})</span>`:''}</div>
+      ${r.auto_emailed_at?`<span class="est-fu-line">✉ Follow-up email automatically sent ${fuAgo(r.auto_emailed_at)}</span>`:''}
+      ${r.reminded_at&&r.reminded_at!==r.auto_emailed_at?`<span class="est-fu-line">We followed up with customer at ${esc(fuWhen(r.reminded_at))} (${fuAgo(r.reminded_at)})</span>`:''}</div>
     <div class="fu-btns">
       ${r.phone?`<a class="rc-btn ghost" href="tel:${esc(r.phone)}" style="text-decoration:none;">Call</a>`:''}
       ${r.can_text?`<button type="button" class="rc-btn" data-fu-remind="${esc(r.id)}">${r.reminded_at?'Text again':'Text reminder'}</button>`:''}
@@ -14234,7 +14235,9 @@ function estCard(e){
   const fuStamps=[...String(e.notes||'').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?: by ([^.\n]+))?/g)].map(m=>({at:m[1],by:m[2]||''})).filter(x=>Date.parse(x.at));
   const fuLast=fuStamps.length?fuStamps[fuStamps.length-1]:null;
   const followedLine=fuLast?`<div class="est-fu-line">↻ We followed up with customer at ${esc(fmtSentAt(fuLast.at))}${fuLast.by?` · ${esc(fuLast.by)}`:''}${fuStamps.length>1?` · ${fuStamps.length} follow-ups`:''}</div>`:'';
-  const sentLine=textedLine+emailedLine+legacySentLine+followedLine;
+  // The system's own 3-hour follow-up email (followup_emailed_at, migration 0131).
+  const autoLine=e.followup_emailed_at?`<div class="est-fu-line">✉ Follow-up email automatically sent · ${esc(fmtSentAt(e.followup_emailed_at))}</div>`:'';
+  const sentLine=textedLine+emailedLine+legacySentLine+autoLine+followedLine;
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);

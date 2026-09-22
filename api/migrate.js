@@ -9,6 +9,7 @@ import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
 import { checkPaidNotComplete } from './_lib/paid-not-complete.js';
+import { checkEstimateFollowups } from './_lib/estimate-followup.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
 import { runDomainWatch } from './_lib/domain-watch.js';
@@ -841,6 +842,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[paid_not_complete_check]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Automatic 3-hour follow-up EMAIL on sent, unapproved estimates (owner rule
+  // 2026-09-23; api/_lib/estimate-followup.js). Same CRON_SECRET auth and
+  // 10-min cron as the checks above.   &dry=1  list who would get one, send nothing
+  if (action === 'estimate_followup_check') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await checkEstimateFollowups({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[estimate_followup_check]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }

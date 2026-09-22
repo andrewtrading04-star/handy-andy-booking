@@ -10397,7 +10397,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, technician_id, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, followup_emailed_at, technician_id, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -10979,7 +10979,7 @@ const FOLLOWUP_AFTER_MS = 24 * 3600000;
 async function estimateFollowups(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const now = Date.now();
-  const cols = 'id, customer_name, customer_phone, customer_email, service_label, line_items, tax_rate, sms_consent, notes, source, created_at, contacted_at, texted_at, emailed_at, text_opened_at, email_opened_at';
+  const cols = 'id, customer_name, customer_phone, customer_email, service_label, line_items, tax_rate, sms_consent, notes, source, created_at, contacted_at, texted_at, emailed_at, text_opened_at, email_opened_at, followup_emailed_at';
   const { data, error } = await db.from('estimates').select(cols)
     .eq('business_id', biz.id).eq('status', 'contacted').is('approved_at', null)
     .gte('created_at', new Date(now - 21 * 86400000).toISOString())
@@ -10994,13 +10994,15 @@ async function estimateFollowups(req, res, db, auth) {
     const sentAt = Math.max(ms(e.contacted_at), ms(e.texted_at), ms(e.emailed_at)) || ms(e.created_at);
     const openedAt = Math.max(ms(e.text_opened_at), ms(e.email_opened_at));
     const rem = [...String(e.notes || '').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/g)].map(m => Date.parse(m[1])).filter(Boolean);
-    const remindedAt = rem.length ? Math.max(...rem) : 0;
+    // The automatic 3-hour follow-up email (estimate-followup.js) is a touch too.
+    const remindedAt = Math.max(rem.length ? Math.max(...rem) : 0, ms(e.followup_emailed_at));
     const row = {
       id: e.id, name: e.customer_name || '', phone: e.customer_phone || '', email: e.customer_email || '',
       service: e.service_label || '', total: items.length ? total : null, can_text: !!(e.customer_phone && e.sms_consent === true),
       phone_estimate: e.source === 'manual', sent_at: sentAt ? new Date(sentAt).toISOString() : null,
       opened_at: openedAt ? new Date(openedAt).toISOString() : null,
       reminded_at: remindedAt ? new Date(remindedAt).toISOString() : null,
+      auto_emailed_at: e.followup_emailed_at || null,
     };
     if (!sentAt || sentAt < FOLLOWUP_STARTS) continue;
     // Last time WE reached out: the original send or the latest reminder.
