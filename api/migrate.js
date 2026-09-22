@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
+import { checkPaidNotComplete } from './_lib/paid-not-complete.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
 import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
 import { runDomainWatch } from './_lib/domain-watch.js';
@@ -809,6 +810,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[tech_late_check]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
+  // Paid-but-not-Complete alert. Fires once, 15 min after a job is charged, if
+  // the tech never tapped Complete. Secured by CRON_SECRET, same as
+  // tech_late_check (added to the same 10-min Vercel cron in vercel.json).
+  //   &dry=1   find + report eligible bookings without texting anyone
+  if (action === 'paid_not_complete_check') {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+      const summary = await checkPaidNotComplete({ dryRun });
+      return res.status(200).json({ ok: true, ...summary });
+    } catch (e) {
+      console.error('[paid_not_complete_check]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
     }
   }
