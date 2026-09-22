@@ -154,7 +154,7 @@
    status shown as a dot instead of text, who it rings on the right. */
 .ch-number-inbox .ci-item.num-row{flex-direction:row;align-items:center;gap:12px;padding:10px 14px;margin-bottom:0;border-radius:0}
 .ch-number-inbox .ci-item.num-row:hover{transform:none}
-.num-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.num-dot{width:10px;height:10px;border-radius:50%;flex:none}
 .num-id{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .num-id strong{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .num-id>span{font-size:12px;color:#536277}

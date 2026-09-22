@@ -11150,6 +11150,14 @@ function friendlyForward(e164){
   if(!e164) return 'Voicemail only';
   return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));
 }
+// Three states, not two -- Andrew, 2026-09-22: red = not connected, yellow =
+// connected but no one to answer (e.g. the LA number that's live with no
+// forward_to set yet), green = connected and someone will pick up.
+function numberStatusColor(n){
+  if(!n.active) return '#b53343';
+  if(!n.forward_to) return '#c07a12';
+  return '#1f9d57';
+}
 let _numberData=null, _numberSelected=null, _numberQuery='', _numberStatus='all';
 async function renderCallNumbers(){
   const view=document.getElementById('view');
@@ -11212,7 +11220,7 @@ function paintNumberDirectory(){
   const listScroll=directory.querySelector('.ci-list')?.scrollTop||0;
   directory.innerHTML=`<div class="ch-number-inbox"><div class="ci-list" role="group" aria-label="Select a tracking number">
     ${rows.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
-      <span class="num-dot" style="background:${n.active?'#1f9d57':'#9aa4b2'}" aria-hidden="true"></span>
+      <span class="num-dot" style="background:${numberStatusColor(n)}" aria-hidden="true"></span>
       <span class="num-id"><strong>${esc(n.business_name)}</strong><span>${esc(prettyNum(n.phone))}</span></span>
       <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to))}</span>
     </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
