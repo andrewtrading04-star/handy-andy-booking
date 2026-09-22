@@ -298,6 +298,15 @@
   .call-tx{margin-top:8px;padding:9px 11px;border-radius:9px;background:var(--line2);font-size:13px;line-height:1.5;white-space:pre-wrap;}
   .call .btn.sm{padding:7px 11px;font-size:12.5px;}
   .call.graded{border-color:#86efac;}
+  /* Full-detail card (owner: "she needs to see everything") -- same 4 facts
+     the office's own Calls tab shows, read-only. */
+  .cfacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:2px 14px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);}
+  .cfacts dt{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin:0;}
+  .cfacts dd{font-size:13px;font-weight:600;margin:0 0 6px;color:var(--ink-2);}
+  .call-warn{margin-top:6px;font-size:12.5px;color:#92400e;}
+  .call-claim{margin-top:6px;font-size:12.5px;font-weight:700;}
+  .call-job{margin-top:8px;background:#dcfce7;border-radius:9px;padding:8px 11px;font-size:12.5px;color:#166534;}
+  .call-job b{color:#15803d;}
 </style>
 </head>
 <body>
@@ -1623,6 +1632,49 @@ function callResult(r){
   const m={new:'Needs callback',calling:'Being called',called_back:'Called back',resolved:'Handled',ignored:'Ignored'};
   return {t:m[r.status]||r.status||'',c:r.status==='new'?'bad':r.status==='called_back'||r.status==='resolved'?'blue':''};
 }
+// Same 4 facts + extras the office's own Calls tab card shows (public/admin.html
+// callCard) -- mirrored here read-only. Jiyah's token can't call the write
+// actions (claim/resolve/block/delete/message: not on AUDITOR_ADMIN_ACTIONS,
+// api/admin.js), so this shows everything about a call and nothing to act on
+// it with -- the office still owns the queue.
+function callOutcomeFull(r){
+  if(r.kind==='live') return 'Live intake';
+  if(r.answered===true) return 'Answered';
+  if(r.left_voicemail) return 'Missed · Voicemail';
+  return r.answered===false ? 'Missed' : 'Outcome unavailable';
+}
+function callFollowUpFull(r){
+  if(r.status==='resolved') return r.booking?'Resolved · Booked':'Resolved';
+  if(r.status==='ignored') return 'Ignored';
+  if(r.claim_active) return r.claimed_by_me?'You are handling this':'Being handled by '+(r.claimed_by||'a teammate');
+  if(r.status==='called_back') return 'Called back · Follow-up open';
+  return 'Needs callback';
+}
+function callFacts(r){
+  return '<dl class="cfacts">'+
+    '<dt>Call outcome</dt><dd>'+esc(callOutcomeFull(r))+'</dd>'+
+    '<dt>Follow-up</dt><dd>'+esc(callFollowUpFull(r))+'</dd>'+
+    '<dt>Location</dt><dd>'+esc(r.market||'Unrouted')+'</dd>'+
+    '<dt>Routed to</dt><dd>'+esc(r.routed_to_name||'Not assigned')+'</dd>'+
+  '</dl>';
+}
+function callExtras(r){
+  const lines=[];
+  if(!r.booking && r.called_back_at) lines.push('Called back '+fmtSentAt(r.called_back_at));
+  for(const w of (r.warnings||[])) lines.push(w);
+  return lines.length?'<div class="call-warn">'+lines.map(esc).join(' · ')+'</div>':'';
+}
+function callClaimLine(r){
+  if(!r.claim_active) return '';
+  const mine=r.claimed_by_me;
+  return '<div class="call-claim" style="color:'+(mine?'#15803d':'#b91c1c')+';">'+(mine?'You claimed this callback':esc(r.claimed_by)+' claimed this callback')+'</div>';
+}
+function callJobBanner(r){
+  if(!r.booking) return '';
+  return '<div class="call-job"><b>Became a job</b> — '+(r.booking.price!=null?money2(r.booking.price)+' · ':'')+(r.booking.technician&&r.booking.technician.name?esc(r.booking.technician.name)+' · ':'')+esc(fmtSentAt(r.booking.scheduled_at))+'</div>';
+}
+function fmtSentAt(iso){ return iso?new Date(iso).toLocaleString('en-US',{timeZone:CT,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):''; }
+function money2(n){ const v=Math.round((Number(n)||0)*100)/100; return (v<0?'-$':'$')+Math.abs(v).toFixed(2); }
 function renderCalls(){
   const q=cf.q;
   const rows=callRows.filter(r=>{
@@ -1661,12 +1713,14 @@ function renderCalls(){
         (res.t?'<span class="pill '+res.c+'">'+esc(res.t)+'</span>':'')+
         (graded?'<span class="pill good">✓ Graded</span>':'')+
       '</div>'+
-      '<div class="call-meta" style="margin-top:4px;">'+bizLineLabel(r)+(r.service?' · '+esc(r.service):'')+(whoLabel(r)?' · '+esc(whoLabel(r)):'')+(r.text_count?' · '+r.text_count+' text'+(r.text_count===1?'':'s'):'')+'</div>'+
+      '<div class="call-meta" style="margin-top:4px;">'+bizLineLabel(r)+(r.grasshopper_number?' · called '+esc(prettyPhone(r.grasshopper_number)):'')+(r.service?' · '+esc(r.service):'')+(r.text_count?' · '+r.text_count+' text'+(r.text_count===1?'':'s'):'')+'</div>'+
+      callFacts(r)+callExtras(r)+callClaimLine(r)+
       '<div class="call-body">'+rec+
         (r.transcript?'<button type="button" class="btn ghost sm" data-tx>Transcript</button>':'')+
         '<button type="button" class="btn sm" data-grade>'+(graded?'Grade again':'Grade this call')+'</button>'+
       '</div>'+
       (r.transcript?'<div class="call-tx" hidden>'+esc(r.transcript)+'</div>':'')+
+      callJobBanner(r)+
       (r.notes?'<div class="call-meta" style="margin-top:6px;">Office note: '+esc(r.notes)+'</div>':'')+
     '</div>';
   }).join('');
