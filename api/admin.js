@@ -712,7 +712,16 @@ async function viewAs(req, res, db, auth) {
   // business switcher instead (unfiltered by slug for scope:'all' — see the
   // businesses query in login()/sessionStatus()).
   const slug = (req.body?.business || '').toString();
-  if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy or doms' });
+  // Jiyah (the call auditor) is the third person in the View As list. Her
+  // app is a separate page (public/audit.html, api/audit.js) with its own
+  // token kind, so instead of a secretary session this hands back the exact
+  // token her password login would (api/audit.js login()), and the client
+  // opens her portal with it. Owner-only, same as the secretary branch.
+  if (slug === 'auditor') {
+    const name = (process.env.AUDITOR_NAME || 'Jiyah').toString();
+    return res.status(200).json({ audit_token: signToken({ kind: 'auditor', name }), name, url: '/audit.html' });
+  }
+  if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy, doms or auditor' });
 
   // Mirror the real login exactly, extra brands included — the whole point of
   // View As is showing the owner what that secretary actually sees, and Joey's

@@ -2256,7 +2256,7 @@ let availViewSlug = null;      // which business the Availability tab is viewing
 const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
 // ── API helper ───────────────────────────────────────────────────────────
-async function api(action, { method='GET', params={}, body=null, timeoutMs=45000 } = {}) {
+async function api(action, { method='GET', params={}, body=null, timeoutMs=45000, authToken=null } = {}) {
   const url = new URL(API, location.origin);
   url.searchParams.set('action', action);
   for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
@@ -2269,12 +2269,14 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   // connection eventually gives up and lets the UI recover.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const sent=token;   // the session this request goes out with (see the 401 branch)
+  // authToken: send a different session than the current one (View As -> Jiyah
+  // needs the stashed OWNER token while this tab is running as a secretary).
+  const sent=authToken||token;   // the session this request goes out with (see the 401 branch)
   let res, data;
   try {
     res = await fetch(url, {
       method,
-      headers: { 'Content-Type':'application/json', ...(token && { Authorization:`Bearer ${token}` }) },
+      headers: { 'Content-Type':'application/json', ...(sent && { Authorization:`Bearer ${sent}` }) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
@@ -2594,6 +2596,9 @@ const VIEW_AS_PEOPLE = {
   admin:       { name:'Andrew', av:'A', bg:'#111111', sub:'Admin — full access' },
   'handy-andy':{ name:'Heather', av:'H', bg:'#f59e0b', sub:'Handy Andy secretary' },
   doms:        { name:'Joey',   av:'J', bg:'#2563eb', sub:"Dom's secretary" },
+  // Jiyah's app is a separate page (audit.html), not a mode of this one --
+  // picking her opens the Call Audit Portal in a new tab, already signed in.
+  auditor:     { name:'Jiyah',  av:'Ji', bg:'#7c3aed', sub:'Call auditor · opens her portal' },
 };
 function currentPersonKey(){ return role==='owner' ? 'admin' : scope; }
 function updateWhoAvatar(){
@@ -2615,7 +2620,7 @@ function renderViewAsPopoverList(){
   const canSwitch = role==='owner' || !!owned;
   if(!canSwitch){ list.innerHTML=''; return; }
   const activeKey = currentPersonKey();
-  list.innerHTML = ['admin','handy-andy','doms'].map(key=>{
+  list.innerHTML = ['admin','handy-andy','doms','auditor'].map(key=>{
     const p = VIEW_AS_PEOPLE[key];
     const active = key===activeKey;
     return `<div class="viewas-item" data-key="${key}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;${active?'background:#eaf1ff;':''}">
@@ -2629,9 +2634,24 @@ function renderViewAsPopoverList(){
       document.getElementById('viewAsPopover').classList.add('hidden');
       const key = item.dataset.key;
       if(key===activeKey) return;
-      if(key==='admin') backToAdmin(); else switchToViewAs(key);
+      if(key==='admin') backToAdmin(); else if(key==='auditor') openAuditorPortal(); else switchToViewAs(key);
     });
   });
+}
+// Jiyah's Call Audit Portal is its own page with its own token kind
+// (api/audit.js). Ask view_as for that token, drop it where audit.html reads
+// it on load (localStorage ha_audit_token, same origin), and open the portal
+// in a new tab. This tab stays the owner's CRM -- nothing to switch back from.
+// Must be called from the click itself, or the browser blocks the popup.
+async function openAuditorPortal(){
+  const win = window.open('', '_blank');
+  try{
+    const ownerToken = lsGet('ha_owner_token');
+    const d = await api('view_as', { method:'POST', body:{ business:'auditor' }, authToken: ownerToken || null });
+    if(!d.audit_token) throw new Error('No audit token returned');
+    lsSet('ha_audit_token', d.audit_token);
+    if(win) win.location = d.url || '/audit.html'; else location.href = d.url || '/audit.html';
+  }catch(e){ if(win) win.close(); toast(e.message||"Could not open Jiyah's portal"); }
 }
 async function switchToViewAs(slug){
   try{
