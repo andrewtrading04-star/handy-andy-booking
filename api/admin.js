@@ -8881,6 +8881,21 @@ async function calls(req, res, db, auth) {
     }
   } catch (e) { /* names are a nicety — never fail the call list over them */ }
 
+  // What LINE this call actually came in on (migration 0132's display_name),
+  // e.g. "HA Golden" or "HA Greenway" — not the business name, which several
+  // of Handy Andy's lead-gen city lines share, and not tracking_label, which
+  // is the recording-consent sentence, not a name. Matched by the dialed
+  // number's last 10 digits so it doesn't care whether a row stored it bare
+  // or E.164.
+  const lineNameByPhone = new Map();
+  try {
+    const { data: lineRows } = await db.from('tracking_numbers').select('phone, display_name, label');
+    for (const l of lineRows || []) {
+      const d = String(l.phone || '').replace(/\D/g, '').slice(-10);
+      if (d.length === 10) lineNameByPhone.set(d, l.display_name || null);
+    }
+  } catch (e) { /* a nicety — never fail the call list over it */ }
+
   const mapped = (rows || []).map(r => ({
     ...r,
     caller_display: r.customer?.name || prettyPhone(r.caller_phone),
@@ -8889,6 +8904,7 @@ async function calls(req, res, db, auth) {
     // The person behind forwarded_to, when we know them. null keeps the client
     // on the formatted number.
     routed_to_name: staffByPhone.get(String(r.forwarded_to || '').replace(/\D/g, '').slice(-10)) || null,
+    line_name: lineNameByPhone.get(String(r.grasshopper_number || '').replace(/\D/g, '').slice(-10)) || r.business?.name || null,
     // Someone is on this call right now. `claimed_by_me` lets the UI show "you
     // are on this" rather than warning a person about their own claim.
     claim_active: claimIsHot(r),
@@ -11945,7 +11961,7 @@ async function callNumbers(req, res, db, auth) {
 
   const [{ data: numbers }, { data: businesses }, voiceUrlByPhone, sms] = await Promise.all([
     db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
+      .select('phone, label, display_name, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
       .order('business_slug'),
     db.from('businesses').select('slug, name, url'),
     fetchTwilioVoiceUrls(),
@@ -11968,6 +11984,11 @@ async function callNumbers(req, res, db, auth) {
     return {
       ...n,
       business_name: biz.name || n.business_slug,
+      // What every screen should actually show as this LINE's name (migration
+      // 0132) -- label is a legal disclosure sentence, business_name collapses
+      // every Handy Andy lead-gen city number to the same word. Falls back to
+      // business_name only for a line ported in before it's been given one.
+      line_name: n.display_name || biz.name || n.business_slug,
       business_url: biz.url || null,
       volume: volumes[n.phone] || null,
       // Is this number actually in our Twilio account yet? A row can be

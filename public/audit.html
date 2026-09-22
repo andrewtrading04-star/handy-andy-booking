@@ -327,13 +327,20 @@
 
     <div class="shell">
     <nav class="sidenav" id="sidenav" aria-label="Pages">
-      <button type="button" data-nav="audit" class="on"><span class="nav-ic">📝</span>Audit</button>
-      <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
+      <button type="button" data-nav="calls" class="on"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
+      <button type="button" data-nav="audit"><span class="nav-ic">📝</span>Audit</button>
+      <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
     </nav>
     <div class="pages">
 
+    <!-- ══════════ Page: Secretaries (Heather/Joey conversion -- was pinned to
+         the top of every page; now its own tab, per owner instruction 2026-09-22) ══════════ -->
+    <section class="page" data-page="secretaries" id="pageSecretaries">
+      <div class="conv-wrap" id="convWrap"></div>
+    </section>
+
     <!-- ══════════ Page: Calls (every call, every business, every line) ══════════ -->
-    <section class="page" data-page="calls" id="pageCalls">
+    <section class="page on" data-page="calls" id="pageCalls">
       <div class="card">
         <div class="cf-row">
           <div class="seg" id="cfRange">
@@ -353,10 +360,7 @@
     </section>
 
     <!-- ══════════ Page: Audit (the original portal) ══════════ -->
-    <section class="page on" data-page="audit" id="pageAudit">
-
-    <!-- Secretary conversion -->
-    <div class="conv-wrap" id="convWrap"></div>
+    <section class="page" data-page="audit" id="pageAudit">
 
     <!-- Stat tiles -->
     <div class="tiles">
@@ -1507,13 +1511,16 @@ async function enter(){
   $('app').classList.remove('hidden');
   if(!$('date').value) $('date').value=todayStr();
   await load();
-  if(location.hash==='#calls') showPage('calls');
+  // Calls is the landing page (owner instruction 2026-09-22: she needs all
+  // call data, well organized -- not the secretary/audit stuff up top). A
+  // hash from a bookmark or reload picks a specific page instead.
+  const fromHash=(location.hash||'').replace('#','');
+  showPage(['calls','audit','secretaries'].includes(fromHash)?fromHash:'calls');
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 // Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
-// "audit" is the original portal; "calls" is every call in the CRM.
-let page='audit';
+let page='calls';
 function showPage(p){
   page=p;
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
@@ -1577,7 +1584,22 @@ async function loadCalls(){
     fillCallFilters(); renderCalls();
   }catch(err){ if(req===callsReq) $('callsList').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }
 }
-function lineLabel(r){ return r.tracking_label || (r.grasshopper_number?prettyPhone(r.grasshopper_number):'') || r.market || ''; }
+// r.line_name (migration 0132) is the short per-line name -- "HA Golden",
+// "HA Greenway", etc. -- NOT r.tracking_label, which is the recording-consent
+// disclosure sentence, and not the business name, which several Handy Andy
+// lead-gen lines share (that collapse was the whole bug: every one of them
+// showed as plain "Handy Andy").
+function lineLabel(r){ return r.line_name || (r.grasshopper_number?prettyPhone(r.grasshopper_number):'') || r.market || ''; }
+// Business + line for the call-meta row, without repeating itself: a
+// single-line brand's line_name IS its business name (backend fallback), so
+// "Dom's · Dom's" would be redundant; a shared Handy Andy line still shows
+// both ("Handy Andy · HA Golden") since line_name alone loses the brand.
+function bizLineLabel(r){
+  const biz=(r.business&&r.business.name)||'', line=lineLabel(r);
+  if(!biz) return esc(line);
+  if(!line || line===biz) return esc(biz);
+  return esc(biz)+' · '+esc(line);
+}
 function whoLabel(r){ return r.handled_by && r.handled_by!=='Booked' ? r.handled_by : (r.routed_to_name||''); }
 function fillCallFilters(){
   const keep=(sel,vals,label)=>{
@@ -1639,7 +1661,7 @@ function renderCalls(){
         (res.t?'<span class="pill '+res.c+'">'+esc(res.t)+'</span>':'')+
         (graded?'<span class="pill good">✓ Graded</span>':'')+
       '</div>'+
-      '<div class="call-meta" style="margin-top:4px;">'+esc((r.business&&r.business.name)||'')+(lineLabel(r)?' · '+esc(lineLabel(r)):'')+(r.service?' · '+esc(r.service):'')+(whoLabel(r)?' · '+esc(whoLabel(r)):'')+(r.text_count?' · '+r.text_count+' text'+(r.text_count===1?'':'s'):'')+'</div>'+
+      '<div class="call-meta" style="margin-top:4px;">'+bizLineLabel(r)+(r.service?' · '+esc(r.service):'')+(whoLabel(r)?' · '+esc(whoLabel(r)):'')+(r.text_count?' · '+r.text_count+' text'+(r.text_count===1?'':'s'):'')+'</div>'+
       '<div class="call-body">'+rec+
         (r.transcript?'<button type="button" class="btn ghost sm" data-tx>Transcript</button>':'')+
         '<button type="button" class="btn sm" data-grade>'+(graded?'Grade again':'Grade this call')+'</button>'+
