@@ -381,7 +381,10 @@ export default async function handler(req, res) {
     // business scoping in allowedSlugsFor() treats her like the owner (no
     // filter) while the owner-only money/staff actions still refuse her.
     if (auth && auth.kind === 'auditor') {
-      if (!AUDITOR_ADMIN_ACTIONS.has(action) || req.method !== 'GET') return res.status(401).json({ error: 'Unauthorized' });
+      const isWrite = AUDITOR_WRITE_ACTIONS.has(action);
+      const allowed = isWrite || AUDITOR_ADMIN_ACTIONS.has(action);
+      const methodOk = isWrite ? req.method === 'POST' : req.method === 'GET';
+      if (!allowed || !methodOk) return res.status(401).json({ error: 'Unauthorized' });
       auth = { kind: 'admin', role: 'auditor', scope: 'all', name: auth.name || 'Jiyah', auditor: true };
     }
     if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
@@ -536,6 +539,7 @@ export default async function handler(req, res) {
       case 'call_numbers':      return await callNumbers(req, res, db, auth);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
+      case 'call_ticket':       return await callTicket(req, res, db, auth);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -8737,7 +8741,12 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail']);
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket']);
+// Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
+// deliberate exception to the GET-only rule below. Not call_unblock: that
+// stays owner-only (callUnblock's own auth.role check), and isn't on this list
+// at all, so her token never even reaches it.
+const AUDITOR_WRITE_ACTIONS = new Set(['call_block']);
 // How long a claim ("I am ringing this person now") stays hot. Long enough to
 // cover dialing, a conversation and writing a note; short enough that a claim
 // someone forgot to close does not hide a customer forever. After this the card
@@ -9149,6 +9158,32 @@ async function callUnblock(req, res, db, auth, body) {
   const { error } = await db.from('blocked_numbers').delete().eq('phone', phone);
   if (error) throw error;
   return res.status(200).json({ ok: true, phone });
+}
+
+// A minimal, read-only "ticket" view of a call's linked booking -- for Jiyah's
+// Calls page (owner rule 2026-09-23: "if she wants she can see the ticket
+// too... but only if she wants. she will rarely use that"). Deliberately NOT
+// the full `bookings` action/shapeBooking(): this is scoped down to what a
+// call audit actually needs to see -- what was booked, where, when, for how
+// much, with whom -- not payment method, tech pay, or internal notes. GET
+// only, on AUDITOR_ADMIN_ACTIONS (not the write list), so any admin login can
+// read it but the auditor token can never write through it.
+async function callTicket(req, res, db, auth) {
+  const id = (req.query.id || '').toString();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: b, error } = await db.from('bookings')
+    .select(`id, scheduled_at, status, price, subtotal, address_line1, city, state, postal_code,
+      customer:customers(name),
+      technician:technicians!technician_id(name),
+      secondary_technician:technicians!secondary_technician_id(name),
+      business:businesses(name)`)
+    .eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!b) return res.status(404).json({ error: 'Job not found' });
+  const { data: lineItems } = await db.from('booking_line_items')
+    .select('name, quantity, unit_price, line_total, kind')
+    .eq('booking_id', id).order('sort_order');
+  return res.status(200).json({ ticket: { ...b, line_items: lineItems || [] } });
 }
 
 // Permanently remove a call row from the log (owner call, 2026-08-29 — cleaning

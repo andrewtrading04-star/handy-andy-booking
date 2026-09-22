@@ -307,6 +307,15 @@
   .call-claim{margin-top:6px;font-size:12.5px;font-weight:700;}
   .call-job{margin-top:8px;background:#dcfce7;border-radius:9px;padding:8px 11px;font-size:12.5px;color:#166534;}
   .call-job b{color:#15803d;}
+  /* Rarely-used extras (owner: "if she wants... but only if she wants, she
+     will rarely use that") -- small muted text links, not buttons, tucked at
+     the bottom of the card so they never compete with Grade/Transcript. */
+  .call-more{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line);display:flex;gap:14px;}
+  .call-more a{font-size:11.5px;color:var(--mute);text-decoration:underline dotted;cursor:pointer;background:none;border:0;font:inherit;padding:0;}
+  .call-more a:hover{color:var(--ink-2);}
+  .call-more a.danger:hover{color:var(--bad);}
+  .tkt-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line2);font-size:13.5px;}
+  .tkt-row:first-of-type{border-top:none;}
 </style>
 </head>
 <body>
@@ -1543,9 +1552,14 @@ $('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'
 // Reads the CRM's OWN call handlers (api/admin.js: calls, call_recording) with
 // the auditor token -- the admin API lets that token in for call actions only
 // (AUDITOR_ADMIN_ACTIONS). No second copy of the call logic to drift.
-async function crm(action, params){
+async function crm(action, params, opts){
+  const o=opts||{};
   const qs=new URLSearchParams({action, ...(params||{})});
-  const r=await fetch('/api/admin?'+qs.toString(), {headers:{Authorization:'Bearer '+token}});
+  const r=await fetch('/api/admin?'+qs.toString(), {
+    method:o.method||'GET',
+    headers:{'Content-Type':'application/json', Authorization:'Bearer '+token},
+    body:o.body?JSON.stringify(o.body):undefined,
+  });
   const j=await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(j.error||'Could not load calls');
   return j;
@@ -1722,10 +1736,69 @@ function renderCalls(){
       (r.transcript?'<div class="call-tx" hidden>'+esc(r.transcript)+'</div>':'')+
       callJobBanner(r)+
       (r.notes?'<div class="call-meta" style="margin-top:6px;">Office note: '+esc(r.notes)+'</div>':'')+
+      callMoreLinks(r)+
     '</div>';
   }).join('');
   $('callsList').querySelectorAll('[data-tx]').forEach(b=>b.onclick=()=>{ const t=b.closest('.call').querySelector('.call-tx'); t.hidden=!t.hidden; });
   $('callsList').querySelectorAll('[data-grade]').forEach(b=>b.onclick=()=>gradeFromCall(callRows.find(r=>r.id===b.closest('.call').dataset.call)));
+  $('callsList').querySelectorAll('[data-ticket]').forEach(b=>b.onclick=()=>openTicket(b.dataset.ticket));
+  $('callsList').querySelectorAll('[data-callblock]').forEach(b=>b.onclick=()=>blockCaller(b.dataset.callblock, b.dataset.callphone, b));
+}
+// Optional, rarely-used extras (owner rule 2026-09-23): block an obvious
+// scammer caller, or open the basic job ticket for a call that booked. Both
+// tucked below the fold as plain text links -- neither is something she'll
+// reach for often, and neither should look like a primary action next to
+// Grade/Transcript.
+function callMoreLinks(r){
+  const links=[];
+  if(r.booking) links.push('<a data-ticket="'+esc(r.booking.id)+'">View ticket</a>');
+  if(!r.blocked && r.caller_phone) links.push('<a class="danger" data-callblock="'+esc(r.id)+'" data-callphone="'+esc(r.caller_pretty||r.caller_phone)+'">Block this caller</a>');
+  return links.length?'<div class="call-more">'+links.join('')+'</div>':'';
+}
+async function blockCaller(callId, phonePretty, btn){
+  if(!confirm('Block '+phonePretty+' on EVERY business?\n\nThey will be rejected on every tracking line before anyone\'s phone rings, and their texts stop too. Only block someone who is a scammer.')) return;
+  btn.textContent='Blocking…';
+  try{
+    await crm('call_block', {}, { method:'POST', body:{ id:callId } });
+    const r=callRows.find(x=>x.id===callId); if(r) r.blocked=true;
+    renderCalls();
+  }catch(e){ alert(e.message||'Could not block that number.'); btn.textContent='Block this caller'; }
+}
+// The ticket view (owner rule 2026-09-23: "if she wants she can see the
+// ticket too... but only if she wants. she will rarely use that") -- same
+// on-demand overlay pattern as openView() above, deliberately a SEPARATE,
+// narrower endpoint (call_ticket, not the full bookings action): service
+// breakdown, address, schedule, price, techs. No payment method, no tech pay,
+// no internal notes.
+async function openTicket(bookingId){
+  const existing=document.getElementById('viewOverlay'); if(existing) existing.remove();
+  const ov=document.createElement('div'); ov.id='viewOverlay';
+  ov.innerHTML='<div id="viewCard"><div class="spread" style="margin-bottom:8px;"><h2>Job ticket</h2><button type="button" class="btn ghost" id="viewClose">Close</button></div><p class="sub">Loading…</p></div>';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
+  document.getElementById('viewClose').onclick=()=>ov.remove();
+  try{
+    const {ticket:t}=await crm('call_ticket', {id:bookingId});
+    if(!document.body.contains(ov)) return;
+    const when=t.scheduled_at?new Date(t.scheduled_at).toLocaleString('en-US',{timeZone:CT,weekday:'long',month:'long',day:'numeric',hour:'numeric',minute:'2-digit'}):'Not scheduled';
+    const addr=[t.address_line1,t.city,t.state,t.postal_code].filter(Boolean).join(', ');
+    const techs=[t.technician&&t.technician.name, t.secondary_technician&&t.secondary_technician.name].filter(Boolean).join(' & ');
+    const lines=(t.line_items||[]).filter(li=>li.name).map(li=>
+      '<div class="tkt-row"><span>'+(li.quantity>1?'&times;'+li.quantity+' ':'')+esc(li.name)+'</span><b>'+money2(li.line_total)+'</b></div>').join('');
+    ov.querySelector('#viewCard').innerHTML=
+      '<div class="spread" style="margin-bottom:8px;"><h2>'+esc(t.customer&&t.customer.name||'Job ticket')+'</h2><button type="button" class="btn ghost" id="viewClose">Close</button></div>'+
+      '<div class="sub" style="margin-bottom:10px;">'+esc(t.business&&t.business.name||'')+' &middot; '+esc(when)+'</div>'+
+      (addr?'<div class="tkt-row"><span>Address</span><b>'+esc(addr)+'</b></div>':'')+
+      (techs?'<div class="tkt-row"><span>Technician</span><b>'+esc(techs)+'</b></div>':'')+
+      '<div class="tkt-row"><span>Status</span><b>'+esc(t.status||'')+'</b></div>'+
+      lines+
+      '<div class="tkt-row" style="font-weight:800;"><span>Total</span><b>'+money2(t.price)+'</b></div>';
+    ov.querySelector('#viewClose').onclick=()=>ov.remove();
+  }catch(e){
+    if(!document.body.contains(ov)) return;
+    ov.querySelector('#viewCard').innerHTML='<div class="spread" style="margin-bottom:8px;"><h2>Job ticket</h2><button type="button" class="btn ghost" id="viewClose">Close</button></div><p class="err">'+esc(e.message||'Could not load this job.')+'</p>';
+    ov.querySelector('#viewClose').onclick=()=>ov.remove();
+  }
 }
 // One click from a call to grading it: jump to the Audit page on that call's
 // day and open the form with everything we already know filled in.

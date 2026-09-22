@@ -16564,6 +16564,11 @@ function cwNewDraft(){
     preDiscountTotal:0, discountLabel:null,
     prefDate:'', selectedSlot:null,
     calMonth:null, availDates:null,
+    // Optional, owner rule 2026-09-23: a small "select the technician" pick on
+    // the calendar screen. null = autofill (server picks whoever's free in the
+    // caller's metro, same as before this existed). A real tech id narrows the
+    // calendar/slots to just that one person -- see cwScheduleParams().
+    technicianId:null,
     resolution:null,
   };
 }
@@ -17795,7 +17800,7 @@ async function cwSubmitBooking(){
       draft._bookingAttempt={body:{
         business:draft.business,idempotency_key:cwRequestId(),customer,require_available:true,
         service_id:isTv?(nbServiceId||null):null,
-        technician_id:'any',pool:schedule.pool||'own',secondary_technician_id:schedule.secondary_technician_id||null,
+        technician_id:schedule.technician_id,pool:schedule.pool||'own',secondary_technician_id:schedule.secondary_technician_id||null,
         pool2:schedule.pool2||'own',needs_lifting:schedule.secondary_technician_id==='any',
         tv_size_category:nbSelectedLiftingKind()||null,
         scheduled_date:draft.prefDate,scheduled_slot:draft.selectedSlot.key,
@@ -17913,7 +17918,10 @@ function cwScheduleZoneLabel(draft=callWiz){
 // TV always needs two people; the paid "2 technicians" answer on a smaller TV
 // is also an actual staffing promise, not just an extra charge.
 function cwScheduleParams(draft=callWiz){
-  const params={business:draft.business,technician_id:'any',pool:'own'};
+  // technicianId: null unless the secretary picked one on the calendar screen
+  // (owner rule 2026-09-23) -- 'any' keeps the exact autofill behavior this
+  // already had, a real id narrows the calendar/slots to just that person.
+  const params={business:draft.business,technician_id:draft.technicianId||'any',pool:'own'};
   if(draft.zip) params.postal_code=draft.zip;
   const mode=nbSecondTechMode(), lifting=nbSelectedLiftingKind();
   if(draft.service==='TV Mounting' && (mode==='mandatory' || (mode==='optional' && (lifting==='cannot'||lifting==='big')))){
@@ -18326,6 +18334,12 @@ async function renderCallWiz(){
     }
     if(!callWiz.availDates) callWiz.availDates=new Set();
     body.innerHTML=`${callWizScript("What's a good day for you?")}
+      <div style="display:flex;align-items:center;gap:6px;margin:-2px 0 8px;font-size:11.5px;color:var(--mute);">
+        <label for="cwTechPick" style="white-space:nowrap;">Select the technician</label>
+        <select id="cwTechPick" style="flex:none;max-width:180px;font-size:11.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2);background:#fff;">
+          <option value="">Auto-assign</option>
+        </select>
+      </div>
       <div id="cwCalWrap" style="width:100%;min-width:0;background:#0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
         <div class="nb-cal-head">
           <button type="button" class="nb-cal-nav" id="cwCalPrev">‹</button>
@@ -18505,6 +18519,36 @@ async function renderCallWiz(){
     };
     document.getElementById('cwCalPrev').addEventListener('click', ()=>changeMonth(-1));
     document.getElementById('cwCalNext').addEventListener('click', ()=>changeMonth(1));
+    // "Select the technician" (owner rule 2026-09-23): really small, optional --
+    // left alone it stays "Auto-assign" and nothing about booking changes. Roster
+    // is the SAME zip-filtered list New Booking's own tech dropdown uses
+    // (service_area_id === nbZipAreaId, set by checkZip() earlier in this same
+    // wizard), so it follows the exact same city rule -- Houston only offers
+    // Juan, Austin only offers Zach, etc. Picking one re-renders this step,
+    // which (via cwScheduleKey depending on cwScheduleParams) naturally clears
+    // whatever date/time was picked under the OLD scope and re-fetches for the
+    // new one -- same mechanism the after-the-fact TV-option changes already use.
+    (async()=>{
+      const sel=document.getElementById('cwTechPick'); if(!sel) return;
+      let techs=[];
+      try{
+        const {tech}=await nbEnsureDataCached(draft.business);
+        // Same roster + same zip-metro filter New Booking's own tech dropdown
+        // uses (nbFilterOwn), including its fallback: if the zip match comes up
+        // empty, show everyone rather than an empty (and confusing) picker.
+        techs=nbFilterOwn((tech&&tech.technicians)||[]);
+      }catch(_){ return; }
+      if(!scheduleHere() || document.getElementById('cwTechPick')!==sel) return;
+      sel.innerHTML='<option value="">Auto-assign</option>'+
+        techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+      sel.value=draft.technicianId||'';
+    })();
+    document.getElementById('cwTechPick').addEventListener('change',e=>{
+      if(!scheduleHere()) return;
+      draft.technicianId=e.target.value||null;
+      cwTrack('technician_picked',{technician_id:draft.technicianId||'any'});
+      renderCallWiz();
+    });
     loadCwCalendar();
     if(callWiz.prefDate) loadCwSlots(callWiz.prefDate);
     // Nothing past this step can get back to the calendar, and the booking is
