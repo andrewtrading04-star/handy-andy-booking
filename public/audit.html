@@ -213,11 +213,28 @@
   .dtp-ampm button.on{background:var(--accent);color:#fff;}
   .dtp-lbl{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
     color:var(--mute);margin:8px 2px 5px;}
-  .dtp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
-  .dtp-cell{min-height:48px;border-radius:10px;font-size:17px;font-weight:700;
-    border:1px solid var(--line)!important;font-variant-numeric:tabular-nums;}
-  .dtp-cell:hover{background:var(--line2);}
-  .dtp-cell.sel,.dtp-cell.sel:hover{background:var(--accent);border-color:var(--accent)!important;color:#fff;}
+  /* Time wheels (Jiyah, 2026-09-22): hour / minute / AM-PM columns that scroll
+     like a phone's native picker -- each row snaps to the centre band, and the
+     rows above and below fade out. --wh is the row height; the JS reads it
+     via getBoundingClientRect so the two never drift. */
+  .dtp-wheels{--wh:44px;position:relative;display:flex;gap:4px;margin:6px 0 2px;}
+  .dtp-wheel{flex:1;height:calc(var(--wh) * 5);overflow-y:auto;scroll-snap-type:y mandatory;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;overscroll-behavior:contain;
+    padding:calc(var(--wh) * 2) 0;box-sizing:border-box;border-radius:10px;outline-offset:-2px;
+    -webkit-mask-image:linear-gradient(to bottom,transparent,#000 32%,#000 68%,transparent);
+    mask-image:linear-gradient(to bottom,transparent,#000 32%,#000 68%,transparent);}
+  .dtp-wheel::-webkit-scrollbar{display:none;}
+  .dtp-wheel:focus{outline:none;}
+  .dtp-wheel:focus-visible{outline:2px solid var(--accent);}
+  .dtp-wheel[data-wheel="ap"]{flex:0 0 64px;}
+  .dtp-witem{display:flex;align-items:center;justify-content:center;height:var(--wh);
+    scroll-snap-align:center;scroll-snap-stop:always;font-size:19px;font-weight:600;
+    color:var(--mute);cursor:pointer;user-select:none;font-variant-numeric:tabular-nums;
+    transition:color .12s,transform .12s;}
+  .dtp-witem.sel{color:var(--ink);font-weight:800;transform:scale(1.08);}
+  .dtp-wheel-band{position:absolute;left:0;right:0;top:calc(var(--wh) * 2);height:var(--wh);
+    border-radius:10px;background:var(--accent-soft);border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);pointer-events:none;}
   .dtp-hint{min-height:1.2em;font-size:12.5px;color:var(--mute);margin:6px 2px 0;}
   .dtp-hint.bad{color:var(--bad);}
 
@@ -599,44 +616,97 @@ function initTime(root){
   }
   c.hook(norm,label);
 
+  /* Three scroll-snap wheels (hour 1-12, minute 0-59, AM/PM), like the phone's
+     own picker: whatever row settles in the centre band IS the value. Every
+     minute is a row (the old grid only had 5-minute steps, so an autofilled
+     2:17 had nowhere to land). The typed box above stays as the fast path. */
   var hh='', mm='', i;
-  for(i=1;i<=12;i++) hh+='<button type="button" class="dtp-cell" data-h="'+i+'">'+i+'</button>';
-  for(i=0;i<60;i+=5) mm+='<button type="button" class="dtp-cell" data-m="'+i+'">:'+pad(i)+'</button>';
+  for(i=1;i<=12;i++) hh+='<div class="dtp-witem" data-i="'+(i-1)+'">'+i+'</div>';
+  for(i=0;i<60;i++) mm+='<div class="dtp-witem" data-i="'+i+'">'+pad(i)+'</div>';
   pop.innerHTML='<div class="dtp-time-pad">'+
     '<div class="dtp-trow">'+
       '<input type="text" class="dtp-typed" autocomplete="off" autocapitalize="off" spellcheck="false" '+
         'inputmode="text" placeholder="e.g. 2:15 PM or 14:15" aria-label="Type a time">'+
-      '<div class="dtp-ampm" role="group" aria-label="AM or PM">'+
-        '<button type="button" data-ap="am">AM</button><button type="button" data-ap="pm">PM</button></div>'+
     '</div>'+
-    '<div class="dtp-lbl">Hour</div><div class="dtp-grid" data-grid="h">'+hh+'</div>'+
-    '<div class="dtp-lbl">Minute</div><div class="dtp-grid" data-grid="m">'+mm+'</div>'+
+    '<div class="dtp-wheels">'+
+      '<div class="dtp-wheel-band" aria-hidden="true"></div>'+
+      '<div class="dtp-wheel" data-wheel="h" tabindex="0" role="listbox" aria-label="Hour">'+hh+'</div>'+
+      '<div class="dtp-wheel" data-wheel="m" tabindex="0" role="listbox" aria-label="Minute">'+mm+'</div>'+
+      '<div class="dtp-wheel" data-wheel="ap" tabindex="0" role="listbox" aria-label="AM or PM">'+
+        '<div class="dtp-witem" data-i="0">AM</div><div class="dtp-witem" data-i="1">PM</div></div>'+
+    '</div>'+
     '<div class="dtp-hint" aria-live="polite"></div>'+
     '<div class="dtp-foot"><button type="button" data-clear>Clear</button>'+
       '<button type="button" class="primary" data-close>Done</button></div>'+
   '</div>';
   var typed=pop.querySelector('.dtp-typed'), hint=pop.querySelector('.dtp-hint');
-  var hourBtns=pop.querySelectorAll('[data-h]'), minBtns=pop.querySelectorAll('[data-m]');
-  var amBtn=pop.querySelector('[data-ap="am"]'), pmBtn=pop.querySelector('[data-ap="pm"]');
+  var wheels={h:pop.querySelector('[data-wheel="h"]'),m:pop.querySelector('[data-wheel="m"]'),ap:pop.querySelector('[data-wheel="ap"]')};
+  var wsel={h:11,m:0,ap:0};   // row index per wheel; 11 = "12" o'clock
+  var quiet=0;                // > now: scroll events are ours (sync), not the user's
 
   function setHint(t,bad){ hint.textContent=t||''; hint.classList.toggle('bad',!!bad); }
+  function rowH(w){ var it=w.firstElementChild; return it?it.getBoundingClientRect().height||44:44; }
+  function paint(w,idx){
+    var items=w.children, k;
+    for(k=0;k<items.length;k++) items[k].classList.toggle('sel',k===idx);
+  }
+  function scrollWheel(w,idx,smooth){
+    quiet=Date.now()+400;
+    var top=idx*rowH(w);
+    if(smooth && w.scrollTo) w.scrollTo({top:top,behavior:'smooth'}); else w.scrollTop=top;
+    paint(w,idx);
+  }
   function sync(){
-    var p=parts(), h12=p?((p.h+11)%12+1):0, k;
-    for(k=0;k<hourBtns.length;k++) hourBtns[k].classList.toggle('sel',+hourBtns[k].getAttribute('data-h')===h12);
-    for(k=0;k<minBtns.length;k++) minBtns[k].classList.toggle('sel',!!p&&+minBtns[k].getAttribute('data-m')===p.m);
-    amBtn.classList.toggle('on',!pm); pmBtn.classList.toggle('on',pm);
-    amBtn.setAttribute('aria-pressed',String(!pm)); pmBtn.setAttribute('aria-pressed',String(pm));
+    var p=parts();
+    wsel.h=p?((p.h+11)%12):11; wsel.m=p?p.m:0; wsel.ap=(p?p.h>=12:pm)?1:0;
+    pm=!!wsel.ap;
+    scrollWheel(wheels.h,wsel.h,false); scrollWheel(wheels.m,wsel.m,false); scrollWheel(wheels.ap,wsel.ap,false);
     typed.value=p?fmt12(p):''; typed.removeAttribute('aria-invalid');
-    /* minutes that are not on a 5-minute step (e.g. autofilled 2:17) are shown in the typed box */
-    if(p && p.m%5) setHint('Exact time '+fmt12(p)+'. Tap a minute to round, or edit above.');
   }
   c.onOpen=function(){
     var p=parts(); if(p) pm=p.h>=12;
     setHint(''); sync();
-    var f=pop.querySelector('[data-h].sel')||hourBtns[0]; f.focus();
+    /* the sheet was display:none a moment ago, so its rows had no height yet */
+    requestAnimationFrame(function(){ sync(); wheels.h.focus(); });
   };
   function to24(h12){ return (h12%12)+(pm?12:0); }
   function setHM(h,m){ c.commit(pad(h)+':'+pad(m)); }
+  /* the centre rows, read straight off the wheels, become the value */
+  function commitWheels(){
+    pm=wsel.ap===1;
+    setHM(to24(wsel.h+1),wsel.m);
+    typed.value=fmt12(parts()); setHint('');
+  }
+  function onSettled(key){
+    var w=wheels[key], idx=Math.round(w.scrollTop/rowH(w));
+    idx=Math.max(0,Math.min(w.children.length-1,idx));
+    wsel[key]=idx; paint(w,idx);
+    commitWheels();
+  }
+  Object.keys(wheels).forEach(function(key){
+    var w=wheels[key], timer=null;
+    w.addEventListener('scroll',function(){
+      /* live highlight while it moves; commit once it stops */
+      var idx=Math.round(w.scrollTop/rowH(w));
+      paint(w,Math.max(0,Math.min(w.children.length-1,idx)));
+      if(Date.now()<quiet) return;
+      clearTimeout(timer); timer=setTimeout(function(){ onSettled(key); },140);
+    });
+    w.addEventListener('scrollend',function(){ if(Date.now()<quiet) return; clearTimeout(timer); onSettled(key); });
+    w.addEventListener('click',function(e){
+      var it=e.target.closest('.dtp-witem'); if(!it) return;
+      wsel[key]=+it.getAttribute('data-i'); scrollWheel(w,wsel[key],true); commitWheels();
+    });
+    w.addEventListener('keydown',function(e){
+      var n=null;
+      if(e.key==='ArrowDown') n=wsel[key]+1; else if(e.key==='ArrowUp') n=wsel[key]-1;
+      else if(e.key==='ArrowRight'){ e.preventDefault(); (key==='h'?wheels.m:wheels.ap).focus(); return; }
+      else if(e.key==='ArrowLeft'){ e.preventDefault(); (key==='ap'?wheels.m:wheels.h).focus(); return; }
+      if(n===null) return;
+      e.preventDefault();
+      wsel[key]=Math.max(0,Math.min(w.children.length-1,n)); scrollWheel(w,wsel[key],true); commitWheels();
+    });
+  });
 
   function applyTyped(){
     var s=typed.value.trim().toLowerCase().replace(/\./g,'');
@@ -659,30 +729,12 @@ function initTime(root){
 
   pop.addEventListener('click',function(e){
     var t=e.target.closest('button'); if(!t||!pop.contains(t)) return;
-    var p=parts();
-    if(t.hasAttribute('data-h')){
-      setHM(to24(+t.getAttribute('data-h')),p?p.m:0); setHint('');
-      var mb=pop.querySelector('[data-m].sel')||minBtns[0]; mb.focus();
-    }else if(t.hasAttribute('data-m')){
-      if(!p){ setHint('Pick an hour first.',true); hourBtns[0].focus(); return; }
-      setHM(p.h,+t.getAttribute('data-m')); c.close(true);
-    }else if(t.hasAttribute('data-ap')){
-      pm=t.getAttribute('data-ap')==='pm';
-      if(p) setHM(to24((p.h+11)%12+1),p.m); else sync();
-    }else if(t.hasAttribute('data-clear')){
+    if(t.hasAttribute('data-clear')){
       c.commit(''); c.close(true);
     }else if(t.hasAttribute('data-close')){
       if(typed.value.trim() && !applyTyped()) return;
       c.close(true);
     }
-  });
-  /* arrow keys move between the big buttons */
-  pop.addEventListener('keydown',function(e){
-    var g=e.target.closest&&e.target.closest('.dtp-grid'); if(!g) return;
-    var list=[].slice.call(g.querySelectorAll('button')), i=list.indexOf(e.target), n=null;
-    if(e.key==='ArrowRight') n=i+1; else if(e.key==='ArrowLeft') n=i-1;
-    else if(e.key==='ArrowDown') n=i+4; else if(e.key==='ArrowUp') n=i-4;
-    if(n!==null && n>=0 && n<list.length){ e.preventDefault(); list[n].focus(); }
   });
   label();
 }
