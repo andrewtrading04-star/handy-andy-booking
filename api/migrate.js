@@ -1176,6 +1176,63 @@ export default async function handler(req, res) {
     }
   }
 
+  // One-shot: fully release a tracking number from Twilio (irreversible --
+  // the number goes back to Twilio's pool and stops billing) and mark its
+  // CRM row retired. Owner rule 2026-09-23: the wrong second "HA Los Angeles"
+  // number (323-570-1778) was never the real LA line and needs to be gone,
+  // not just hidden. Runs INSIDE the deployed function so it uses the real
+  // TWILIO_ACCOUNT_SID/AUTH_TOKEN Vercel already has (this session's own copy
+  // of those is stale/inaccessible) -- CRON_SECRET-gated, same pattern as
+  // every other cron/ops action above.   &dry=1  preview only, releases nothing
+  if (action === 'release_tracking_number') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const provided = (req.query.secret || '').toString() || bearer;
+    if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
+    try {
+      const phone = ((req.body && req.body.phone) || '').toString().replace(/\D/g, '').slice(-10);
+      if (phone.length !== 10) return res.status(400).json({ error: 'phone (10 digits) required' });
+      const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+
+      const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+      if (!sid || !tok) return res.status(503).json({ error: 'Twilio env vars not configured on this deployment.' });
+      const auth = 'Basic ' + Buffer.from(`${sid}:${tok}`).toString('base64');
+
+      const lookupUrl = `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PhoneNumber=%2B1${phone}`;
+      const lookupRes = await fetch(lookupUrl, { headers: { Authorization: auth } });
+      const lookupJson = await lookupRes.json().catch(() => ({}));
+      if (!lookupRes.ok) return res.status(502).json({ error: `Twilio lookup failed: ${lookupJson.message || lookupRes.status}` });
+      const numbers = lookupJson.incoming_phone_numbers || [];
+      if (!numbers.length) return res.status(404).json({ error: `Twilio has no number matching +1${phone} -- nothing to release.` });
+      const twilioNumber = numbers[0];
+
+      if (dryRun) {
+        return res.status(200).json({ ok: true, dryRun: true, would_release: { sid: twilioNumber.sid, phone_number: twilioNumber.phone_number, friendly_name: twilioNumber.friendly_name } });
+      }
+
+      const releaseUrl = `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers/${twilioNumber.sid}.json`;
+      const releaseRes = await fetch(releaseUrl, { method: 'DELETE', headers: { Authorization: auth } });
+      if (releaseRes.status !== 204 && !releaseRes.ok) {
+        const releaseJson = await releaseRes.json().catch(() => ({}));
+        return res.status(502).json({ error: `Twilio release failed: ${releaseJson.message || releaseRes.status}` });
+      }
+
+      const db = serviceClient();
+      const { error: dbErr } = await db.from('tracking_numbers')
+        .update({ active: false, display_name: null, label: '[retired ' + new Date().toISOString().slice(0, 10) + '] released from Twilio -- was never the real number' })
+        .eq('phone', phone);
+      if (dbErr) console.error('[release_tracking_number] DB update failed (Twilio release already succeeded):', dbErr.message);
+
+      console.log('[release_tracking_number] released', twilioNumber.sid, twilioNumber.phone_number);
+      return res.status(200).json({ ok: true, released: { sid: twilioNumber.sid, phone_number: twilioNumber.phone_number }, db_updated: !dbErr });
+    } catch (e) {
+      console.error('[release_tracking_number]', (e && e.stack) || e);
+      return res.status(500).json({ error: String((e && e.message) || e) });
+    }
+  }
+
   const auth = verifyToken(getBearer(req));
 
   // Require admin auth for any migration action
