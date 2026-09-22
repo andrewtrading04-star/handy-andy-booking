@@ -11211,10 +11211,10 @@ function paintNumberDirectory(){
   const detail=(label,value)=>`<dt>${label}</dt><dd>${esc(value||'Not available')}</dd>`;
   const listScroll=directory.querySelector('.ci-list')?.scrollTop||0;
   directory.innerHTML=`<div class="ch-number-inbox"><div class="ci-list" role="group" aria-label="Select a tracking number">
-    ${rows.map(n=>`<button type="button" class="ci-item" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
-      <strong>${esc(prettyNum(n.phone))}</strong><span>${esc(n.business_name)}</span><span>${esc(n.market||'No market')} · ${n.active?'Active':'Retired'}</span>
-      <span class="ci-status">Rings to ${esc(friendlyForward(n.forward_to))}</span>
-      <span>${n.volume?`${n.volume.total} calls / 90 days · ${n.volume.average_daily} per day`:'Call volume unavailable'}</span>
+    ${rows.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
+      <span class="num-dot" style="background:${n.active?'#1f9d57':'#9aa4b2'}" aria-hidden="true"></span>
+      <span class="num-id"><strong>${esc(n.business_name)}</strong><span>${esc(prettyNum(n.phone))}</span></span>
+      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to))}</span>
     </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
       <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.business_name)}</p>
       ${numberVolumeHtml(selected.volume)}
