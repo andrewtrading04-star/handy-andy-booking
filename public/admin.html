@@ -11986,11 +11986,10 @@ function callCard(r,handled,g){
 
   const tx=r.transcript
     ? `<div style="margin-top:8px;background:var(--line2);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink-2);line-height:1.55;">${esc(r.transcript)}</div>`
-    : (isTracked&&r.answered)
-      // An answered tracking call left no message by definition. Saying "no
-      // transcript" here would read as something missing rather than normal.
-      ? '<div style="margin-top:8px;font-size:12.5px;color:var(--mute);font-style:italic;">Call was answered — no message left.</div>'
-      : '';
+    // Nothing for an answered call: the old "Call was answered -- no message
+    // left." filler was cut 2026-09-23 (owner: "wasted time", the recording
+    // right under it already says what happened).
+    : '';
   // Proxied through call_recording (Twilio's own recording URLs need Basic
   // Auth the browser can't supply) — only present at all once a tracking
   // number has record_calls on and a call has actually completed.
@@ -12120,6 +12119,12 @@ function callCard(r,handled,g){
     : r.left_voicemail  ? { g:'📨', bg:'#fef3c7', bd:'#fcd34d' }
     : { g:'✕', bg:'#fee2e2', bd:'#fca5a5', c:'#b91c1c' };
   const dispIcon = `<div style="flex:none;width:38px;height:38px;border-radius:50%;background:${disp.bg};border:1px solid ${disp.bd};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;${disp.c?'color:'+disp.c+';':''}">${disp.g}</div>`;
+  // Direction marker (owner pick 2026-09-23, "option 1": phone with an arrow
+  // coming in). Every call this log holds is inbound -- the CRM never places
+  // calls -- so it's always the same icon; it exists so the card reads as
+  // "incoming call" at a glance. Inline SVG (Tabler phone-incoming outline)
+  // because admin.html carries no icon font.
+  const inIcon = `<span title="Incoming call" aria-label="Incoming call" style="display:inline-flex;align-items:center;margin-right:6px;color:#15803d;vertical-align:-3px;"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/><path d="M15 9l5 -5"/><path d="M15 5v4h4"/></svg></span>`;
   const durChip = r.duration_sec
     ? `<span style="font-size:12px;font-weight:700;color:var(--mute);background:var(--line2);border-radius:6px;padding:2px 7px;">${esc(callDuration(r.duration_sec))}</span>` : '';
 
@@ -12132,7 +12137,7 @@ function callCard(r,handled,g){
   return `<div class="rc-card" data-call="${esc(r.id)}" style="align-items:flex-start;">
     ${dispIcon}
     <div class="rc-main">
-      <div class="rc-name">${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}${durChip}</div>
+      <div class="rc-name">${inIcon}${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}${durChip}</div>
       ${subLine?`<div class="rc-meta" style="margin-top:2px;">${subLine}</div>`:''}
       ${noNumber}
       ${statusBoxes}${extra}${claimLine}
