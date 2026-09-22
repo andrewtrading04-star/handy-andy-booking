@@ -6,8 +6,8 @@
 //
 // ── Why four stages ──────────────────────────────────────────────────────────
 // One tap link, minted fresh on every text, carries the tech through all of
-// this — it's the same /otw.html?token=... link the tech app's own "On My
-// Way" button produces, and tapping "Send on my way" at ANY point (any stage,
+// this — /otw.html?token=..., which does what the tech app's own "On My Way"
+// button does. Tapping "Send on my way" at ANY point (any stage,
 // or before any stage has fired) does exactly what it does today: stamps
 // on_the_way_at, texts the customer, and — because the query below filters on
 // on_the_way_at IS NULL — drops the booking out of every future pass on its
@@ -29,10 +29,11 @@
 //     with the owner cc'd (only when the owner's number differs from the
 //     office's).
 //
-// Every stage is gated by its OWN one-shot/per-tech marker (see below), never
-// by a narrow time window — a stage that was missed entirely (a cron outage,
-// a deploy) still fires on the very next pass, same as the old design. A
-// stage, once due, STAYS due until its marker says it was sent.
+// Every stage is gated by its OWN one-shot/per-tech marker (see below), so a
+// pass that fails to send retries on the next pass. But a LATER due stage
+// supersedes the earlier ones: each text is only true inside its own window,
+// so a booking that first enters the window late gets the one text that is
+// true right now, never a stale barrage of the ones it "missed".
 //
 // ── Tech self-report: "I'm running late" ────────────────────────────────────
 // The SAME tap link every stage's tech text carries opens public/otw.html,
@@ -246,10 +247,16 @@ export async function checkLateTechs(opts = {}) {
       continue;
     }
     const msSinceStart = now - schedMs;
-    const stage1Due = msSinceStart >= -STAGE1_LEAD_MS;
-    const stage2Due = msSinceStart >= 0;
-    const stage3Due = msSinceStart >= STAGE3_AFTER_MS;
     const stage4Due = msSinceStart >= STAGE4_AFTER_MS;
+    // A later stage SUPERSEDES the earlier ones. Each stage's text is only
+    // true for its own window ("starts in 30 minutes" is a lie once the job
+    // has started), so a booking that first enters the window late — booked
+    // last-minute, tech assigned late, a cron outage — must get ONE text that
+    // is true right now, not a stale barrage of all the ones it "missed".
+    // A stage that is superseded is simply never sent; nothing catches up.
+    const stage3Due = !stage4Due && msSinceStart >= STAGE3_AFTER_MS;
+    const stage2Due = !stage4Due && !stage3Due && msSinceStart >= 0;
+    const stage1Due = !stage4Due && !stage3Due && !stage2Due && msSinceStart >= -STAGE1_LEAD_MS;
 
     // Every assigned tech (primary + secondary, deduped) with a phone on
     // file — the only techs any of this can actually reach.
@@ -307,7 +314,7 @@ export async function checkLateTechs(opts = {}) {
     if (!pendingStage1.length && !pendingStage2.length && !pendingStage3Tech.length
       && !pendingStage4Tech.length && !willStage3Staff && !willStage4Staff) {
       summary.skipped++;
-      summary.details.push({ id: b.id, skip: stage1Due ? (officeBlockedBy || 'already handled / nothing due') : 'not due yet' });
+      summary.details.push({ id: b.id, skip: msSinceStart >= -STAGE1_LEAD_MS ? (officeBlockedBy || 'already handled / nothing due') : 'not due yet' });
       continue;
     }
 
@@ -422,7 +429,13 @@ export async function checkLateTechs(opts = {}) {
         if (newly3Tech.length) newMeta.stage3_tech_sent_ids = Array.from(new Set([...(freshMeta.stage3_tech_sent_ids || []).map(String), ...newly3Tech]));
         if (stage3StaffSentThisPass) newMeta.staff_late_notified_at = nowISO;
         if (newly4Tech.length) newMeta.stage4_tech_sent_ids = Array.from(new Set([...(freshMeta.stage4_tech_sent_ids || []).map(String), ...newly4Tech]));
-        if (stage4StaffSentThisPass) newMeta.stage4_staff_owner_notified_at = nowISO;
+        if (stage4StaffSentThisPass) {
+          newMeta.stage4_staff_owner_notified_at = nowISO;
+          // Stage 4 supersedes stage 3, so the office may never have been sent
+          // the stage 3 text — but this booking IS confirmed late, and the
+          // tech scorecard (late_30d in api/admin.js) counts by this key.
+          if (!newMeta.staff_late_notified_at) newMeta.staff_late_notified_at = nowISO;
+        }
         const { error: upErr } = await db.from('bookings').update({ metadata: newMeta }).eq('id', b.id);
         if (upErr) console.warn(`[tech-late] sent but failed to mark booking ${b.id}:`, upErr.message);
       }
