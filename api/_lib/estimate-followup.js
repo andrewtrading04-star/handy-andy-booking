@@ -17,6 +17,11 @@ import { signToken } from './auth.js';
 
 const HOUR = 3600000;
 export const FOLLOWUP_EMAIL_AFTER_MS = 3 * HOUR;
+// $20 off, owner rule 2026-09-23. Baked into the signed approve token
+// (kind=estimate_approve, coupon=20) that goes out on THIS email only, so it
+// is redeemable only by clicking through from here, and it stops working the
+// moment that token's own TTL runs out -- no separate expiration to track.
+export const FOLLOWUP_COUPON_AMOUNT = 20;
 // Don't chase quotes that were already old when this shipped, or that have
 // gone stale -- a 5-day-old estimate getting a "did you see it?" reads as spam.
 const LOOKBACK_MS = 3 * 24 * HOUR;
@@ -63,7 +68,7 @@ export async function checkEstimateFollowups(opts = {}) {
 
     try {
       const firstName = (e.customer_name || '').trim().split(/\s+/)[0];
-      const approveToken = signToken({ kind: 'estimate_approve', estimate_id: e.id }, 7776000); // 90 days, same as the original
+      const approveToken = signToken({ kind: 'estimate_approve', estimate_id: e.id, coupon: FOLLOWUP_COUPON_AMOUNT }, 7776000); // 90 days, same as the original
       const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}&via=email` : '';
       const upsells = (Array.isArray(e.upsells) ? e.upsells : []).map(u => ({
         id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price,
@@ -71,7 +76,7 @@ export async function checkEstimateFollowups(opts = {}) {
       }));
       const { subject, html } = estimateEmail(
         { firstName, serviceLabel: e.service_label, description: e.description, customerNote: e.customer_note,
-          lineItems: e.line_items, taxRate: e.tax_rate, approveUrl, upsells, followUp: true },
+          lineItems: e.line_items, taxRate: e.tax_rate, approveUrl, upsells, followUp: true, couponAmount: FOLLOWUP_COUPON_AMOUNT },
         brandFor(slug)
       );
       await sendEmail({ slug, to: e.customer_email, subject, html, throwOnError: true, idempotencyKey: `est-followup-${e.id}` });

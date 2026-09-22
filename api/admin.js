@@ -12511,6 +12511,27 @@ function approveTokenEstimateId(raw) {
   return t.estimate_id;
 }
 
+// The $20 follow-up coupon (api/_lib/estimate-followup.js) rides as a `coupon`
+// claim on the SAME signed token, so it can only ever be applied by clicking
+// through that specific email -- a regular resend/text link mints a token
+// with no `coupon` claim and gets no discount. Expires with the token itself.
+function approveTokenDiscount(raw) {
+  const t = verifyToken((raw || '').toString());
+  if (!t || t.kind !== 'estimate_approve') return 0;
+  const d = Number(t.coupon) || 0;
+  return d > 0 ? Math.round(d * 100) / 100 : 0;
+}
+
+// Folds a follow-up coupon into a copy of an estimate's line items as a real
+// negative line -- the SAME shape the office's own manual discount lines use
+// -- so it flows through quoteTotals/booking/line-item insert with no special
+// casing anywhere downstream. No-op when there's nothing to discount against.
+function applyCouponToItems(items, discount) {
+  const list = Array.isArray(items) ? items.slice() : [];
+  if (discount > 0 && list.length) list.push({ description: `$${discount} off — thanks for getting back to us`, qty: 1, unit_price: -discount });
+  return list;
+}
+
 // Fetch one estimate by id across any business (for the public approve page),
 // dropping quote columns the schema may not have yet so it never 500s. The
 // business is fetched separately (not via an embed) so the column-drop retry
@@ -13188,7 +13209,8 @@ async function estimateApproveInfo(req, res, body) {
     if (!est[col]) await db.from('estimates').update({ [col]: new Date().toISOString() }).eq('id', id).is(col, null);
   } catch (e) { console.warn('[estimate_approve_info] opened stamp failed:', e.message); }
 
-  const items = Array.isArray(est.line_items) ? est.line_items : [];
+  const discount = approveTokenDiscount(token);
+  const items = applyCouponToItems(est.line_items, discount);
   const totals = quoteTotals(items, est.tax_rate);
   // Public-safe upsell menu (no tech_pay). If already approved, echo back the
   // customer's own selection so a reopened link shows what they chose.
@@ -13226,6 +13248,7 @@ async function estimateApproveInfo(req, res, body) {
     approved_total: est.approved_total != null ? Number(est.approved_total) : null,
     already_approved: !!est.approved_at,
     approved_at: est.approved_at || null,
+    coupon_amount: (!est.approved_at && discount > 0) ? discount : 0,
   });
 }
 
@@ -13508,7 +13531,8 @@ async function estimateApprove(req, res, body) {
   const accepted = menu.filter(u => u && reqSet.has(String(u.id)))
     .map(u => ({ id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price, tech_pay: u.tech_pay || 0 }));
 
-  const baseItems = Array.isArray(est.line_items) ? est.line_items : [];
+  const discount = approveTokenDiscount(token);
+  const baseItems = applyCouponToItems(est.line_items, discount);
   const combined = baseItems.concat(upsellsAsLineItems(accepted));
   const totals = quoteTotals(combined, est.tax_rate);
 
@@ -13587,6 +13611,7 @@ async function estimateApprove(req, res, body) {
     stripe_customer_id: card.customerId, card_brand: card.brand, card_last4: card.last4,
     preferred_slots: [chosenSlot], status: 'scheduled',
   };
+  if (discount > 0) patch.notes = [est.notes, `$${discount} follow-up coupon applied at approval (${now}).`].filter(Boolean).join('\n').slice(0, 2000);
   // Strip columns the schema doesn't have yet (0048 not applied) and retry, so an
   // approval is always recorded even if only approved_at exists.
   let error;
