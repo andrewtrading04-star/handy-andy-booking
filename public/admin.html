@@ -11153,8 +11153,16 @@ function friendlyForward(e164){
 // Three states, not two -- Andrew, 2026-09-22: red = not connected, yellow =
 // connected but no one to answer (e.g. the LA number that's live with no
 // forward_to set yet), green = connected and someone will pick up.
+// "Connected" means Twilio itself has the number, not just that our own CRM
+// row is marked active -- a number being ported in (e.g. the 2026-09-22
+// Grasshopper batch) has an active CRM row ready and waiting days before
+// Twilio actually owns it, and until then a call to it doesn't even reach
+// this app. twilio_number_exists is null (not false) when we couldn't ask
+// Twilio at all -- treated as "can't tell", not "not ported", so a Twilio
+// outage never paints already-working numbers red.
 function numberStatusColor(n){
   if(!n.active) return '#b53343';
+  if(n.twilio_number_exists===false) return '#b53343';
   if(!n.forward_to) return '#c07a12';
   return '#1f9d57';
 }

@@ -11773,7 +11773,7 @@ async function auditReport(req, res, db, auth) {
 // cached, since a number can be imported/removed from Vapi at any moment
 // outside this app. 10s timeout + swallow-on-failure: a slow/erroring Twilio
 // call should degrade to "can't tell" for every row, never break the page.
-let _twilioNumbersCache = null; // { at, byPhone: Map<10-digit, voiceUrl> }
+let _twilioNumbersCache = null; // { at, byPhone: Map<10-digit, voiceUrl>, ok }
 const TWILIO_NUMBERS_CACHE_MS = 30 * 1000;
 async function fetchTwilioVoiceUrls() {
   if (_twilioNumbersCache && (Date.now() - _twilioNumbersCache.at) < TWILIO_NUMBERS_CACHE_MS) return _twilioNumbersCache.byPhone;
@@ -11785,13 +11785,20 @@ async function fetchTwilioVoiceUrls() {
   if (!sid || !token) return byPhone;
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
   let url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/IncomingPhoneNumbers.json?PageSize=200`;
+  // Whether this list is COMPLETE, not just non-empty -- callNumbers() needs
+  // this to tell "this number isn't in the Twilio account yet" (a Grasshopper
+  // number that hasn't ported in) from "we couldn't finish asking Twilio"
+  // (rate limit / timeout / a page failed mid-list). Only a clean run where
+  // pagination ran out on its own earns ok=true; anything that broke early
+  // leaves ok=false so an outage can't be misread as "not ported".
+  let ok = true;
   try {
     for (let page = 0; page < 5 && url; page++) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 10000);
       const r = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: ctrl.signal });
       clearTimeout(t);
-      if (!r.ok) break;
+      if (!r.ok) { ok = false; break; }
       const data = await r.json();
       for (const rec of (data.incoming_phone_numbers || [])) {
         const ten = (rec.phone_number || '').replace(/\D/g, '').replace(/^1(\d{10})$/, '$1');
@@ -11800,8 +11807,9 @@ async function fetchTwilioVoiceUrls() {
       }
       url = data.next_page_uri ? `https://api.twilio.com${data.next_page_uri}` : null;
     }
-  } catch (e) { /* Twilio unreachable/slow -- callers treat a missing entry as "unknown" */ }
-  _twilioNumbersCache = { at: Date.now(), byPhone, smsCap };
+    if (url) ok = false; // hit the 5-page cap before pagination actually finished
+  } catch (e) { ok = false; /* Twilio unreachable/slow -- callers treat a missing entry as "unknown" */ }
+  _twilioNumbersCache = { at: Date.now(), byPhone, smsCap, ok };
   return byPhone;
 }
 function aiVoiceStatusFor(voiceUrl) {
@@ -11883,6 +11891,7 @@ async function callNumbers(req, res, db, auth) {
   ]);
   // Filled by fetchTwilioVoiceUrls() above (already awaited), so safe to read.
   const smsCapByPhone = (_twilioNumbersCache && _twilioNumbersCache.smsCap) || new Map();
+  const twilioListOk = !!(_twilioNumbersCache && _twilioNumbersCache.ok);
   const campaignApproved = (sms.campaign_status || '').toUpperCase() === 'VERIFIED';
   let volumes = {}, volumeError = null;
   try { volumes = await numberVolumes(db, numbers || []); }
@@ -11899,6 +11908,14 @@ async function callNumbers(req, res, db, auth) {
       business_name: biz.name || n.business_slug,
       business_url: biz.url || null,
       volume: volumes[n.phone] || null,
+      // Is this number actually in our Twilio account yet? A row can be
+      // active=true in our own CRM well before the real port lands (we add
+      // the routing config ahead of time so it's ready the moment a number
+      // ports in -- see the Grasshopper port project) -- until Twilio says
+      // it owns the number, it is NOT connected no matter what the CRM row
+      // says. null (not false) when the Twilio list call itself failed, so a
+      // timeout/outage reads as "can't tell" rather than a false "not ported".
+      twilio_number_exists: twilioListOk ? hasVoiceUrl : null,
       ai_voice_status: aiVoiceStatusFor(hasVoiceUrl ? voiceUrlByPhone.get(n.phone) : null),
       texting_status: !sms.ok ? 'unknown'
         : smsCapByPhone.has(n.phone) && !smsCapByPhone.get(n.phone) ? 'no_sms_capability'
