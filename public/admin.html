@@ -11951,7 +11951,7 @@ function callCard(r,handled,g){
   // label rather than a toggle since there's no "off" state for a place.
   const statusBoxes = `<dl class="ci-facts">
     <dt>Business</dt><dd>${esc(r.business?.name || '—')}</dd>
-    <dt>Called</dt><dd>${esc(r._calledLine || '—')}</dd>
+    <dt>Line they called</dt><dd>${esc(r._calledLine || '—')}</dd>
     <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
     <dt>Call outcome</dt><dd>${esc(callOutcome(r))}</dd>
     <dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>
@@ -12066,6 +12066,11 @@ function callCard(r,handled,g){
   const handledLine=handled&&r.handled_by
     ? (r.handled_by==='Booked'
         ? `<div class="rc-meta">Cleared automatically — they booked.</div>`
+        // voice_status (api/analytics.js) stamps handled_by='Answered' when
+        // the call was picked up. Read literally that rendered as "Handled by
+        // Answered" (owner, 2026-09-23: "that doesnt make sense").
+        : r.handled_by==='Answered'
+        ? `<div class="rc-meta">Answered${r.routed_to_name?' by '+esc(r.routed_to_name):''}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`
         : `<div class="rc-meta">${esc(r.status==='ignored'?'Ignored':'Handled')} by ${esc(r.handled_by)}${r.handled_at?' · '+esc(fmtDateTime(r.handled_at)):''}</div>`)
     : '';
 
