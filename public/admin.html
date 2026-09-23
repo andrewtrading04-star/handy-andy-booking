@@ -380,6 +380,17 @@
   /* Phone layout, option A (owner pick 2026-09-23): one status dropdown +
      filter icon; Came from / Sort hide behind the icon; round + for new. */
   .est-mob{display:none;}
+  /* Customers: desktop shows the full table; a phone shows only name, phone
+     and city, no sideways scroll (owner, 2026-09-23). Tap a row for the
+     popup with everything else. */
+  .cust-table .cx-city{display:none;}
+  @media(max-width:760px){
+    .cust-table{table-layout:fixed;width:100%;}
+    .cust-table .cx,.cust-table .cx-loc{display:none;}
+    .cust-table .cx-city{display:table-cell;}
+    .cust-table td,.cust-table th{white-space:normal;word-break:break-word;padding-left:8px;padding-right:8px;}
+    .cust-table th:first-child,.cust-table td:first-child{width:40%;font-weight:700;}
+  }
   .est-mlist{display:flex;flex-direction:column;gap:8px;}
   .est-mrow{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;}
   .est-mrow.open{border-color:var(--accent);}
@@ -5269,11 +5280,11 @@ async function renderCustomers(){
     try{
       const d=await api('customers',{ params:{ business:current.slug, q }});
       custCache={}; d.customers.forEach(c=>custCache[c.id]=c);
-      list.innerHTML = d.customers.length ? `<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Location</th><th style="text-align:right;">Jobs</th><th style="text-align:right;">Lifetime Value</th><th>Last Job</th><th>GDS</th><th></th></tr></thead><tbody>${
+      list.innerHTML = d.customers.length ? `<table class="cust-table"><thead><tr><th>Name</th><th>Phone</th><th class="cx">Email</th><th class="cx-loc">Location</th><th class="cx-city">City</th><th class="cx" style="text-align:right;">Jobs</th><th class="cx" style="text-align:right;">Lifetime Value</th><th class="cx">Last Job</th><th class="cx">GDS</th><th class="cx"></th></tr></thead><tbody>${
         d.customers.map(c=>{
           const lastJob=c.last_job_at ? payFmtDateUTC(c.last_job_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
           const gdsBadge=c.has_gds ? `<span class="badge" style="background:#eaf6ec;color:#1a7a34;">✓ GDS</span>` : `<span class="meta">—</span>`;
-          return `<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td>${esc(c.email||'')}</td><td>${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td style="text-align:right;">${c.jobs_count||0}</td><td style="text-align:right;">${payFmtUSD(c.lifetime_value||0)}</td><td>${lastJob}</td><td>${gdsBadge}</td><td style="text-align:right;white-space:nowrap;"><button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`;
+          return `<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td class="cx">${esc(c.email||'')}</td><td class="cx-loc">${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td class="cx-city">${esc(c.city||'')}</td><td class="cx" style="text-align:right;">${c.jobs_count||0}</td><td class="cx" style="text-align:right;">${payFmtUSD(c.lifetime_value||0)}</td><td class="cx">${lastJob}</td><td class="cx">${gdsBadge}</td><td class="cx" style="text-align:right;white-space:nowrap;"><button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`;
         }).join('')
       }</tbody></table>` : '<div class="empty">No customers found.</div>';
       list.querySelectorAll('[data-newappt]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const c=custCache[b.dataset.newappt]; if(c) openNewBooking(c); }));
@@ -5434,6 +5445,12 @@ function renderCustomerDetail(d){
     ${kpi('GDS Purchased', stats.has_gds?'✓ Yes':'No', stats.has_gds?'#1a7a34':'#8a94a3')}
   </div>`;
 
+  // Create Appointment / Edit also live here: on a phone the customer list
+  // only shows name, phone and city, so the popup is where these are.
+  html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;">
+    <button type="button" class="btn sm" id="cdNewAppt" style="width:auto;">Create Appointment</button>
+    <button type="button" class="btn ghost sm" id="cdEdit" style="width:auto;">Edit</button>
+  </div>`;
   html += `<div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--mute);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 2px;margin-bottom:18px;">
     <span>📞&nbsp;${esc(customer.phone||'—')}</span>
     <span>✉️&nbsp;${esc(customer.email||'—')}</span>
@@ -5492,6 +5509,9 @@ function renderCustomerDetail(d){
 
   body.innerHTML = html;
   body.querySelectorAll('.cd-job-row').forEach(row=>row.addEventListener('click',()=>openCustomerJobBooking(row.dataset.jobid)));
+  const close=()=>document.getElementById('custDetailModal').classList.add('hidden');
+  document.getElementById('cdNewAppt')?.addEventListener('click',()=>{ close(); openNewBooking(custCache[customer.id]||customer); });
+  document.getElementById('cdEdit')?.addEventListener('click',()=>{ close(); openCustomerEdit(customer.id); });
 }
 // Jumping from a job-history row to the REAL booking-detail modal — same one
 // used everywhere else in the app (photos, notes, refund/charge) — rather
