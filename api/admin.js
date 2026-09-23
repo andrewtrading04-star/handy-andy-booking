@@ -8872,7 +8872,7 @@ async function calls(req, res, db, auth) {
     } catch (e) { /* the flag is a nicety; never fail the list over it */ }
     try {
       const forms = callerPhones.flatMap(p => [p, '+1' + p]);
-      let mq = db.from('messages').select('customer_phone, direction, created_at')
+      let mq = db.from('messages').select('customer_phone, our_phone, direction, created_at')
         .in('customer_phone', forms).gte('created_at', new Date(Date.now() - 60 * 86400000).toISOString()).limit(3000);
       if (viewerSlugs) {
         const { data: vb } = await db.from('businesses').select('id').in('slug', viewerSlugs);
@@ -8884,7 +8884,8 @@ async function calls(req, res, db, auth) {
         const d = callerDigits(m.customer_phone);
         const t = textInfo.get(d) || { total: 0, inbound: 0, last: null };
         t.total++; if (m.direction === 'in' || m.direction === 'inbound') t.inbound++;
-        if (!t.last || m.created_at > t.last) t.last = m.created_at;
+        // our_phone of the newest message = the thread the Calls card's Text box opens.
+        if (!t.last || m.created_at > t.last) { t.last = m.created_at; t.our = m.our_phone; }
         textInfo.set(d, t);
       }
     } catch (e) { /* same: counts are a nicety */ }
@@ -8955,6 +8956,7 @@ async function calls(req, res, db, auth) {
     recorded_message: !!r.recording_url,
     blocked: blockedSet.has(callerDigits(r.caller_phone)),
     text_count: (textInfo.get(callerDigits(r.caller_phone)) || {}).total || 0,
+    text_our: (textInfo.get(callerDigits(r.caller_phone)) || {}).our || null,
     text_in: (textInfo.get(callerDigits(r.caller_phone)) || {}).inbound || 0,
     text_last_at: (textInfo.get(callerDigits(r.caller_phone)) || {}).last || null,
   }));

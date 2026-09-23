@@ -350,6 +350,9 @@
   .cg-have>div.on.rec{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
   .cg-have>div.on.vm{background:#fffbeb;border-color:#fcd34d;color:#92400e;}
   .cg-have>div.on.txt{background:#f5f3ff;border-color:#c4b5fd;color:#5b21b6;}
+  .cg-have>button{border:1px solid #c4b5fd;border-radius:10px;padding:9px 11px;background:#f5f3ff;color:#5b21b6;}
+  .cg-have>button b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.4px;}
+  .cg-have>button span{font-size:15px;font-weight:800;}
   .cg-blocked{background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:11px 13px;margin:0 0 14px;color:#991b1b;font-size:13.5px;line-height:1.5;}
   .cg-earlier{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fff;}
   .cg-earlier .cg-top{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:700;}
@@ -429,6 +432,7 @@
   .md-nudge{position:fixed;right:16px;bottom:16px;z-index:200;max-width:320px;background:#fff;border:2px solid var(--accent);border-radius:14px;padding:14px;box-shadow:0 12px 32px rgba(0,0,0,.25);font-size:14px;}
   .md-nudge-b{display:flex;gap:8px;margin-top:10px;} .md-nudge-b .btn{width:auto;}
   .est-mob{display:none;}
+  .cg-have-open{font:inherit;text-align:left;cursor:pointer;} .cg-have-open:hover{filter:brightness(.96);}
   /* Calls on a phone: iPhone Recents look (see callInboxPhone). */
   .cm-list{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   .cm-row{border-bottom:1px solid var(--line2);}
@@ -12302,7 +12306,10 @@ function callHaveBoxes(g){
   return `<div class="cg-have">
     ${box('rec','🎙 Recording',g.recordings,g.recordings+(g.recordings===1?' recording':' recordings'))}
     ${box('vm','📨 Voicemail',g.voicemails,g.voicemails+(g.voicemails===1?' voicemail':' voicemails'))}
-    ${box('txt','💬 Text',g.texts,g.texts+(g.texts===1?' message':' messages')+(g.textsIn?` · ${g.textsIn} from them`:''))}
+    ${(g.texts&&g.latest.text_our&&g.latest.caller_phone)
+      // Tap to open this caller's text thread in Messages (owner, 2026-09-24).
+      ? `<button type="button" class="on txt cg-have-open" data-callmsg="1" data-msgour="${esc(g.latest.text_our)}" data-msgcust="${esc(g.latest.caller_phone)}" title="Open the texts"><b>💬 Text</b><span>${g.texts+(g.texts===1?' message':' messages')+(g.textsIn?` · ${g.textsIn} from them`:'')} ›</span></button>`
+      : box('txt','💬 Text',g.texts,g.texts+(g.texts===1?' message':' messages')+(g.textsIn?` · ${g.textsIn} from them`:''))}
   </div>`;
 }
 // A compact row for the older calls folded under the newest one.
