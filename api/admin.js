@@ -16585,7 +16585,9 @@ async function messagesSend(req, res, db, auth, body) {
     direction: 'out',
     body: outText,   // what the customer actually receives, prefix/suffix included
     status: 'queued',
-    sent_by: auth.scope === 'all' ? 'owner' : (auth.scope || null),
+    // The PERSON, not the login's business scope (owner, 2026-09-23: the
+    // thread read "delivered · handy-andy" instead of Heather's name).
+    sent_by: auth.name || adminAuthorName(auth) || null,
   }).select('id').single();
   if (insErr) return res.status(500).json({ error: insErr.message });
 

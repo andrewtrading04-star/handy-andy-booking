@@ -394,7 +394,13 @@
   .est-mlist{display:flex;flex-direction:column;gap:8px;}
   .est-mrow{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;}
   /* Lifted with a shadow when open, so it's obvious which estimate you're in. */
-  .est-mrow.open{border-color:var(--accent);border-width:2px;box-shadow:0 8px 24px rgba(15,23,42,.18),0 2px 6px rgba(15,23,42,.10);margin:4px 0;}
+  /* Open estimate: unmistakable (owner, 2026-09-23: "it still blends with
+     the background"). Thick blue frame, blue-tinted header, deep shadow, a
+     little lift -- and every OTHER row fades back so the open one stands out. */
+  .est-mrow.open{border:3px solid var(--accent);box-shadow:0 18px 40px rgba(15,23,42,.30),0 4px 10px rgba(15,23,42,.18);margin:10px -4px;transform:scale(1.01);position:relative;z-index:2;}
+  .est-mrow.open .est-mhead{background:var(--accent);color:#fff;}
+  .est-mrow.open .est-mhead .est-mline span,.est-mrow.open .est-mhead .est-mchev{color:rgba(255,255,255,.85);}
+  .est-mlist:has(.est-mrow.open) .est-mrow:not(.open){opacity:.45;}
   .est-mhead{display:flex;align-items:center;gap:10px;width:100%;padding:12px 13px;border:none;background:transparent;text-align:left;cursor:pointer;font:inherit;color:inherit;}
   .est-mline{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
   .est-mline strong{font-size:15px;}
@@ -12954,7 +12960,12 @@ function msgDetailHtml(t){
   const key=msgKey(t.our_phone, t.customer_phone);
   // iPhone-style header: back chevron left, avatar + name centered, one
   // small gray line for brand + number (was 3 stacked label lines).
-  const sub=[t.business_name, t.customer_name?(t.customer_phone_pretty||t.customer_phone):null].filter(Boolean).map(esc).join(' · ');
+  // The exact line they texted ("Handy Andy TV Mounting Golden"), not just
+  // the brand -- Handy Andy alone is a dozen lines (owner, 2026-09-23). The
+  // line's label is its call-whisper script, so the spoken name is pulled
+  // out of "Please be aware. This call is from X."; brand only as fallback.
+  const lineName=String(t.line_label||'').replace(/^Please be aware\.\s*This call is from\s*/i,'').replace(/\.\s*$/,'').trim();
+  const sub=[lineName||t.business_name, t.customer_name?(t.customer_phone_pretty||t.customer_phone):null].filter(Boolean).map(esc).join(' · ');
   let html='<div class="msg-dhead msg-ihead">'
     +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">‹</button>'
     +'<button class="msg-iblock" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">Block</button>'
