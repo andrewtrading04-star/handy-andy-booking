@@ -393,7 +393,8 @@
   }
   .est-mlist{display:flex;flex-direction:column;gap:8px;}
   .est-mrow{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;}
-  .est-mrow.open{border-color:var(--accent);}
+  /* Lifted with a shadow when open, so it's obvious which estimate you're in. */
+  .est-mrow.open{border-color:var(--accent);border-width:2px;box-shadow:0 8px 24px rgba(15,23,42,.18),0 2px 6px rgba(15,23,42,.10);margin:4px 0;}
   .est-mhead{display:flex;align-items:center;gap:10px;width:100%;padding:12px 13px;border:none;background:transparent;text-align:left;cursor:pointer;font:inherit;color:inherit;}
   .est-mline{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
   .est-mline strong{font-size:15px;}
