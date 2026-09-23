@@ -695,6 +695,16 @@
     .msg-detail{max-height:none;}
     .msg-shell.detail-open .msg-rail,.msg-shell.detail-open .msg-list{display:none;}
     .msg-shell:not(.detail-open) .msg-detail{display:none;}
+    /* An open conversation fills the phone screen, so the typing bar sits at
+       the bottom instead of floating mid-page with dead space under it
+       (owner, 2026-09-23: "theres a large empty space"). dvh, not vh, so the
+       mobile browser's collapsing address bar doesn't leave a gap either. */
+    /* 90px = the 57px .mobilebar + .wrap's 16px top and bottom padding. */
+    .msg-shell.detail-open{height:calc(100dvh - 90px);min-height:340px;}
+    .msg-shell.detail-open .msg-reply{padding-bottom:calc(8px + env(safe-area-inset-bottom));}
+    .msg-shell.detail-open .msg-detail{flex:1;min-height:0;overflow:hidden;}
+    .msg-shell.detail-open .msg-thread{flex:1;min-height:0;overflow-y:auto;}
+    .msg-shell.detail-open .msg-reply{flex:none;}
   }
   .est-slots{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center;}
   .est-slots-lbl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;}
@@ -1700,6 +1710,33 @@
   .ana .section{ margin-bottom:18px; }
   .ana .two{ grid-template-columns:1fr 1fr; } .ana .three{ grid-template-columns:1fr 1fr 1fr; }
   @media(max-width:900px){ .ana .two,.ana .three{ grid-template-columns:1fr; } .ana .kpis{ grid-template-columns:repeat(2,1fr); } }
+  /* Phone (owner, 2026-09-23: "fit properly in mobile"). The desktop
+     paddings/type left the stat tiles tall, narrow and half empty, and any
+     wide table pushed the whole page sideways. Tighten the frame, shrink the
+     numbers a step, keep the range buttons on one line, and let a table
+     scroll inside its own card instead of scrolling the page. */
+  @media(max-width:700px){
+    .ana{ padding:12px 10px; }
+    .ana .grid{ gap:10px; }
+    .ana .card{ padding:12px 11px; border-radius:11px; }
+    .ana .section{ margin-bottom:12px; }
+    .ana .kpis{ margin-bottom:12px; }
+    .ana .kpi .lbl{ font-size:10px; letter-spacing:.4px; margin-bottom:4px; }
+    .ana .kpi .val{ font-size:21px; }
+    .ana .kpi .extra{ font-size:11px; line-height:1.3; }
+    .ana .ana-head{ gap:8px; margin-bottom:12px; }
+    .ana .ana-head h1{ font-size:19px; }
+    .ana .ranges{ gap:5px; }
+    .ana .ranges button{ padding:6px 11px; font-size:12.5px; }
+    .ana h2{ font-size:14px; margin-bottom:9px; }
+    /* Nothing inside the report may widen the page. */
+    /* A data table keeps readable column widths and scrolls inside its own
+       card (same trick .ins-tw already uses) rather than squeezing every
+       cell down to one word per line. */
+    .ana .section.card{ overflow-x:auto; }
+    .ana .section.card table{ min-width:440px; }
+    .ana .flbl{ min-width:0; text-align:left; }
+  }
   .ana .fstep{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
   .ana .flbl{ min-width:120px; font-size:12.5px; color:var(--mute); text-align:right; flex-shrink:0; }
   .ana .ftrack{ flex:1; min-width:150px; background:#f0f1f4; border-radius:6px; height:34px; position:relative; overflow:hidden; }
