@@ -624,6 +624,16 @@
   .msg-row-main{flex:1;min-width:0;}
   .msg-row-top{display:flex;align-items:baseline;gap:6px;}
   .msg-row-time{margin-left:auto;font-size:11px;color:var(--mute);white-space:nowrap;}
+  /* iPhone Messages look (owner, 2026-09-23): round avatar on the left,
+     bigger bold name, gray preview, thin divider, chevron on the right. */
+  .msg-row{align-items:center;gap:12px;padding:11px 12px 11px 14px;border-bottom:none;position:relative;background:var(--card,#fff);}
+  .msg-row::after{content:"";position:absolute;left:70px;right:0;bottom:0;height:1px;background:var(--line2);}
+  .msg-row .msg-row-top strong{font-size:15.5px !important;font-weight:700;}
+  .msg-row .msg-row-time{font-size:12.5px;}
+  .msg-row .msg-row-time::after{content:"\203A";margin-left:7px;font-size:17px;color:#c4c8cf;vertical-align:-1px;}
+  .msg-row .rc-meta{font-size:13px;}
+  .msg-ava{width:44px;height:44px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;letter-spacing:.02em;}
+  .msg-ava svg{width:24px;height:24px;}
   .msg-detail{flex:1;display:flex;flex-direction:column;min-width:0;overflow-y:auto;}
   /* Android Messages-style: an arrow right next to the contact's name, always
      visible (not just on a narrow screen) — clicking it clears the open
@@ -12604,6 +12614,16 @@ async function renderMessages(){
   }finally{ _msgLoading=false; }
 }
 
+// Round avatar for a thread row: initials when we know the customer's name,
+// a person silhouette when all we have is a number. Tinted with the brand's
+// rail color so the list still shows which company each text is for.
+function msgAvatar(t){
+  const bg=t.business_name?msgBrandColor(t.business_name):'#9aa1ab';
+  const parts=String(t.customer_name||'').trim().split(/\s+/).filter(Boolean);
+  const ini=parts.length?(parts[0][0]+(parts.length>1?parts[parts.length-1][0]:'')).toUpperCase():'';
+  const inner=ini?esc(ini):'<svg viewBox="0 0 24 24" fill="#fff"><circle cx="12" cy="8.5" r="4.2"/><path d="M3.8 20.5c.9-4.2 4.2-6.6 8.2-6.6s7.3 2.4 8.2 6.6z"/></svg>';
+  return '<div class="msg-ava" style="background:'+bg+'">'+inner+'</div>';
+}
 function paintMessages(){
   const view=document.getElementById('view');
   const rows=(_msgThreads||[]);
@@ -12650,6 +12670,7 @@ function paintMessages(){
       const dir=t.last_direction==='out' ? 'You: ' : '';
       const isSel=!!(_msgOpen && _msgOpen.our===t.our_phone && _msgOpen.customer===t.customer_phone);
       listHtml+='<div class="msg-row'+(isSel?' sel':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
+        +msgAvatar(t)
         +'<div class="msg-row-main">'
         +'<div class="msg-row-top"><strong style="font-size:13.5px;">'+esc(who)+'</strong>'
         +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
