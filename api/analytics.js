@@ -1870,12 +1870,15 @@ async function relayInboundText(line, from, body, business_name, note = '') {
   if (!(line && smsTo && body)) return;
   try {
     const pretty = from.length === 10 ? `(${from.slice(0, 3)}) ${from.slice(3, 6)}-${from.slice(6)}` : from;
-    // line.label is the voice whisper script ("Please be aware, this call
-    // is from X.") — wrong verb for a text and reads garbled if reused
-    // verbatim here. Build the SMS relay's own sentence from the business
-    // name instead.
-    const who = business_name ? `Please be aware, this text is from ${business_name}.` : 'Please be aware, this is a text.';
-    await sendSMS(smsTo, `${who} From ${pretty}, it says: ${body}${note || ''}`);
+    // Short on purpose (owner call, 2026-09-23: "reduce the amount of text
+    // sent") — the old wrapper ("Please be aware, this text is from X. From
+    // (xxx) xxx-xxxx, it says: ...") routinely pushed a short customer text
+    // past 160 chars into a 2nd billed segment for no reason. This is the
+    // same information in fewer words: line.label is the voice whisper
+    // script and reads garbled reused verbatim here, so it still builds its
+    // own sentence from the business name, just a shorter one.
+    const who = business_name ? `${business_name}:` : 'Text:';
+    await sendSMS(smsTo, `${who} ${pretty}: ${body}${note || ''}`);
   } catch (e) {
     console.error('[sms_inbound] relay failed:', e.message);
   }

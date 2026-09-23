@@ -9,13 +9,30 @@ import { sendSMS } from './sms.js';
 import { computeJobPay } from './payroll.js';
 import { signToken } from './auth.js';
 
-// ── Big-bracket-job SMS alert ────────────────────────────────────────────────
-// The owner wants a text whenever a single booked ticket carries 4+ brackets
-// (a big multi-TV job worth eyeballing for stock and staffing). Counts bracket
-// line items by name; "I have my own bracket" is the customer's own hardware,
-// so it never counts. Shared by the public widget bookings (api/book.js) and
-// the dashboard's manual booking_create (api/admin.js).
-const BIG_BRACKET_ALERT_PHONE = process.env.BIG_BRACKET_ALERT_PHONE || '3374997817';
+// ── Owner alert email, shared by every "heads up" below ─────────────────────
+// These used to be one-line SMS pings (owner call, 2026-09-23: "reduce the
+// amount of text sent" — Twilio bills per SMS segment, and none of these are
+// time-critical the way sendReviewCallComplaintAlert is, which stays SMS on
+// purpose). One shared helper so every alert below reads the same way in the
+// inbox: a plain subject line, one paragraph, no table (these were originally
+// a single sentence each).
+async function sendOwnerAlertEmail(subject, bodyText) {
+  try {
+    if (!emailNotificationsOn()) return;
+    const cfg = emailConfig();
+    if (!cfg.apiKey) return;
+    const to = process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com';
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;color:#111;line-height:1.6;">${bodyText}</div>`;
+    await sendEmail({ to, subject, html, replyTo: cfg.from });
+  } catch (e) { console.warn('[owner-notify] alert email failed:', e.message); }
+}
+
+// ── Big-bracket-job alert (email, not SMS — 2026-09-23) ─────────────────────
+// The owner wants a heads-up whenever a single booked ticket carries 4+
+// brackets (a big multi-TV job worth eyeballing for stock and staffing).
+// Counts bracket line items by name; "I have my own bracket" is the
+// customer's own hardware, so it never counts. Shared by the public widget
+// bookings (api/book.js) and the dashboard's manual booking_create (api/admin.js).
 const BIG_BRACKET_THRESHOLD = 4;
 export function bracketCountFromLines(lines) {
   return (Array.isArray(lines) ? lines : []).reduce((n, l) => {
@@ -32,8 +49,8 @@ export function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
   try {
     const count = bracketCountFromLines(lines);
     if (count < BIG_BRACKET_THRESHOLD) return;
-    const msg = `Attention: job with ${customerName || 'a customer'} has ${count} brackets on it. It is scheduled for ${whenStr || 'an upcoming date'}.`;
-    sendSMS(BIG_BRACKET_ALERT_PHONE, msg).catch(e => console.warn('[big-bracket] alert SMS failed:', e.message));
+    sendOwnerAlertEmail('Big bracket job booked',
+      `Job with ${customerName || 'a customer'} has ${count} brackets on it. Scheduled for ${whenStr || 'an upcoming date'}.`);
   } catch (e) { console.warn('[big-bracket] alert error:', e.message); }
 }
 
@@ -49,14 +66,13 @@ export async function claimOnce(db, key) {
   return !error; // true only for whoever actually inserted the row first
 }
 
-const MULTI_TV_DISCOUNT_ALERT_PHONE = process.env.BIG_BRACKET_ALERT_PHONE || '3374997817';
 export async function maybeSendFirstMultiTvDiscountAlert(db, { discountAmt, customerName, whenStr }) {
   try {
     if (!discountAmt || discountAmt <= 0) return;
     const first = await claimOnce(db, 'multi_tv_discount_first_used');
     if (!first) return; // already notified once before — never again
-    const msg = `Heads up: the multi-TV discount was just used for the first time — ${customerName || 'a customer'}'s job (scheduled ${whenStr || 'soon'}) saved $${discountAmt.toFixed(2)}.`;
-    sendSMS(MULTI_TV_DISCOUNT_ALERT_PHONE, msg).catch(e => console.warn('[multi-tv-discount] alert SMS failed:', e.message));
+    sendOwnerAlertEmail('Multi-TV discount used for the first time',
+      `The multi-TV discount was just used for the first time — ${customerName || 'a customer'}'s job (scheduled ${whenStr || 'soon'}) saved $${discountAmt.toFixed(2)}.`);
   } catch (e) { console.warn('[multi-tv-discount] alert error:', e.message); }
 }
 
@@ -112,14 +128,12 @@ export function estimateJobProfit({ price, lines, techName, scheduled_at }) {
 }
 export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customerName, whenStr, scheduled_at }) {
   try {
-    const phone = process.env.OWNER_PHONE_NUMBER;
-    if (!phone) return;
     const p = Number(price) || 0;
     const isGds = linesHaveGds(lines);
     if (p === 0 && !isGds) {
-      const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) was booked at $0 and is NOT Guaranteed Dismount Service — worth checking it's priced correctly.`;
-      sendSMS(phone, msg).catch(e => console.warn('[zero-profit] alert SMS failed:', e.message));
-      return; // one heads-up per job — don't also fire the low-profit text below
+      sendOwnerAlertEmail('Job booked at $0',
+        `${customerName || 'A customer'}'s job (${whenStr || 'scheduled'}) was booked at $0 and is NOT Guaranteed Dismount Service — worth checking it's priced correctly.`);
+      return; // one heads-up per job — don't also fire the low-profit alert below
     }
     // A real GDS job is SUPPOSED to run negative every time -- $0 to the
     // customer, $60 out to the tech, by design (a free-redo goodwill service).
@@ -129,8 +143,8 @@ export function maybeSendZeroOrLowProfitAlert({ price, lines, techName, customer
     if (isGds) return;
     const profit = estimateJobProfit({ price, lines, techName, scheduled_at });
     if (profit != null && profit < 20) {
-      const msg = `Heads up: ${customerName || 'a customer'}'s job (${whenStr || 'scheduled'}) has an estimated profit of $${profit.toFixed(2)} — under $20.`;
-      sendSMS(phone, msg).catch(e => console.warn('[low-profit] alert SMS failed:', e.message));
+      sendOwnerAlertEmail('Low-profit job booked',
+        `${customerName || 'A customer'}'s job (${whenStr || 'scheduled'}) has an estimated profit of $${profit.toFixed(2)} — under $20.`);
     }
   } catch (e) { console.warn('[zero/low-profit] alert error:', e.message); }
 }
@@ -509,11 +523,9 @@ export function isLeadGenSlug(slug) {
 export function maybeSendLeadGenBookingAlert({ slug, businessName, customerName, whenStr }) {
   try {
     if (!isLeadGenSlug(slug)) return;
-    const phone = process.env.OWNER_PHONE_NUMBER;
-    if (!phone) return;
     const msg = `${businessName || 'A lead-gen business'} just booked an appointment`
       + `${customerName ? ` — ${customerName}` : ''}${whenStr ? `, ${whenStr}` : ''}.`;
-    sendSMS(phone, msg).catch(e => console.warn('[lead-gen-booking] alert SMS failed:', e.message));
+    sendOwnerAlertEmail(`${businessName || 'A lead-gen business'} just booked an appointment`, msg);
   } catch (e) { console.warn('[lead-gen-booking] alert error:', e.message); }
 }
 
@@ -528,11 +540,9 @@ export function maybeSendLeadGenBookingAlert({ slug, businessName, customerName,
 // find out by opening the payroll screen at the end of the week.
 export async function sendReviewBonusEarnedAlert({ techName, amount }) {
   try {
-    const phone = process.env.OWNER_PHONE_NUMBER;
-    if (!phone) return;
-    const msg = `${techName || 'A technician'} just finished all 5 Google reviews. `
-      + `A $${Number(amount) || 100} bonus has been added to their payroll for this week.`;
-    await sendSMS(phone, msg).catch(e => console.warn('[review-bonus] alert SMS failed:', e.message));
+    await sendOwnerAlertEmail(`${techName || 'A technician'} earned the $${Number(amount) || 100} review bonus`,
+      `${techName || 'A technician'} just finished all 5 Google reviews. `
+      + `A $${Number(amount) || 100} bonus has been added to their payroll for this week.`);
   } catch (e) { console.warn('[review-bonus] alert error:', e.message); }
 }
 
@@ -546,8 +556,6 @@ export async function sendReviewBonusEarnedAlert({ techName, amount }) {
 // once replied STOP to the 888 line) will also swallow their job texts.
 export async function sendTechJoinedAlert({ techName, company, metro, slotCount, unstaffed, payrollNote, welcomeFailed }) {
   try {
-    const phone = process.env.OWNER_PHONE_NUMBER;
-    if (!phone) return;
     let msg = `New tech joined: ${techName}, ${company} - ${metro}. `;
     msg += unstaffed
       ? `${metro} isn't taking online bookings yet, so no automatic jobs reach them until you open it. `
@@ -555,6 +563,6 @@ export async function sendTechJoinedAlert({ techName, company, metro, slotCount,
     msg += 'Not who you invited? Deactivate them on the Technicians tab.';
     if (payrollNote) msg += ` PAYROLL: ${payrollNote}`;
     if (welcomeFailed) msg += ` Heads up: our welcome text to them failed (${welcomeFailed}), so job texts may not reach them either.`;
-    await sendSMS(phone, msg).catch(e => console.warn('[tech-join] alert SMS failed:', e.message));
+    await sendOwnerAlertEmail(`New tech joined: ${techName}`, msg);
   } catch (e) { console.warn('[tech-join] alert error:', e.message); }
 }
