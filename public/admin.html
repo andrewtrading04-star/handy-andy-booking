@@ -7407,11 +7407,27 @@ function webClicksTbl(byButton){
     rows.map(r=>`<tr><td>${esc(r.k.slice(0,60))}</td><td class="num">${webNum(r.v)}</td></tr>`).join('')+
     `</table>`;
 }
+// Owner, 2026-09-24: rows were ambiguous. Now one row per site + page
+// (the site shown under the path), ?query variants such as ?hero=new merged
+// into their page, and pages under 10 visits greyed out -- too few to judge.
 function webBounceTbl(rows){
   if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
-  return `<table><tr><th>Page</th><th class="num">Sessions</th><th class="num">Bounce</th></tr>`+
-    rows.slice(0,12).map(r=>{ const hi=r.bounce_rate>=70; return `<tr><td>${esc(webShortPath(r.url))}</td><td class="num">${webNum(r.sessions)}</td><td class="num"><span style="font-weight:700;color:${hi?'var(--red)':'var(--ink)'};">${r.bounce_rate}%</span></td></tr>`; }).join('')+
-    `</table>`;
+  const by=new Map();
+  for(const r of rows){
+    let host='', path=r.url||'/';
+    try{ const u=new URL(r.url); host=u.hostname.replace(/^www\./,''); path=u.pathname.replace(/\/+$/,'')||'/'; }catch{}
+    const k=host+path, s=Number(r.sessions)||0;
+    const g=by.get(k)||{ host, path, sessions:0, bounces:0 };
+    g.sessions+=s; g.bounces+=s*(Number(r.bounce_rate)||0)/100;
+    by.set(k,g);
+  }
+  const list=[...by.values()].sort((a,b)=>b.sessions-a.sessions).slice(0,15);
+  return `<table><tr><th>Page</th><th class="num">Visits</th><th class="num">Bounce</th></tr>`+
+    list.map(g=>{
+      const rate=g.sessions?Math.round(g.bounces/g.sessions*100):0, few=g.sessions<10, hi=!few&&rate>=70;
+      return `<tr style="${few?'opacity:.45;':''}"><td>${esc(g.path)}<div style="font-size:11.5px;color:var(--mute);">${esc(g.host)}</div></td><td class="num">${webNum(g.sessions)}</td><td class="num"><span style="font-weight:700;color:${hi?'var(--red)':'var(--ink)'};">${rate}%</span></td></tr>`;
+    }).join('')+
+    `</table><div style="font-size:11.5px;color:var(--mute);margin-top:6px;">Faded = under 10 visits, too few to judge.</div>`;
 }
 function webExitTbl(rows){
   if(!rows||!rows.length) return `<div class="empty">No data yet.</div>`;
