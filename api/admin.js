@@ -25,6 +25,7 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutS
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { myDay } from './_lib/my-day.js';
+import { pipelineHandler, pipelineCallTarget, inboundForLiveStart } from './_lib/pipeline.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { QUESTIONS as APPLY_QUESTIONS } from './_lib/apply-quiz.js';
@@ -367,6 +368,12 @@ export default async function handler(req, res) {
     // session either; it's authenticated by Twilio's own request signature
     // plus a short-TTL signed token instead, both checked inside callConnect.
     if (action === 'call_connect') return await callConnect(req, res);
+    // The same bridge reporting back how each leg ended (Pipeline callback
+    // tries, owner rule 2026-09-24): the staff leg's StatusCallback and the
+    // customer leg's <Dial action>. Public for the same reason as
+    // call_connect, and gated the same two ways inside each handler.
+    if (action === 'call_attempt_status') return await callAttemptStatus(req, res);
+    if (action === 'call_attempt_done') return await callAttemptDone(req, res);
 
     // Everything below requires a valid admin token. call_recording is the one
     // exception to "Bearer header only": it's loaded by a plain <audio src>,
@@ -532,6 +539,9 @@ export default async function handler(req, res) {
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
       case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
       case 'my_day': return await myDay(req, res, db, auth, body);
+      // Owner + secretaries only: pipelineHandler refuses role 'auditor', and
+      // 'pipeline' must never be added to AUDITOR_ADMIN_ACTIONS.
+      case 'pipeline': return await pipelineHandler(req, res, db, auth, body);
       case 'estimate_bulk_close': return await estimateBulkClose(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
@@ -9282,6 +9292,13 @@ async function callLiveStart(req, res, db, auth, body) {
   }
   const callId = body.call_id == null ? null : String(body.call_id);
   if (callId && !PHONE_REQUEST_UUID.test(callId)) return res.status(400).json({ error: 'call_id must be a UUID' });
+  // Pipeline link (owner rule 2026-09-24): which inbound Twilio call this
+  // script is for, and the caller's number, so the conversation lands on the
+  // right card instead of being guessed from timing later. Sent by the
+  // script when it was opened from a card (inbound_call_id / caller_phone);
+  // otherwise the call that just rang this person's own handset. Best-effort:
+  // it never blocks the script from starting.
+  const link = await inboundForLiveStart(db, auth, body);
   const now = new Date().toISOString();
   const { data, error } = await db.from('calls').insert({
     ...(callId ? { id: callId } : {}),
@@ -9290,6 +9307,8 @@ async function callLiveStart(req, res, db, auth, body) {
     occurred_at: now,
     status: 'new',
     handled_by: auth.name || auth.role || 'office',
+    ...(link.inbound_call_id ? { inbound_call_id: link.inbound_call_id } : {}),
+    ...(link.caller_phone ? { caller_phone: link.caller_phone } : {}),
   }).select('id').single();
   // The client keeps this UUID for the entire call. A retry after a lost
   // response must recover the original row without resetting its outcome.
@@ -9322,6 +9341,17 @@ async function callLiveStart(req, res, db, auth, body) {
 // out" delay before the customer's phone starts ringing.
 const CALL_START_TTL_S = 120;        // the connect token is consumed within seconds of her picking up
 const CALL_START_TIMEOUT_MS = 15000; // just OUR request to Twilio's REST API, not the ring itself
+// Every bridge call is logged as an app.call_attempts row (Pipeline, owner
+// rule 2026-09-24: "2 failed callback tries" needs the tries on record).
+// Twilio reports back on two signed links: the staff leg's StatusCallback
+// fires when the whole call ends (ring + conversation), the customer leg's
+// <Dial action> when that leg ends.
+const CALL_ATTEMPT_STATUS_TTL_S = 6 * 3600;
+const CALL_ATTEMPT_DONE_TTL_S = 3 * 3600;
+// The customer leg counts as a conversation automatically only at 30 s or
+// more (a voicemail greeting runs about that long); the card still asks
+// "Did you talk to them?" to confirm.
+const CALL_ATTEMPT_TALK_SEC = 30;
 function callStartTimeoutSignal() {
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), CALL_START_TIMEOUT_MS);
@@ -9413,7 +9443,8 @@ async function callStart(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const source = (body.source || '').toString();
 
-  let customerPhone, trackingNumber;
+  // attemptBizId: the brand the call_attempts row is filed under.
+  let customerPhone, trackingNumber, attemptBizId = null;
   if (source === 'message_thread') {
     // The Messages thread's Call pill: dial the customer this open thread is
     // with, From the tracking number this conversation is actually on.
@@ -9434,6 +9465,7 @@ async function callStart(req, res, db, auth, body) {
     if (!(existing || []).length) return res.status(404).json({ error: 'No conversation found for this number.' });
     customerPhone = toE164(customer);
     trackingNumber = toE164(ctx.ourPhone);
+    attemptBizId = (ctx.biz && ctx.biz.id) || null;
   } else if (source === 'call_claim') {
     // The Needs callback queue's big green button — dials only AFTER the
     // claim itself already succeeded (the client sequences this; see
@@ -9441,7 +9473,7 @@ async function callStart(req, res, db, auth, body) {
     const id = (body.call_id || '').toString();
     if (!id) return res.status(400).json({ error: 'call_id is required' });
     const { data: call, error } = await db.from('calls')
-      .select('caller_phone, grasshopper_number, business:businesses ( slug )')
+      .select('caller_phone, grasshopper_number, business_id, business:businesses ( slug )')
       .eq('id', id).single();
     if (error || !call) return res.status(404).json({ error: 'Call not found' });
     const slug = call.business && call.business.slug;
@@ -9450,6 +9482,21 @@ async function callStart(req, res, db, auth, body) {
     if (!call.grasshopper_number) return res.status(400).json({ error: 'This call has no tracking number on file' });
     customerPhone = toE164(call.caller_phone);
     trackingNumber = toE164(call.grasshopper_number);
+    attemptBizId = call.business_id || null;
+  } else if (source === 'pipeline') {
+    // The Pipeline card's Call button (owner rule 2026-09-24). A card can be
+    // born from a web booking or an estimate, with no call row or text thread
+    // to dial from, so the card hands over only the customer's number and its
+    // brand. Neither is trusted: pipelineCallTarget checks the number already
+    // sits on a call, text, estimate or booking in a business this login may
+    // use, and re-derives the line to ring From (latest inbound call's line
+    // -> latest text thread's line -> the brand's first forwarded line ->
+    // the toll-free).
+    let target;
+    try { target = await pipelineCallTarget(db, auth, body.phone, body.business ? String(body.business) : null); } catch (e) { return bail(res, e); }
+    customerPhone = toE164(target.phone);
+    trackingNumber = toE164(target.line);
+    attemptBizId = target.businessId || null;
   } else {
     return res.status(400).json({ error: 'Unknown source' });
   }
@@ -9473,8 +9520,32 @@ async function callStart(req, res, db, auth, body) {
     return res.status(500).json({ error: 'Calling is not configured (Twilio credentials missing).' });
   }
 
+  // Log the try BEFORE dialing, from every screen (Calls tab, Messages,
+  // Pipeline), so the Pipeline can count callback tries (owner rule
+  // 2026-09-24). Best-effort: a logging hiccup must never stop a callback
+  // from going out -- the call is simply untracked then.
+  const cardKey = /^c_[0-9a-f-]{36}$/i.test(String(body.card_key || '')) ? String(body.card_key) : null;
+  let attemptId = null;
+  try {
+    const { data: att, error: attErr } = await db.from('call_attempts').insert({
+      phone: customerPhone.slice(-10), business_id: attemptBizId, our_phone: trackingNumber.slice(-10),
+      staff_name: auth.name || auth.role || 'office', source, card_key: cardKey,
+    }).select('id').single();
+    if (attErr) throw attErr;
+    attemptId = att.id;
+  } catch (e) { console.error('[call_start] could not log the call attempt:', e.message); }
+  // The request to Twilio itself failed: nothing rang, so it isn't a try at
+  // the customer (the Pipeline skips staff legs that never connected).
+  const attemptFailed = async () => {
+    if (!attemptId) return;
+    try {
+      const { error } = await db.from('call_attempts').update({ staff_status: 'failed', talked: false, talked_set_by: 'auto', ended_at: new Date().toISOString() }).eq('id', attemptId);
+      if (error) throw error;
+    } catch (e) { console.error('[call_start] could not close the call attempt:', e.message); }
+  };
+
   const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-  const connectToken = signToken({ kind: 'ctc_connect', customerPhone, trackingNumber }, CALL_START_TTL_S);
+  const connectToken = signToken({ kind: 'ctc_connect', customerPhone, trackingNumber, ...(attemptId ? { attempt_id: attemptId } : {}) }, CALL_START_TTL_S);
   const connectUrl = `${base}/api/admin?action=call_connect&token=${encodeURIComponent(connectToken)}`;
 
   const formData = new URLSearchParams();
@@ -9485,6 +9556,12 @@ async function callStart(req, res, db, auth, body) {
   // first leg doesn't sit open forever — there's no voicemail/retry in v1,
   // so past this the call just ends.
   formData.append('Timeout', '25');
+  if (attemptId) {
+    const statusToken = signToken({ kind: 'ctc_status', attempt_id: attemptId }, CALL_ATTEMPT_STATUS_TTL_S);
+    formData.append('StatusCallback', `${base}/api/admin?action=call_attempt_status&token=${encodeURIComponent(statusToken)}`);
+    formData.append('StatusCallbackEvent', 'completed');
+    formData.append('StatusCallbackMethod', 'POST');
+  }
   const authHeader = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
   _recentCallStarts.set(customerPhone, Date.now());
   let twilioRes;
@@ -9496,16 +9573,24 @@ async function callStart(req, res, db, auth, body) {
       body: formData,
     });
   } catch (e) {
+    await attemptFailed();
     return res.status(502).json({ error: e.name === 'AbortError' ? 'Twilio did not respond in time.' : (e.message || 'Could not reach Twilio.') });
   }
   if (!twilioRes.ok) {
     const t = await twilioRes.text().catch(() => '');
     console.error('[call_start] Twilio error', twilioRes.status, t.slice(0, 300));
+    await attemptFailed();
     return res.status(502).json({ error: `Twilio ${twilioRes.status}: ${t.slice(0, 200)}` });
   }
   let sid = null;
   try { sid = (await twilioRes.json())?.sid || null; } catch { /* placed regardless */ }
-  return res.status(200).json({ ok: true, sid, ringing: staffPhone });
+  if (attemptId && sid) {
+    try {
+      const { error } = await db.from('call_attempts').update({ twilio_sid: sid }).eq('id', attemptId);
+      if (error) throw error;
+    } catch (e) { console.error('[call_start] could not store the call sid:', e.message); }
+  }
+  return res.status(200).json({ ok: true, sid, ringing: staffPhone, attempt_id: attemptId });
 }
 
 // POST ?action=call_connect — Twilio fetches this the instant the staff leg
@@ -9535,7 +9620,91 @@ async function callConnect(req, res) {
     console.error('[call_connect] token carried a malformed number', claims);
     return xml(res, '<Response><Say voice="Polly.Joanna-Generative">Sorry, something went wrong placing this call.</Say><Hangup/></Response>');
   }
-  return xml(res, `<Response><Dial callerId="${xmlEsc(claims.trackingNumber)}"><Number>${xmlEsc(claims.customerPhone)}</Number></Dial></Response>`);
+  // A logged try (call_attempts) gets the customer leg's outcome back: Twilio
+  // requests the <Dial action> with DialCallStatus/DialCallDuration when that
+  // leg ends (callAttemptDone below). Its own signed, single-purpose token.
+  let dialAction = '';
+  if (claims.attempt_id && PHONE_REQUEST_UUID.test(String(claims.attempt_id))) {
+    const doneToken = signToken({ kind: 'ctc_done', attempt_id: String(claims.attempt_id) }, CALL_ATTEMPT_DONE_TTL_S);
+    dialAction = ` action="${xmlEsc(`${base}/api/admin?action=call_attempt_done&token=${encodeURIComponent(doneToken)}`)}" method="POST"`;
+  }
+  return xml(res, `<Response><Dial callerId="${xmlEsc(claims.trackingNumber)}"${dialAction}><Number>${xmlEsc(claims.customerPhone)}</Number></Dial></Response>`);
+}
+
+// Shared gate for the two bridge report-backs below: Twilio's signature over
+// the exact URL we handed it, then our own token of the expected kind naming
+// a well-formed attempt id. Returns { params, attemptId } or null.
+function callAttemptCallback(req, action, kind) {
+  const token = (req.query.token || '').toString();
+  const base = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const url = `${base}/api/admin?action=${action}&token=${encodeURIComponent(token)}`;
+  const params = (req.body && typeof req.body === 'object') ? req.body : {};
+  if (!verifyTwilioSignature(url, params, req.headers['x-twilio-signature'])) {
+    console.warn(`[${action}] signature verification failed`);
+    return null;
+  }
+  const claims = verifyToken(token);
+  if (!claims || claims.kind !== kind || !PHONE_REQUEST_UUID.test(String(claims.attempt_id || ''))) {
+    console.warn(`[${action}] bad or expired token`);
+    return null;
+  }
+  return { params, attemptId: String(claims.attempt_id) };
+}
+// A staff member's own "Did you talk to them?" answer (talked_set_by = her
+// name) always outranks the automatic read.
+const setByPerson = (row) => !!(row && row.talked_set_by && row.talked_set_by !== 'auto');
+
+// POST ?action=call_attempt_status — the staff leg's StatusCallback (the
+// whole bridge call is over). If her own phone never connected (no-answer,
+// busy, failed, canceled) the customer was never dialed: talked=false, and
+// the Pipeline doesn't count it as a try at the customer. Always empty TwiML.
+async function callAttemptStatus(req, res) {
+  const cb = callAttemptCallback(req, 'call_attempt_status', 'ctc_status');
+  if (!cb) return xml(res, '<Response/>');
+  const status = String(cb.params.CallStatus || '').toLowerCase().replace(/[^a-z-]/g, '').slice(0, 20) || null;
+  try {
+    const db = serviceClient();
+    const { data: row, error } = await db.from('call_attempts').select('talked_set_by, ended_at').eq('id', cb.attemptId).maybeSingle();
+    if (error) throw error;
+    if (row) {
+      const patch = { staff_status: status };
+      if (status && status !== 'completed' && !setByPerson(row)) { patch.talked = false; patch.talked_set_by = 'auto'; }
+      if (!row.ended_at) patch.ended_at = new Date().toISOString();
+      const { error: e2 } = await db.from('call_attempts').update(patch).eq('id', cb.attemptId);
+      if (e2) throw e2;
+    }
+  } catch (e) {
+    console.error('[call_attempt_status] update failed:', e.message);
+  }
+  return xml(res, '<Response/>');
+}
+
+// POST ?action=call_attempt_done — the customer leg's <Dial action>. A real
+// conversation, automatically, = the customer picked up and it lasted
+// CALL_ATTEMPT_TALK_SEC or more; anything shorter reads as voicemail or a
+// hang-up. Empty TwiML ends the call.
+async function callAttemptDone(req, res) {
+  const cb = callAttemptCallback(req, 'call_attempt_done', 'ctc_done');
+  if (!cb) return xml(res, '<Response/>');
+  const dial = String(cb.params.DialCallStatus || '').toLowerCase().replace(/[^a-z-]/g, '').slice(0, 20) || null;
+  const dur = parseInt(cb.params.DialCallDuration, 10);
+  try {
+    const db = serviceClient();
+    const { data: row, error } = await db.from('call_attempts').select('talked_set_by').eq('id', cb.attemptId).maybeSingle();
+    if (error) throw error;
+    if (row) {
+      const patch = { dial_status: dial, duration_sec: Number.isFinite(dur) ? dur : null, ended_at: new Date().toISOString() };
+      if (!setByPerson(row)) {
+        patch.talked = dial === 'completed' && Number.isFinite(dur) && dur >= CALL_ATTEMPT_TALK_SEC;
+        patch.talked_set_by = 'auto';
+      }
+      const { error: e2 } = await db.from('call_attempts').update(patch).eq('id', cb.attemptId);
+      if (e2) throw e2;
+    }
+  } catch (e) {
+    console.error('[call_attempt_done] update failed:', e.message);
+  }
+  return xml(res, '<Response/>');
 }
 
 // ── Inbound calls: Grasshopper ingestion — RETIRED 2026-08-26 ───────────────
@@ -10882,6 +11051,10 @@ async function estimateCreate(req, res, db, auth, body) {
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   const estimateId = body.estimate_id == null ? null : String(body.estimate_id);
   if (estimateId && !PHONE_REQUEST_UUID.test(estimateId)) return res.status(400).json({ error: 'estimate_id must be a UUID' });
+  // The Take a Call row this quote came out of (migration 0141, Pipeline):
+  // lets the card tie the conversation to the quote without guessing. Only a
+  // link -- a malformed id is dropped rather than blocking the estimate.
+  const estCallId = body.call_id != null && PHONE_REQUEST_UUID.test(String(body.call_id)) ? String(body.call_id) : null;
   const taxRate = body.tax_rate === undefined ? DEFAULT_EST_TAX_RATE : normalizeTaxRate(body.tax_rate);
 
   const { customer_name, customer_phone, customer_email, selections, service_label } = body;
@@ -10958,6 +11131,7 @@ async function estimateCreate(req, res, db, auth, body) {
     sms_consent: estSmsConsent,
     source: 'manual',
     ...(estTechId ? { technician_id: estTechId } : {}),
+    ...(estCallId ? { call_id: estCallId } : {}),
   }, estimateId ? ['id', 'line_items', 'tax_rate'] : []);
 
   if (createErr?.code === '23505' && estimateId) {

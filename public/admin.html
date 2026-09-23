@@ -431,6 +431,101 @@
   .md-habit-add button{border:none;background:var(--accent);color:#fff;border-radius:999px;padding:0 12px;font-weight:700;}
   .md-nudge{position:fixed;right:16px;bottom:16px;z-index:200;max-width:320px;background:#fff;border:2px solid var(--accent);border-radius:14px;padding:14px;box-shadow:0 12px 32px rgba(0,0,0,.25);font-size:14px;}
   .md-nudge-b{display:flex;gap:8px;margin-top:10px;} .md-nudge-b .btn{width:auto;}
+  /* Pipeline (owner + secretaries) -- see renderPipeline(). One card per
+     inquiry, New lead to Paid. Same white cards and accent as the rest of the
+     CRM; on phones 16px gutters, 44px taps, and the stage strip is a select. */
+  .pl-wrap{max-width:980px;}
+  .pl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .pl-title{font-size:24px;font-weight:800;letter-spacing:-.02em;flex:1 1 auto;min-width:0;}
+  .pl-title small{display:block;font-size:12.5px;font-weight:600;color:var(--mute);letter-spacing:0;}
+  .pl-head select{font-size:14px;font-weight:600;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);min-height:40px;max-width:100%;min-width:0;}
+  .pl-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px;}
+  .pl-tile{display:block;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;text-align:left;font:inherit;color:var(--ink);min-width:0;cursor:default;}
+  .pl-tile-l{display:block;font-size:11.5px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+  .pl-tile-n{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1.1;overflow-wrap:anywhere;}
+  .pl-tile-s{display:block;font-size:12.5px;color:var(--mute);margin-top:2px;}
+  .pl-tile.good .pl-tile-n{color:#15803d;}
+  .pl-pct i{font-style:normal;}
+  .pl-tile.bad{background:#fff6f6;border-color:#f3c1c1;cursor:pointer;}
+  .pl-tile.bad .pl-tile-n,.pl-tile.bad .pl-tile-l{color:#b91c1c;}
+  .pl-stages{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:12px;}
+  .pl-stage{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;padding:9px 6px;font:inherit;color:var(--ink-2);text-align:center;min-height:58px;min-width:0;}
+  .pl-stage-n{display:block;font-size:20px;font-weight:800;color:var(--ink);}
+  .pl-stage-l{display:block;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pl-stage.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .pl-stage.on .pl-stage-n{color:var(--accent);}
+  .pl-stage-dot{position:absolute;top:-7px;right:-4px;background:#dc2626;color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;}
+  .pl-stagesel{display:none;}
+  .pl-sec{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:12px;}
+  .pl-sec-h{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:4px;}
+  .pl-bar{display:grid;grid-template-columns:96px minmax(0,1fr) auto;align-items:center;gap:10px;padding:5px 0;font-size:13.5px;}
+  .pl-bar-name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pl-bar-track{height:10px;background:var(--line2);border-radius:999px;overflow:hidden;}
+  .pl-bar-fill{height:100%;border-radius:999px;background:#16a34a;}
+  .pl-bar-fill.warn{background:#f59e0b;} .pl-bar-fill.bad{background:#dc2626;}
+  .pl-bar-num{font-size:12.5px;color:var(--ink-2);font-weight:700;white-space:nowrap;}
+  .pl-list{display:flex;flex-direction:column;gap:8px;}
+  .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+  .pl-card.leak{border:2px solid #dc2626;}
+  .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
+  .pl-row{display:block;width:100%;background:transparent;border:none;text-align:left;font:inherit;color:var(--ink);padding:11px 14px;min-height:44px;}
+  .pl-row:hover{background:#fafbfc;}
+  .pl-row-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .pl-name{font-weight:800;font-size:15px;min-width:0;overflow-wrap:anywhere;}
+  .pl-chip{font-size:11.5px;font-weight:700;background:var(--line2);color:var(--ink-2);border-radius:999px;padding:2px 8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pl-chip.ret{background:#e0ecff;color:#1d4ed8;}
+  .pl-amt{margin-left:auto;font-weight:800;font-size:14px;white-space:nowrap;}
+  .pl-next{display:flex;gap:5px;align-items:flex-start;font-size:13.5px;font-weight:700;margin-top:4px;}
+  .pl-next svg{flex:none;margin-top:2px;}
+  .pl-next.danger{color:#b91c1c;} .pl-next.warn{color:#b45309;} .pl-next.ok{color:#15803d;} .pl-next.mute{color:var(--mute);font-weight:600;}
+  .pl-meta{display:block;font-size:12px;color:var(--mute);margin-top:3px;overflow-wrap:anywhere;}
+  .pl-detail{border-top:1px solid var(--line2);padding:12px 14px 14px;}
+  .pl-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .pl-acts+.pl-acts{margin-top:8px;}
+  .pl-btn{min-height:40px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink-2);font-size:13.5px;font-weight:700;}
+  .pl-btn:hover{background:var(--line2);}
+  .pl-btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .pl-btn.pri:hover{filter:brightness(.95);}
+  .pl-btn.red{color:#b91c1c;}
+  .pl-btn:disabled{opacity:.55;cursor:default;}
+  .pl-link{background:none;border:none;color:var(--accent);font-size:13px;font-weight:700;padding:8px 4px;min-height:40px;}
+  .pl-ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--accent-soft);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:14px;font-weight:700;}
+  .pl-ask .pl-x{margin-left:auto;}
+  .pl-lost{background:#fff6f6;border:1px solid #f3c1c1;border-radius:12px;padding:10px 12px;margin-bottom:10px;}
+  .pl-lost-h{font-size:13.5px;font-weight:800;color:#b91c1c;}
+  .pl-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;}
+  .pl-reason{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 12px;font-size:13px;font-weight:700;color:var(--ink-2);min-height:40px;}
+  .pl-reason.on{background:#b91c1c;border-color:#b91c1c;color:#fff;}
+  .pl-lost input{display:block;width:100%;font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;}
+  .pl-facts{font-size:13px;color:var(--ink-2);line-height:1.6;margin-top:10px;overflow-wrap:anywhere;}
+  .pl-facts b{color:var(--ink);}
+  .pl-facts .danger{color:#b91c1c;font-weight:700;}
+  .pl-audit{margin-top:10px;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.55;overflow-wrap:anywhere;}
+  .pl-audit .good{color:#15803d;} .pl-audit .warn{color:#b45309;} .pl-audit .bad{color:#b91c1c;} .pl-audit .thin{color:var(--mute);}
+  .pl-audit .flag{color:#b91c1c;font-weight:700;}
+  .pl-stars{color:#f59e0b;letter-spacing:1px;}
+  .pl-tl{margin-top:12px;border-left:2px solid var(--line2);padding-left:10px;display:flex;flex-direction:column;gap:7px;}
+  .pl-tl-i{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:6px;font-size:13px;align-items:baseline;}
+  .pl-tl-i .ic{text-align:center;font-size:13px;}
+  .pl-tl-i .t{overflow-wrap:anywhere;}
+  .pl-tl-i .w{font-size:12px;color:var(--mute);white-space:nowrap;}
+  .pl-tl-i.danger .t{color:#b91c1c;} .pl-tl-i.warn .t{color:#b45309;} .pl-tl-i.mute .t{color:var(--mute);}
+  .pl-empty{background:var(--panel);border:1px dashed var(--line);border-radius:14px;padding:26px 14px;text-align:center;color:var(--mute);font-size:14px;}
+  @media(max-width:760px){
+    .wrap.pl-wrap{padding:12px 16px;}
+    .pl-stages{display:none;}
+    .pl-stagesel{display:block;width:100%;font-size:16px;font-weight:700;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);margin-bottom:12px;min-height:44px;}
+    .pl-title{flex-basis:100%;}
+    .pl-head select{font-size:16px;min-height:44px;flex:1 1 140px;}
+    .pl-tiles{gap:6px;}
+    .pl-tile{padding:10px;border-radius:12px;}
+    .pl-tile-n{font-size:21px;} .pl-tile-l{font-size:10.5px;letter-spacing:.03em;} .pl-tile-s{font-size:11.5px;}
+    .pl-pct{display:block;font-size:15px;} .pl-pct i{display:none;}
+    .pl-btn,.pl-reason,.pl-link{min-height:44px;}
+    .pl-bar{grid-template-columns:72px minmax(0,1fr) auto;gap:8px;}
+    .pl-tl-i{grid-template-columns:22px minmax(0,1fr);row-gap:0;}
+    .pl-tl-i .w{grid-column:2;}
+  }
   .est-mob{display:none;}
   .ch-hist{margin:10px 0 4px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 12px;font-size:13px;color:#14532d;line-height:1.55;}
   .ch-hist-h{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#15803d;margin-bottom:2px;}
@@ -2033,6 +2128,9 @@
       <button data-nav="technicians" id="navTechnicians"><span class="ic" data-ico="wrench">🔧</span> Technicians</button>
       <button data-nav="reviews" id="navReviews"><span class="ic" data-ico="star">⭐</span> Reviews</button>
       <button data-nav="callhub" id="navCallHub"><span class="ic" data-ico="phone">📞</span> <span id="navCallHubLabel">Calls</span> <span class="nav-badge" id="rcBadge" style="display:none;"></span></button>
+      <!-- Pipeline: one card per inquiry, New lead → Paid (owner, 2026-09-24).
+           Owner + secretaries; never the auditor (see enterApp). -->
+      <button data-nav="pipeline" id="navPipeline" style="display:none;"><span class="ic" data-ico="pipeline">📈</span> Pipeline</button>
       <!-- Texts. Deliberately its OWN section rather than a tab inside the
            Calls hub: CALL_TABS is hand-tuned per secretary, so a tab added
            there would change which tab each of them lands on AND feed the
@@ -2599,6 +2697,7 @@ const ICONS = {
   link:     {e:'🔗', f:'fa-solid fa-link'},
   estimate: {e:'🧾', f:'fa-solid fa-file-invoice-dollar'},
   analytics:{e:'📊', f:'fa-solid fa-chart-column'},
+  pipeline: {e:'📈', f:'fa-solid fa-chart-line'},
   handyman:{e:'🛠️', f:'fa-solid fa-screwdriver-wrench'},
   webanalytics:{e:'🌐', f:'fa-solid fa-globe'},
 };
@@ -2798,6 +2897,7 @@ function logout(opts){
   const otherTabLive = reason==='expired' && !!token && !!lsGet('ha_admin_token') && lsGet('ha_admin_token')!==token;
   dismissAllOverlays();
   token=''; role=''; userName=''; scope=''; appConfig={}; businesses=[]; current=null;
+  try{ plReset(); }catch(_){}   // drop the cached Pipeline board (owner's audit notes, scoreboard)
   if(!otherTabLive){
     lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
     lsDel('ha_owner_token'); lsDel('ha_owner_role'); lsDel('ha_owner_name'); lsDel('ha_owner_scope'); lsDel('ha_owner_config'); lsDel('ha_owner_biz');
@@ -2983,6 +3083,12 @@ function enterApp(){
   const navMyDay=document.getElementById('navMyDay');
   if(navMyDay) navMyDay.style.display = role==='owner' ? '' : 'none';
   if(role==='owner') startMyDayNudge();
+  // Pipeline: owner and both secretaries (they call back from it on their
+  // phones). Never the auditor -- the server refuses that role too, and the
+  // audit box inside a card is owner-only on the server side as well.
+  const navPipe=document.getElementById('navPipeline');
+  if(navPipe) navPipe.style.display = (role==='owner'||role==='secretary') ? '' : 'none';
+  try{ plReset(); }catch(_){}
   // Reviews: owner only. Removed from the secretary view 2026-09-09 at the
   // owner's request -- the tab is his review-request/GBP oversight, not a
   // shift task, and every extra tab is one more place to click by mistake.
@@ -3326,6 +3432,7 @@ function navTo(s){
   // falls back to the schedule rather than rendering an empty shell.
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
+  if(s==='pipeline' && role!=='owner' && role!=='secretary') s='schedule';
   section=s;
   document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch'||s==='estimates');
   document.getElementById('view').classList.toggle('estimates-workspace',s==='estimates');
@@ -3339,7 +3446,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline'})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -3362,6 +3469,7 @@ function navTo(s){
     else if(s==='launch') renderLaunch();
     else if(s==='notes') renderNotes();
     else if(s==='myday') renderMyDay();
+    else if(s==='pipeline') renderPipeline();
   }
 }
 function refreshCurrent(){
@@ -3392,6 +3500,7 @@ function refreshCurrent(){
   else if(section==='other') renderOther();
   else if(section==='notes') renderNotes();
   else if(section==='myday') renderMyDay();
+  else if(section==='pipeline') renderPipeline();
 }
 
 // Mobile drawer: the hamburger toggles it; tapping the scrim (off the drawer)
@@ -4669,7 +4778,7 @@ function tvSizeIndex(name){
     if(v<=32) return 0; if(v<=59) return 1; if(v<=69) return 2; if(v<=84) return 3; if(v<=97) return 4; return 5; }
   return -1;
 }
-function liIsZeroExtra(name,total){ return !(Number(total)||0) && !/^tax/i.test(String(name||'').trim()); }
+function liIsZeroExtra(name,total){ return !(Number(total)||0) && !/^tax\b/i.test(String(name||'').trim()); }
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
   let hiddenItems=[];   // default "TV Type: Regular TV" lines — kept in the data, hidden from the editor
@@ -9916,6 +10025,447 @@ function startMyDayNudge(){
   check(); setInterval(check, 10*60000);
 }
 
+// ── Pipeline (owner + secretaries) ─────────────────────────────────────────
+// Owner rules 2026-09-24: one card per inquiry (a phone number within one
+// brand family). Stages New lead → Talked to → Quoted → Booked → Done → Paid,
+// plus Lost with a reason. Every talked-to call must end in a booking or an
+// estimate; one that hasn't, an hour after the conversation, is a red leak.
+// The server builds the cards on read (api/_lib/pipeline.js, action
+// 'pipeline'); this screen only paints them and posts the office's decisions
+// back as {op}. Secretaries call back from here on their phones, so every
+// button is a 44px tap and the stage strip becomes one dropdown.
+//
+// All screen state lives in the _pl* globals below, never in the DOM: a
+// business switch (Send estimate / Book / Call script on another brand's
+// card) re-runs navTo('pipeline'), and renderPipeline() repaints the cached
+// board straight back with the same stage, open card, pending "Did you talk
+// to them?" and half-picked Lost reason.
+const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['done','Done'],['paid','Paid'],['lost','Lost']];
+// Exact list, owner rule -- do not change. The server sends its own copy
+// (lost_reasons); this is only the fallback if a payload ever lacks it.
+const PL_LOST_REASONS=['Too expensive','Went with someone else','Just shopping','Out of area',"We don't do that",'No reply after estimate','Spam'];
+const PL_TONES=['danger','warn','ok','mute'];
+// Timeline icon names from the server -> the app's own icon set (emoji for
+// Handy Andy, Font Awesome for Dom's, same as every other screen).
+// script = a Take a Call row, callout = a callback try (the rows the 2-tries
+// rule counts), cancel = "Job cancelled", reopen = "Reopened".
+const PL_TL_ICON={phone:'phone',call:'phone',missed:'phone',attempt:'phone',callout:'phone',text:'messages',sms:'messages',auto:'messages',estimate:'estimate',web:'webanalytics',booking:'schedule',done:'schedule',paid:'card',lost:'ban',cancel:'ban',reopen:'pipeline',audit:'star',note:'note',script:'note'};
+const PL_ALERT='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 15h-2v-2h2v2zm0-4h-2V9h2v4z"/></svg>';
+let _pl=null, _plErr=null, _plLoading=false, _plReq=0, _plDirty=false;
+let _plRange='7', _plBiz='all', _plStage=null, _plOpen=null;
+let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
+let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
+const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
+// Every sign-in and View As switch (enterApp) starts the board clean: the last
+// login's cached cards -- the owner's audit notes and full scoreboard -- must
+// never be painted for a secretary session, not even until the refetch lands.
+function plReset(){ _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; }
+
+const plStageLabel=s=>(PL_STAGES.find(x=>x[0]===s)||[s,s])[1];
+function plCard(key){ return ((_pl&&Array.isArray(_pl.cards))?_pl.cards:[]).find(c=>c&&c.key===key)||null; }
+function plMoney(n){ const v=Number(n); return Number.isFinite(v)&&v>0 ? '$'+Math.round(v).toLocaleString('en-US') : ''; }
+function plAgo(iso){
+  const ms=Date.now()-Date.parse(iso||''); if(!Number.isFinite(ms)) return '';
+  const m=Math.max(0,Math.round(ms/60000));
+  if(m<60) return m+'m';
+  const h=Math.floor(m/60); return h<48 ? h+'h' : Math.floor(h/24)+'d';
+}
+// Central unless the card names its own zone: the server's "Today" range
+// starts at Central midnight, so the clock on the cards agrees with it.
+function plWhen(iso, zone){
+  if(!iso) return '';
+  try{
+    const z=zone||'America/Chicago', d=new Date(iso);
+    const t=d.toLocaleTimeString('en-US',{timeZone:z,hour:'numeric',minute:'2-digit'});
+    const today=d.toLocaleDateString('en-CA',{timeZone:z})===new Date().toLocaleDateString('en-CA',{timeZone:z});
+    return today ? t : d.toLocaleDateString('en-US',{timeZone:z,weekday:'short',month:'numeric',day:'numeric'})+' '+t;
+  }catch(_){ return ''; }
+}
+function plTitle(c){ return String(c.name||'').trim() || c.phone_pretty || fmtPhone(c.phone) || 'Unknown caller'; }
+// A name only when it is one: callers who never gave a name come back as
+// "Caller (no phone saved)" or as their own number, and neither should be
+// typed into a booking's Name box.
+function plRealName(c){
+  const n=String(c&&c.name||'').trim();
+  return n && !/^caller \(/i.test(n) && n.replace(/\D/g,'')!==String(c.phone||'') ? n : '';
+}
+function plHasPhone(c){ return String(c&&c.phone||'').replace(/\D/g,'').length>=10; }
+// The brand to act as for a card: the one it shows, else any other brand on
+// it that this login can use. null = none (a card that reached a secretary's
+// board only through a brand she can't book for).
+function plBizSlug(c){
+  const want=[c&&c.business&&c.business.slug, ...((c&&Array.isArray(c.businesses))?c.businesses.map(x=>typeof x==='string'?x:x&&x.slug):[])].filter(Boolean);
+  return want.find(s=>businesses.some(b=>b.slug===s)) || null;
+}
+// New Booking prices and books against `current`, so switch to the card's
+// brand first -- the same switchToBusiness() the sidebar chips use.
+// A brand slug the server named (booking.slug / estimate.slug), only when this
+// login can use it -- a job or estimate lives under its own brand, which can
+// differ from the card's shown one inside a family.
+function plOwnSlug(s){ return s && businesses.some(b=>b.slug===s) ? s : null; }
+function plUseBusiness(c){
+  const slug=plBizSlug(c);
+  if(!slug){ toast(`This login can't book for ${(c.business&&c.business.name)||'that brand'}.`); return null; }
+  if(!current || current.slug!==slug) switchToBusiness(slug);
+  return slug;
+}
+// Answered 20-119 s with no Take a Call session: the server counts it as a
+// talk for the stage and the leak clock, but a Google Voice voicemail reads as
+// "answered" too, so it asks the office (amendment 4). The call in question is
+// the server's answered_call {id, state, wizard} -- never inbound_call_id,
+// which is just the card's LATEST inbound call: a missed call after the 45 s
+// one would get marked a talk, and "Voicemail" would land on a call that
+// changes nothing while the question stays.
+function plUnconfirmedCall(c){
+  const a=c&&c.answered_call;
+  return c && c.stage==='talked' && a && a.id && a.state==='unconfirmed' ? a.id : null;
+}
+// "Voicemail, not a talk" on a talked card whose talk came from an answered
+// inbound call. Not when a Take a Call script ran on that call (wizard): the
+// script row is a talk by itself, so no_talk on the call could never move it.
+function plTalkCall(c){
+  const a=c&&c.answered_call;
+  return c && c.stage==='talked' && a && a.id && a.state==='talked' && !a.wizard ? a.id : null;
+}
+
+async function renderPipeline(){
+  // Paint the last board at once (business switch, a booking just saved,
+  // coming back to the tab), then refresh behind it.
+  if(_pl) paintPipeline();
+  await plLoad(true);
+}
+// force = a person asked for this (open, filter change, after a save), so it
+// paints even over an open picker. The 30s poll passes false and waits.
+async function plLoad(force){
+  const req=++_plReq;
+  const params={ range:_plRange };
+  if(role==='owner' && _plBiz && _plBiz!=='all') params.business=_plBiz;
+  _plLoading=true;
+  try{
+    const d=await api('pipeline',{ params, timeoutMs:30000 });
+    if(req!==_plReq) return;
+    _pl=d||{}; _plErr=null;
+  }catch(e){
+    if(req!==_plReq) return;
+    _plErr=e.message||'Could not load the pipeline';
+    if(force && _pl) toast(_plErr);
+  }finally{ if(req===_plReq) _plLoading=false; }
+  if(!onScreen('pipeline')) return;
+  if(!force && plHold()){ _plDirty=true; return; }
+  paintPipeline();
+}
+// The refresh must never pull a control out from under a finger: not while a
+// Lost reason picker is on screen, and not while a box here has focus (typing
+// the lost note, a dropdown open on a phone). It repaints once that's over.
+function plHold(){
+  if(_plLost && document.querySelector('#plRoot .pl-lost')) return true;
+  const a=document.activeElement, v=document.getElementById('view');
+  return !!(a && v && v.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+}
+// Own interval, not pollTimer: navTo clears that on every move, including the
+// business switch this screen makes itself. Same shape as the Calls poller.
+// Signed out: `section` still says 'pipeline', so without the !current/!token
+// guard it would keep polling with no token and repaint the last login's
+// board into the hidden view.
+setInterval(()=>{
+  if(document.hidden || !current || !token || !onScreen('pipeline')) return;
+  plLoad(false);
+}, 30000);
+document.getElementById('view').addEventListener('focusout',()=>setTimeout(()=>{
+  if(_plDirty && onScreen('pipeline') && !plHold()) paintPipeline();
+},0));
+
+function paintPipeline(){
+  const view=document.getElementById('view');
+  if(!onScreen('pipeline')) return;
+  _plDirty=false;
+  const d=_pl;
+  if(!d){ view.innerHTML=`<div class="wrap pl-wrap"><div class="empty">${esc(_plErr||'Loading the pipeline…')}</div></div>`; return; }
+  const cards=(Array.isArray(d.cards)?d.cards:[]).filter(c=>c&&c.key&&c.stage);
+  const stages=d.stages||{};
+  const count=k=>stages[k]!=null ? (Number(stages[k])||0) : cards.filter(c=>c.stage===k).length;
+  const leaks={}; cards.forEach(c=>{ if(c.leak) leaks[c.stage]=(leaks[c.stage]||0)+1; });
+  // Default stage, chosen once: the first of New lead / Talked to holding a
+  // leak, else Quoted. After that only a tap changes it -- a poll must not
+  // swap the list under someone reading it.
+  if(!_plStage || !PL_STAGES.some(s=>s[0]===_plStage)) _plStage=leaks.new?'new':leaks.talked?'talked':'quoted';
+  const isOwner=role==='owner';
+  const m=d.metrics||{};
+  const calls=Number(m.calls)||0, conv=Number(m.converted)||0, leakN=Number(m.leaks)||0;
+  const pct=calls?Math.round(100*conv/calls):0;
+  const rangeName=({today:'today','7':'last 7 days','30':'last 30 days'})[_plRange]||'';
+  const upd=_plLoading?'Updating…':_plErr?'Could not refresh: '+_plErr:(d.generated_at?'Updated '+(plAgo(d.generated_at)==='0m'?'just now':plAgo(d.generated_at)+' ago'):'');
+  const opt=(v,l,cur)=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`;
+  const rangeSel=`<select id="plRange" aria-label="Date range">${[['today','Today'],['7','7 days'],['30','30 days']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
+  // Brand filter: owner only (a secretary's board is already scoped to her
+  // brands on the server). Families = Dom's + its lead-gen sites, and Handy
+  // Andy + everything else, the same split the cards are grouped by.
+  const bizSel=isOwner?`<select id="plBiz" aria-label="Brand">${opt('all','All brands',_plBiz)}<optgroup label="Families">${opt('family:handy-andy','Handy Andy family',_plBiz)}${opt('family:doms',"Dom's family",_plBiz)}</optgroup><optgroup label="One brand">${businesses.map(b=>opt(b.slug,b.name,_plBiz)).join('')}</optgroup></select>`:'';
+  const tiles=`<div class="pl-tiles">
+      <div class="pl-tile"><span class="pl-tile-l">Calls</span><span class="pl-tile-n">${calls}</span><span class="pl-tile-s">${esc(rangeName)}</span></div>
+      <div class="pl-tile good"><span class="pl-tile-l">Booked or estimate</span><span class="pl-tile-n">${conv} of ${calls}<span class="pl-pct"><i> · </i>${pct}%</span></span></div>
+      ${leakN>0
+        ? `<button type="button" class="pl-tile bad" data-pl="leaks" title="Show the leaks"><span class="pl-tile-l">Leaks</span><span class="pl-tile-n">${leakN}</span><span class="pl-tile-s">no booking or estimate</span></button>`
+        : `<div class="pl-tile"><span class="pl-tile-l">Leaks</span><span class="pl-tile-n">0</span><span class="pl-tile-s">none right now</span></div>`}
+    </div>`;
+  const leakTag=k=>leaks[k]?`${leaks[k]} leak${leaks[k]===1?'':'s'}`:'';
+  const strip=`<div class="pl-stages" role="group" aria-label="Stages">${PL_STAGES.map(([k,l])=>
+      `<button type="button" class="pl-stage${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}" aria-pressed="${_plStage===k}"><span class="pl-stage-n">${count(k)}</span><span class="pl-stage-l">${l}</span>${leaks[k]?`<span class="pl-stage-dot" title="${leakTag(k)}">${leaks[k]}</span>`:''}</button>`).join('')}</div>
+    <select class="pl-stagesel" id="plStageSel" aria-label="Stage">${PL_STAGES.map(([k,l])=>
+      `<option value="${k}"${_plStage===k?' selected':''}>${esc(l)} · ${count(k)}${leaks[k]?' · '+leakTag(k):''}</option>`).join('')}</select>`;
+  // One bar per secretary: talked-to calls that ended in a booking or an
+  // estimate. The server sends a secretary only her own row.
+  const board=Array.isArray(d.scoreboard)?d.scoreboard:[];
+  const bars=board.length?`<div class="pl-sec"><div class="pl-sec-h">Talked to → booked or estimate</div>${board.map(r=>{
+      const t=Number(r.talked)||0, cv=Number(r.converted)||0;
+      const p=r.pct!=null&&Number.isFinite(Number(r.pct))?Math.round(Number(r.pct)):(t?Math.round(100*cv/t):0);
+      const cls=p>=75?'':p>=50?' warn':' bad';
+      return `<div class="pl-bar"><div class="pl-bar-name">${esc(r.name||'—')}</div><div class="pl-bar-track"><div class="pl-bar-fill${cls}" style="width:${Math.max(0,Math.min(100,p))}%"></div></div><div class="pl-bar-num">${cv} of ${t} · ${p}%</div></div>`;
+    }).join('')}</div>`:'';
+  const list=cards.filter(c=>c.stage===_plStage);
+  view.innerHTML=`<div class="wrap pl-wrap" id="plRoot">
+    <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
+    ${tiles}${strip}${bars}
+    ${list.length?`<div class="pl-list">${list.map(plCardHtml).join('')}</div>`:'<div class="pl-empty">Nothing here right now.</div>'}
+  </div>`;
+  const root=document.getElementById('plRoot');
+  root.addEventListener('click', plClick);
+  document.getElementById('plRange').addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
+  const bs=document.getElementById('plBiz');
+  if(bs) bs.addEventListener('change',e=>{ _plBiz=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
+  document.getElementById('plStageSel').addEventListener('change',e=>{ _plStage=e.target.value; e.target.blur(); paintPipeline(); });
+  const note=document.getElementById('plLostNote');
+  if(note){
+    note.addEventListener('input',()=>{ if(_plLost) _plLost.note=note.value; });
+    note.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const c=_plLost&&plCard(_plLost.key); if(c) plSaveLost(c); } });
+  }
+}
+
+function plCardHtml(c){
+  const open=_plOpen===c.key, next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
+  const returning=!!(c.history && Number(c.history.prior_jobs)>0);
+  const amt=plMoney(c.amount);
+  const meta=[
+    c.secretary?esc(c.secretary):'',
+    c.opened_at?`<span title="Opened ${esc(plWhen(c.opened_at,c.tz))}">${esc(plAgo(c.opened_at))}</span>`:'',
+    businesses.length>1 && c.business && c.business.name ? esc(c.business.name) : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="pl-card${c.leak?' leak':''}${open?' open':''}" data-plkey="${esc(c.key)}">
+    <button type="button" class="pl-row" data-pl="toggle" aria-expanded="${open}">
+      <span class="pl-row-top"><span class="pl-name">${esc(plTitle(c))}</span>${c.source?`<span class="pl-chip">${esc(c.source)}</span>`:''}${returning?'<span class="pl-chip ret">Returning</span>':''}${amt?`<span class="pl-amt">${amt}</span>`:''}</span>
+      ${next.text?`<span class="pl-next ${tone}">${tone==='danger'?PL_ALERT:''}<span>${esc(next.text)}</span></span>`:''}
+      ${meta?`<span class="pl-meta">${meta}</span>`:''}
+    </button>
+    ${open?plDetailHtml(c):''}
+  </div>`;
+}
+
+function plDetailHtml(c){
+  const st=c.stage, phone=plHasPhone(c);
+  const closed=st==='done'||st==='paid', lost=st==='lost';
+  // The server still sends the card's last booking when every job on it was
+  // cancelled (then called again, or Reopened after "Job cancelled"): that
+  // card is a live lead again and needs Book / Send estimate / Mark lost.
+  const liveJob=!!(c.booking && c.booking.status!=='cancelled');
+  const unconf=plUnconfirmedCall(c), talkCall=plTalkCall(c);
+  const picking=!!(_plLost && _plLost.key===c.key);
+  const top=[];
+  if(_plAsk[c.key]) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
+      <button type="button" class="pl-btn pri" data-pl="ask-yes">Yes</button><button type="button" class="pl-btn" data-pl="ask-no">No answer</button>
+      <button type="button" class="pl-link pl-x" data-pl="ask-x">Not now</button></div>`);
+  if(unconf) top.push(`<div class="pl-ask" role="group" aria-label="Talk or voicemail"><span>Answered, but was it a real talk?</span>
+      <button type="button" class="pl-btn pri" data-pl="talk">Talked</button><button type="button" class="pl-btn" data-pl="notalk">Voicemail</button></div>`);
+  if(picking){
+    const reasons=(Array.isArray(_pl.lost_reasons)&&_pl.lost_reasons.length)?_pl.lost_reasons:PL_LOST_REASONS;
+    top.push(`<div class="pl-lost"><div class="pl-lost-h">Why was it lost?</div>
+      <div class="pl-reasons">${reasons.map(r=>`<button type="button" class="pl-reason${_plLost.reason===r?' on':''}" data-pl="reason" data-reason="${esc(r)}" aria-pressed="${_plLost.reason===r}">${esc(r)}</button>`).join('')}</div>
+      <input id="plLostNote" maxlength="300" placeholder="Note (optional)" autocomplete="off" value="${esc(_plLost.note||'')}">
+      <div class="pl-acts"><button type="button" class="pl-btn pri" data-pl="lost-save"${_plLost.reason?'':' disabled'}>Mark lost</button><button type="button" class="pl-btn" data-pl="lost-cancel">Cancel</button></div></div>`);
+  }
+  const a=[], b=[];
+  if(phone) a.push('<button type="button" class="pl-btn pri" data-pl="call">Call</button>');
+  if(phone && c.our_phone) a.push('<button type="button" class="pl-btn" data-pl="text">Text</button>');
+  if(!closed && !lost) a.push('<button type="button" class="pl-btn" data-pl="script">Call script</button>');
+  if(!closed && !lost && !liveJob){
+    a.push('<button type="button" class="pl-btn" data-pl="estimate">Send estimate</button>');
+    a.push('<button type="button" class="pl-btn" data-pl="book">Book</button>');
+  }
+  if(c.booking && c.booking.id) a.push('<button type="button" class="pl-btn" data-pl="job">Open job</button>');
+  if(c.estimate && c.estimate.id) a.push('<button type="button" class="pl-btn" data-pl="est">Open estimate</button>');
+  if(phone && !closed) b.push('<button type="button" class="pl-link" data-pl="manual">Called from my phone</button>');
+  if(talkCall) b.push('<button type="button" class="pl-link" data-pl="notalk">Voicemail, not a talk</button>');
+  // A booked job leaves the board by cancelling the job (auto-Lost "Job
+  // cancelled"), not from here; an approved estimate with no job yet can
+  // still be marked lost.
+  if(!lost && !closed && !liveJob && !picking) b.push('<button type="button" class="pl-btn red" data-pl="lost">Mark lost</button>');
+  if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
+  if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
+  const f=[];
+  f.push(phone
+    ? `<b>${esc(c.phone_pretty||fmtPhone(c.phone))}</b>${c.business&&c.business.name?' · '+esc(c.business.name):''}`
+    : `No phone number saved for this caller${c.business&&c.business.name?' · '+esc(c.business.name):''}`);
+  if(c.lost) f.push(`${c.lost.auto?'Lost automatically':'Lost'}: <b>${esc(c.lost.reason||'')}</b>${c.lost.by?' · by '+esc(c.lost.by):''}${c.lost.at?' · '+esc(plWhen(c.lost.at,c.tz)):''}${c.lost.note?`<br>“${esc(c.lost.note)}”`:''}`);
+  if(Number(c.tries)>0) f.push(`${Number(c.tries)} callback ${Number(c.tries)===1?'try':'tries'} with no answer`);
+  if(c.estimate){ const e=c.estimate;
+    f.push(`Estimate${plMoney(e.total)?' '+plMoney(e.total):''}${e.sent_at?' · sent '+esc(plWhen(e.sent_at,c.tz)):' · <span class="danger">not sent yet</span>'}${e.opened?' · opened':''}${e.coupon_at?' · coupon sent':''}${e.approved_at?' · <b>approved</b> '+esc(plWhen(e.approved_at,c.tz)):''}`); }
+  if(c.booking){ const bk=c.booking;
+    f.push(`Job${bk.scheduled_at?' '+esc(plWhen(bk.scheduled_at,c.tz)):''}${bk.status?' · '+esc(String(bk.status).replace(/_/g,' ')):''}${bk.tech?' · '+esc(bk.tech):''}${plMoney(bk.price)?' · '+plMoney(bk.price):''}${bk.paid_at?' · paid':''}`); }
+  const h=c.history||{}, pj=Number(h.prior_jobs)||0, pc=Number(h.prior_cards)||0;
+  if(pj||pc) f.push(`${pj?`<b>Returning customer</b> · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent)+' spent':''}`:'Asked before'}${pc?` · ${pc} earlier inquir${pc===1?'y':'ies'}`:''}`);
+  return `<div class="pl-detail">${top.join('')}
+    ${a.length?`<div class="pl-acts">${a.join('')}</div>`:''}${b.length?`<div class="pl-acts">${b.join('')}</div>`:''}
+    <div class="pl-facts">${f.join('<br>')}</div>
+    ${role==='owner'&&c.audit?plAuditHtml(c.audit):''}
+    ${plTimelineHtml(c)}
+  </div>`;
+}
+// Owner only (the server also leaves `audit` out for secretaries). Score is
+// the audit portal's formula: % yes of yes+no, customer-outcome answers left
+// out; under 3 scored questions it's greyed like the portal does.
+function plAuditHtml(a){
+  const n=Number(a.n)||0, score=a.score==null||!Number.isFinite(Number(a.score))?null:Math.round(Number(a.score));
+  const yes=score==null?0:Math.round(score*n/100);
+  const cls=score==null||n<3?'thin':score>=80?'good':score>=60?'warn':'bad';
+  const stars=v=>{ const x=Math.max(0,Math.min(5,Math.round(Number(v)||0))); return `<span class="pl-stars" aria-label="${x} of 5">${'★'.repeat(x)}${'☆'.repeat(5-x)}</span>`; };
+  const R={script:'Script',objections:'Objections',clear:'Clear & confident'};
+  const rt=Object.entries(a.ratings||{}).filter(([,v])=>Number(v)>0).map(([k,v])=>`${esc(R[k]||k)} ${stars(v)}`).join(' · ');
+  return `<div class="pl-audit"><b>Call audit</b> · ${score==null?'<span class="thin">not scored</span>':`<b class="${cls}">${score}%</b> <span class="thin">(${yes} of ${n} yes)</span>`}${rt?'<br>'+rt:''}${a.flagged?`<br><span class="flag">⚑ Flagged${a.listen_reason?': '+esc(a.listen_reason):''}</span>`:''}${a.complaint?`<br>Complaint: ${esc(a.complaint)}`:''}</div>`;
+}
+function plTimelineHtml(c){
+  const tl=Array.isArray(c.timeline)?c.timeline:[];
+  if(!tl.length) return '';
+  return `<div class="pl-tl">${tl.map(t=>{
+    const tone=PL_TONES.includes(t&&t.tone)?t.tone:'';
+    return `<div class="pl-tl-i ${tone}"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}</span><span class="w" title="${esc(t.at||'')}">${esc(plWhen(t.at,c.tz))}</span></div>`;
+  }).join('')}</div>`;
+}
+
+// Every write: POST {op,...}, then re-read the board (the server returns only
+// {ok}). onSaved runs before the repaint so a closed question doesn't flash
+// back. The toast names the card's new stage when it moved.
+async function plOp(c, body, okMsg, onSaved){
+  const tag=body.op+':'+(c&&c.key);
+  if(_plBusy.has(tag)) return false;
+  _plBusy.add(tag);
+  const before=c&&c.stage;
+  try{ await api('pipeline',{ method:'POST', body }); }
+  catch(e){ _plBusy.delete(tag); toast(e.message||'Could not save that'); if(onScreen('pipeline')) paintPipeline(); return false; }
+  _plBusy.delete(tag);
+  if(onSaved) onSaved();
+  await plLoad(true);
+  const after=c&&plCard(c.key);
+  toast(after && after.stage!==before ? `${okMsg} · now in ${plStageLabel(after.stage)}` : okMsg);
+  return true;
+}
+// Call = the Twilio bridge: rings the signed-in person's own phone, then the
+// customer, from the brand's tracking line (never her personal caller ID).
+// The server logs the attempt and returns its id; she then says whether they
+// actually talked, which settles the "2 tries" and leak rules.
+async function plCall(c, btn){
+  const tag='call:'+c.key;
+  if(_plBusy.has(tag)) return;
+  _plBusy.add(tag); btn.disabled=true; btn.textContent='Calling…';
+  try{
+    const r=await api('call_start',{ method:'POST', body:{ source:'pipeline', phone:c.phone, business:(c.business&&c.business.slug)||plBizSlug(c), card_key:c.key }});
+    toast('Ringing your phone…');
+    if(r && r.attempt_id) _plAsk[c.key]={ mode:'bridge', attempt_id:r.attempt_id };
+  }catch(e){ toast(e.message||'Could not place the call'); }
+  finally{ _plBusy.delete(tag); }
+  if(onScreen('pipeline')) paintPipeline();
+}
+function plAnswer(c, talked, btn){
+  const ask=_plAsk[c.key]; if(!ask) return;
+  btn.disabled=true;
+  const body=ask.mode==='bridge'
+    ? { op:'attempt_outcome', attempt_id:ask.attempt_id, talked }
+    : { op:'log_attempt', card_key:c.key, phone:c.phone, talked };
+  plOp(c, body, talked?'Saved: you talked to them':'Saved: no answer', ()=>{ if(_plAsk[c.key]===ask) delete _plAsk[c.key]; });
+}
+function plSaveLost(c){
+  const L=_plLost; if(!L || L.key!==c.key || !L.reason) return;
+  const noteEl=document.getElementById('plLostNote');
+  const note=String(noteEl?noteEl.value:(L.note||'')).trim();
+  const save=document.querySelector('#plRoot [data-pl="lost-save"]'); if(save) save.disabled=true;
+  plOp(c, { op:'mark_lost', card_key:c.key, reason:L.reason, note }, 'Marked lost: '+L.reason, ()=>{ if(_plLost===L) _plLost=null; });
+}
+function plClick(e){
+  const b=e.target.closest('[data-pl]'); if(!b || b.disabled) return;
+  const act=b.dataset.pl;
+  if(act==='stage'){ _plStage=b.dataset.stage; paintPipeline(); return; }
+  if(act==='leaks'){
+    const cards=(_pl&&Array.isArray(_pl.cards))?_pl.cards:[];
+    const s=PL_STAGES.map(x=>x[0]).find(k=>cards.some(c=>c&&c.stage===k&&c.leak));
+    if(s){ _plStage=s; paintPipeline(); }
+    return;
+  }
+  const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
+  if(!c) return;
+  switch(act){
+    case 'toggle':
+      _plOpen=_plOpen===c.key?null:c.key;
+      if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
+      paintPipeline(); return;
+    case 'call': plCall(c,b); return;
+    case 'manual': _plAsk[c.key]={ mode:'manual' }; paintPipeline(); return;
+    case 'ask-yes': case 'ask-no': plAnswer(c, act==='ask-yes', b); return;
+    case 'ask-x': delete _plAsk[c.key]; paintPipeline(); return;
+    case 'text':
+      // Same hand-off as the Calls tab's "Send a message": open that exact
+      // thread (our line + their number) on the Messages screen.
+      _msgOpen={ our:c.our_phone, customer:c.phone }; _msgThread=null; _msgThreadError=null;
+      navTo('messages'); return;
+    case 'script': {
+      const slug=plBizSlug(c);
+      if(!slug){ toast(`This login can't take calls for ${(c.business&&c.business.name)||'that brand'}.`); return; }
+      openTakeCall({ phone:plHasPhone(c)?c.phone:'', name:plRealName(c), business:slug, inbound_call_id:c.inbound_call_id||null });
+      return;
+    }
+    case 'estimate':
+      if(!plUseBusiness(c)) return;
+      openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'', _estimateOnly:true });
+      return;
+    case 'book':
+      if(!plUseBusiness(c)) return;
+      openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'' });
+      return;
+    case 'job':
+      // The job modal on top of the board, borrowing the job's brand only
+      // while it's open (openPayrollJob restores `current` on close).
+      openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
+      return;
+    case 'est': {
+      const slug=plOwnSlug(c.estimate.slug) || plOwnSlug(c.estimate.business_slug) || plBizSlug(c);
+      if(!slug){ toast(`This login can't open ${(c.business&&c.business.name)||'that brand'}'s estimates.`); return; }
+      pendingEstimateId=c.estimate.id; estFilter='all';
+      if(!current || current.slug!==slug) switchToBusiness(slug);
+      navTo('estimates'); return;
+    }
+    case 'lost': _plLost={ key:c.key, reason:null, note:'' }; paintPipeline(); return;
+    case 'reason':
+      // Picked in place, no repaint, so a note already being typed keeps its
+      // cursor.
+      if(!_plLost || _plLost.key!==c.key) return;
+      _plLost.reason=b.dataset.reason;
+      el.querySelectorAll('.pl-reason').forEach(x=>{ const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-pressed',String(on)); });
+      { const s=el.querySelector('[data-pl="lost-save"]'); if(s) s.disabled=false; }
+      return;
+    case 'lost-cancel': _plLost=null; paintPipeline(); return;
+    case 'lost-save': plSaveLost(c); return;
+    case 'notlead':
+      if(!confirm('Not a lead?\n\nFor an existing customer\'s question, a vendor or a wrong number. It hides this card from the board and from every count.')) return;
+      b.disabled=true; plOp(c, { op:'not_a_lead', card_key:c.key }, 'Hidden: not a lead'); return;
+    case 'reopen': b.disabled=true; plOp(c, { op:'reopen', card_key:c.key }, 'Reopened'); return;
+    case 'talk': {
+      const id=plUnconfirmedCall(c); if(!id) return;
+      b.disabled=true; plOp(c, { op:'talk', card_key:c.key, call_id:id }, 'Saved: a real talk'); return;
+    }
+    case 'notalk': {
+      const id=plUnconfirmedCall(c)||plTalkCall(c); if(!id) return;
+      b.disabled=true; plOp(c, { op:'no_talk', card_key:c.key, call_id:id }, 'Saved: voicemail, not a talk'); return;
+    }
+  }
+}
+
 async function renderNotes(){
   const view=document.getElementById('view');
   // Owner rule 2026-09-23: notes now go every direction, not just owner ->
@@ -12313,7 +12863,13 @@ function callGroups(rows){
   }
   out.forEach(g=>{
     g.rows.sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
-    g.latest=g.rows[0];
+    // The card is the caller's newest CALL, not a Take a Call script row:
+    // script rows carry caller_phone now (Pipeline, 2026-09-24), so a missed
+    // caller called back with the script would otherwise lose Call back /
+    // Send a message / Mark resolved to the script's Booked / Estimate sent
+    // set. The script row shows under "Earlier calls"; Mark resolved still
+    // closes it (grpIds takes every open row in the group).
+    g.latest=g.rows.find(r=>r.kind!=='live') || g.rows[0];
     g.recordings=g.rows.filter(r=>r.recorded_message).length;
     g.voicemails=g.rows.filter(r=>r.left_voicemail).length;
     g.texts=g.latest.text_count||0;
@@ -12652,7 +13208,7 @@ function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
     const missed=r.answered===false;
     const sub=[r.market||'Unrouted', g.blocked?'Blocked':callFollowUp(r)].join(' · ');
-    const later=g.rows.slice(1);
+    const later=g.rows.filter(x=>x!==g.latest);
     return `<div class="cm-row${on?' open':''}" id="cm-${esc(g.key)}">
       <button type="button" class="cm-head" data-callmob="${esc(g.key)}" aria-expanded="${on}">
         <span class="cm-dir" aria-hidden="true">${missed?'':'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/></svg>'}</span>
@@ -12673,7 +13229,7 @@ function callInbox(groups){
   if(window.innerWidth<760) return callInboxPhone(groups);
   const selected=groups.find(g=>g.key===_callsSelected)||groups[0];
   _callsSelected=selected.key;
-  const later=selected.rows.slice(1);
+  const later=selected.rows.filter(x=>x!==selected.latest);
   return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
     ${groups.map(g=>{ const r=g.latest; return `<button type="button" class="ci-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
@@ -17309,10 +17865,23 @@ function cwNewDraft(){
     // caller's metro, same as before this existed). A real tech id narrows the
     // calendar/slots to just that one person -- see cwScheduleParams().
     technicianId:null,
+    // The Twilio inbound call this session answers, when it was opened from
+    // a Pipeline card (openTakeCall(opts)); null from the sidebar button.
+    inboundCallId:null,
     resolution:null,
   };
 }
 function callWizReset(){ callWiz=cwNewDraft(); }
+// The caller's number as 10 digits for the live call row (calls.caller_phone),
+// from whichever box has one; '' while nothing usable has been typed. The
+// Pipeline keys cards by this, so a wizard call without it can't join one.
+function cwCallerDigits(...phones){
+  for(const p of phones){
+    const d=String(p||'').replace(/\D/g,'').replace(/^1(?=\d{10}$)/,'');
+    if(d.length===10) return d;
+  }
+  return '';
+}
 function cwIsActive(draft, view){
   return !!draft && callWiz===draft && draft._visible && !draft.resolution && (view==null || draft._view===view);
 }
@@ -17360,8 +17929,20 @@ function cwRestoreQuote(draft){
   nbAssurionActive=q.assurion; nbAssurionSel.clear(); q.assurionSel.forEach(x=>nbAssurionSel.add(x));
   nbGdsActive=q.gds; nbNoChargeActive=q.noCharge; nbCustomTaskActive=q.customTask;
 }
-function openTakeCall(){
+// opts (Pipeline "Call script", owner 2026-09-24): {phone, name, business,
+// inbound_call_id} of the card being called. It always starts a FRESH call on
+// that card's brand with the caller already filled in, and remembers which
+// Twilio call it answers so the live row joins the right card. With no opts
+// (the sidebar button) nothing changes: resume an open call, else start fresh.
+function openTakeCall(opts){
   if(!current) return;
+  // The sidebar button hands over its click event; only a plain object from a
+  // Pipeline card counts as a prefill.
+  const pre=(opts && typeof opts==='object' && !(opts instanceof Event)) ? opts : null;
+  // Starting over would leave a call already under way unresolved (it stays
+  // in Calls → Needs callback), so that is a decision, never a silent drop.
+  if(pre && callWiz && !callWiz.resolution && callWiz.service
+    && !confirm('A call is still open in Take a Call. Start a new call for this customer anyway?\n\nThe open one stays in Calls → Needs callback.')) return;
   closeSidebar();
   // Invalidate pending form loads before restoring the phone's shared engine.
   nbModalSession++; nbCalSeq++;
@@ -17373,7 +17954,11 @@ function openTakeCall(){
   // A saved call that belongs to a business this login cannot see (a different
   // person signed in on this tab after an expiry) is dropped, not resumed.
   if(callWiz && !callWiz.resolution && callWiz.business && !businesses.some(b=>b.slug===callWiz.business)) callWiz=null;
-  if(callWiz && !callWiz.resolution){
+  // A card's prefill that never got past the greeting (no service picked, so
+  // no call row) is not resumed by the sidebar button: that tap is a NEW
+  // caller, who must not inherit the card's name, number and Twilio call.
+  if(!pre && callWiz && callWiz._fromCard && !callWiz.service && !callWiz._startPromise) callWiz=null;
+  if(!pre && callWiz && !callWiz.resolution){
     // A call logged against a lead-gen brand resumes on that brand: after a
     // re-login the dashboard opens on her own company, and every wizard step
     // prices and books against `current`.
@@ -17390,10 +17975,26 @@ function openTakeCall(){
   // the next one. If this call is a lead-gen brand, the picker on the greet
   // card is one tap. The resume branch above deliberately skips this: a call
   // already in progress keeps the business it was logged against.
-  if(scope && scope!=='all' && current && current.slug!==scope && businesses.some(b=>b.slug===scope)){
+  // A Pipeline card names its own brand instead: the greeting must say the
+  // brand the customer actually called (still changeable on the greet card).
+  const preBiz=pre && pre.business && businesses.some(b=>b.slug===pre.business) ? pre.business : null;
+  if(preBiz){
+    if(current.slug!==preBiz) switchToBusiness(preBiz);
+  }else if(scope && scope!=='all' && current && current.slug!==scope && businesses.some(b=>b.slug===scope)){
     switchToBusiness(scope);
   }
   callWizReset();
+  if(pre){
+    const digits=String(pre.phone||'').replace(/\D/g,'').replace(/^1(?=\d{10}$)/,'');
+    const phone=digits.length===10 ? fmtPhone(digits) : '';
+    const name=String(pre.name||'').trim();
+    callWiz.cust.phone=phone; callWiz.cust.name=name;
+    callWiz.estimateContact.phone=phone; callWiz.estimateContact.name=name;
+    // Sent with call_live_start (cwStartRecord) so the live row is tied to
+    // the Twilio call it answers instead of being matched by time later.
+    callWiz.inboundCallId=pre.inbound_call_id||null;
+    callWiz._fromCard=true;
+  }
   // The script shares New Booking's option state, so a previous call's (or a
   // previous form's) selections must be cleared or they'd silently ride along
   // into this call's quote.
@@ -17436,7 +18037,7 @@ function closeCallWiz(opts, draft=callWiz){
   if(opts&&opts.resolved){ draft.resolution='closed'; return; }
   toast('Call still open — hit "Take a Call" to pick it back up.');
 }
-document.getElementById('takeCallBtn').addEventListener('click', openTakeCall);
+document.getElementById('takeCallBtn').addEventListener('click', ()=>openTakeCall());
 // On the greet card nothing has been picked yet and no call is logged, so a
 // stray backdrop click must not dismiss it, only a service choice, "Something
 // else", or Hang Up may leave this card. Every later step already resumes
@@ -17638,7 +18239,11 @@ async function cwStartRecord(draft){
   if(draft._started) return;
   if(!draft._startPromise){
     draft._startId=draft._startId||cwRequestId();
-    draft._startPromise=api('call_live_start',{method:'POST',body:{business:draft.business,call_id:draft._startId},timeoutMs:12000}).then(r=>{
+    // Pipeline links (owner, 2026-09-24): the Twilio call this answers and the
+    // caller's number, when already known, so the live row joins its card.
+    const caller=cwCallerDigits(draft.cust&&draft.cust.phone, draft.estimateContact&&draft.estimateContact.phone);
+    const link={...(draft.inboundCallId?{inbound_call_id:draft.inboundCallId}:{}),...(caller?{caller_phone:caller}:{})};
+    draft._startPromise=api('call_live_start',{method:'POST',body:{business:draft.business,call_id:draft._startId,...link},timeoutMs:12000}).then(r=>{
       if(!r || (!r.id && !r.untracked)) throw new Error('The call log did not return a saved record. Try again.');
       draft.id=r.id; draft._started=true;
       cwTrack('started',{},draft);
@@ -18553,7 +19158,10 @@ async function cwSubmitBooking(){
     const resp=await apiConfirmUnavailable('booking_create',attempt.body);
     if(!resp || !resp.id) throw new Error('The booking response was incomplete. Retry to check the same booking.');
     draft._bookingResult=resp; draft._bookingAttempt=null;
-    cwCallUpdate({booking_id:resp.id,resolution:'booked'},draft).catch(()=>{});
+    // The typed number rides along onto the live call row (caller_phone), so
+    // the Pipeline can key this call to its card. No-op for owner test runs.
+    { const caller=cwCallerDigits(attempt.body.customer&&attempt.body.customer.phone, draft.cust.phone);
+      cwCallUpdate({booking_id:resp.id,resolution:'booked',...(caller?{caller_phone:caller}:{})},draft).catch(()=>{}); }
     cwTrack('booking_created',{booking_id:resp.id,total:attempt.quote.total},draft);
     if(!cwIsActive(draft)){draft.resolution='booked';return;}
     if(resp.warning) alert(resp.warning);
@@ -18598,6 +19206,9 @@ async function cwSubmitEstimate(){
       draft._estimateAttempt={body:{
         business:draft.business,estimate_id:cwRequestId(),customer_name:name,customer_phone:phone,customer_email:email,
         customer_zip:draft.zip,service_label:label,selections:quote.selections,tax_rate:TAX_RATE,sms_consent:smsOk,
+        // The live call row that produced this estimate (estimates.call_id),
+        // so the Pipeline joins it to the call's card. Absent on owner runs.
+        ...(draft.id?{call_id:draft.id}:{}),
       },quote};
     }catch(error){err.textContent=error.message;return;}
   }
@@ -18610,7 +19221,8 @@ async function cwSubmitEstimate(){
     draft._estimateAttempt=null; draft._estimateResult=est;
     const sent=!!(est.emailed||est.texted),resolution=sent?'estimate_sent':'other';
     if(sent) cwTrack('estimate_sent',{estimate_id:est.id,discount:attempt.quote.discount},draft);
-    cwCallUpdate({resolution,notes:`Estimate ${est.id} ${sent?'sent':'saved; delivery unconfirmed'} (${attempt.body.service_label})${draft.prefDate?' · preferred '+draft.prefDate:''}`},draft).catch(()=>{});
+    { const caller=cwCallerDigits(attempt.body.customer_phone);
+      cwCallUpdate({resolution,notes:`Estimate ${est.id} ${sent?'sent':'saved; delivery unconfirmed'} (${attempt.body.service_label})${draft.prefDate?' · preferred '+draft.prefDate:''}`,...(caller?{caller_phone:caller}:{})},draft).catch(()=>{}); }
     if(!cwIsActive(draft)){draft.resolution=resolution;return;}
     closeCallWiz({resolved:true},draft);
     if(est.warning || !sent) alert(est.warning||'Estimate saved. Delivery was not confirmed; open Estimates to check it before resending.');
@@ -18778,6 +19390,7 @@ async function renderCallWiz(){
       if(!isHere() || draft._startBusy || draft._ending) return;
       if(draft.service && draft.service!==service){
         const keep={id:draft.id,business:draft.business,_started:draft._started,cust:draft.cust,
+          inboundCallId:draft.inboundCallId,
           _quoteVersion:draft._quoteVersion+1,
           zip:draft.zip,areaName:draft.areaName,otherBiz:draft.otherBiz,surcharge:draft.surcharge,zipLookup:draft.zipLookup};
         Object.assign(draft,cwNewDraft(),keep,{_visible:true,_view:view});
@@ -22048,6 +22661,9 @@ async function sendEstimateFromBooking(upsells){
       })(),
       sms_consent: document.getElementById('nbSmsConsent').checked,
       technician_id: (document.getElementById('nbUpsTech')||{}).value || null,
+      // Opened from Take a Call's "Something else": the live call row this
+      // estimate came out of (estimates.call_id), for the Pipeline card.
+      ...(nbLinkedCallId?{ call_id:nbLinkedCallId }:{}),
     }});
     // estimate_create returns 201 + warning when the estimate ROW saved but
     // the email didn't go out (send failure / notifications off / no API key).
@@ -22441,7 +23057,8 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       // script's own booking path makes at its own booking_create call.
       if(linkedCallDraft){
         if(mySession===nbModalSession && nbLinkedCallId===linkedCallId){nbLinkedCallId=null;nbLinkedCallDraft=null;}
-        cwCallUpdate({resolution:'booked',booking_id:resp&&resp.id?resp.id:undefined},linkedCallDraft).catch(()=>{});
+        { const caller=cwCallerDigits(phone);
+          cwCallUpdate({resolution:'booked',booking_id:resp&&resp.id?resp.id:undefined,...(caller?{caller_phone:caller}:{})},linkedCallDraft).catch(()=>{}); }
       }
       // Only hide the modal if it still belongs to THIS attempt — if the office
       // closed it and reopened for a different job while this request was in

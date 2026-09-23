@@ -25,6 +25,8 @@ function database(run){
 function context(extra={}){
   return vm.createContext({console:silent,Date,Set,Map,Promise,URLSearchParams,AbortController,setTimeout,clearTimeout,
     resolveBusiness:async()=>({id:'biz-1',slug:'doms',name:"Dom's"}),bail:(res,e)=>res.status(e.status||500).json({error:e.message}),
+    // Pipeline inbound-call link (api/_lib/pipeline.js): best-effort, nothing to link here.
+    inboundForLiveStart:async()=>({}),
     adminAuthorName:()=> 'Office',...extra});
 }
 const callSource=cut("const CALL_RESOLUTIONS =",'// Block a caller number')+
@@ -52,6 +54,13 @@ test('simultaneous and lost-response start retries create one durable call',asyn
   assert.equal(f.rows.size,1);assert.ok(replies.every(r=>r.code===200&&r.body.id===uuid));
   assert.equal(replies.filter(r=>r.body.duplicate).length,2);
   f.rows.get(uuid).resolution='booked';await f.start();assert.equal(f.rows.get(uuid).resolution,'booked');
+});
+test('a script start stores the inbound call it answers and the caller number (Pipeline link)',async()=>{
+  const f=calls();const inbound='22222222-2222-4222-8222-222222222222';
+  f.ctx.inboundForLiveStart=async(db,auth,body)=>body.inbound_call_id?{inbound_call_id:body.inbound_call_id,caller_phone:'7205550101'}:{};
+  assert.equal((await f.start({call_id:uuid,business:'doms',inbound_call_id:inbound})).code,200);
+  assert.equal(f.rows.get(uuid).inbound_call_id,inbound);assert.equal(f.rows.get(uuid).caller_phone,'7205550101');
+  const g=calls();await g.start();assert.equal('inbound_call_id' in g.rows.get(uuid),false);assert.equal('caller_phone' in g.rows.get(uuid),false);
 });
 test('call replay cannot recover a different business or inbound row',async()=>{
   for(const row of [{id:uuid,business_id:'other',kind:'live'},{id:uuid,business_id:'biz-1',kind:'inbound'}]){
