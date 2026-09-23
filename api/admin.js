@@ -90,8 +90,8 @@ function bookingStripePk(slug) {
   }
   return STRIPE_PK_GLOBAL;
 }
-import { uploadImage, deleteImage, uploadPrivateImage, readPrivateImage } from './_lib/storage.js';
-import { denverToday, noteIsLive, noteIsScheduled, resolveSendAt, cleanNotePhotos, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
+import { uploadImage, deleteImage, uploadPrivateImage, readPrivateImage, notePhotoContentType } from './_lib/storage.js';
+import { denverToday, noteIsLive, noteIsScheduled, resolveSendAt, cleanNotePhotos, isPrivateNotePhoto, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
@@ -8747,7 +8747,12 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo']);
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo',
+  // Read-only text threads (owner rule 2026-09-23: "add the messages tab to
+  // jiyahs portal"). Deliberately NOT messages_send/messages_block/
+  // messages_read -- she reads what was said, the office still owns replying
+  // to customers and clearing unread.
+  'messages_list', 'messages_thread']);
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
@@ -14656,17 +14661,35 @@ async function notesPhoto(req, res, db, auth, body) {
 }
 
 // GET ?path=priv:note-photos/xxx.jpg[&token=...] — streams a private note
-// photo's bytes back. Any signed-in admin/secretary/auditor session may
-// fetch one (same "already passed the note-level access check to even see
-// this path" reasoning call_recording uses -- the path only ever reaches a
-// browser via notesActive/notesList/auditor_notes_sent, which already scope
-// WHICH notes, and therefore which photo paths, a given reader gets back).
+// photo's bytes back, but only to someone who can see a note carrying it:
+// the owner sees all; everyone else only photos on notes they wrote or that
+// were sent to them (a note "for Andrew only" never qualifies for anyone
+// else). A path on NO note yet is a fresh upload still sitting in its
+// sender's composer -- its random name is known only to that sender, so the
+// preview thumbnail has to keep working.
 async function notePhoto(req, res, db, auth) {
   const raw = (req.query.path || '').toString();
-  const path = raw.startsWith('priv:') ? raw.slice(5) : raw;
-  if (!path) return res.status(400).json({ error: 'path required' });
-  const { buffer, contentType } = await readPrivateImage(path);
-  res.setHeader('Content-Type', contentType);
+  if (!isPrivateNotePhoto(raw)) return res.status(400).json({ error: 'Bad photo path' });
+  const path = raw.slice(5);
+  if (auth.role !== 'owner') {
+    const [{ data: sn }, { data: tn }] = await Promise.all([
+      db.from('staff_notes').select('created_by, to_owner, target_slug').contains('photo_urls', [raw]).is('deleted_at', null).limit(20),
+      db.from('tech_notes').select('created_by').contains('photo_urls', [raw]).is('deleted_at', null).limit(20),
+    ]);
+    const me = auth.name || '';
+    const onNotes = (sn || []).length + (tn || []).length > 0;
+    const mayView = !onNotes
+      || (sn || []).some(n => n.created_by === me || (!auth.auditor && !n.to_owner && (!n.target_slug || n.target_slug === auth.scope)))
+      || (tn || []).some(n => n.created_by === me);
+    if (!mayView) return res.status(403).json({ error: 'Not your photo' });
+  }
+  const { buffer } = await readPrivateImage(path);
+  // Content-Type comes from the file extension, NOT from whatever storage
+  // hands back, and nosniff + a sandbox CSP stop this response ever running
+  // as a document on our own origin (where it could read the login token).
+  res.setHeader('Content-Type', notePhotoContentType(path));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
   res.setHeader('Cache-Control', 'private, max-age=3600');
   return res.status(200).send(buffer);
 }

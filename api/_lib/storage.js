@@ -22,12 +22,33 @@ function decodeDataUrl(input) {
   let b64 = input;
   const m = input.match(/^data:([^;]+);base64,(.*)$/s);
   if (m) { mime = m[1]; b64 = m[2]; }
-  if (!/^image\//.test(mime)) { const e = new Error('Only image uploads are allowed.'); e.status = 400; throw e; }
+  // A whitelist, not a bare "image/" prefix test: image/svg+xml passes that
+  // test, but an SVG is a SCRIPT-BEARING document. Served back from our own
+  // origin it can read localStorage -- i.e. the CRM and tech login tokens --
+  // so only the raster formats our own compressImage() actually produces are
+  // accepted. The proxies that serve these files back also pin Content-Type
+  // from the file extension rather than trusting whatever was stored.
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(mime)) {
+    const e = new Error('Only JPEG, PNG, WebP, or HEIC photos are allowed.'); e.status = 400; throw e;
+  }
   const buffer = Buffer.from(b64, 'base64');
   if (!buffer.length) { const e = new Error('Image data is empty.'); e.status = 400; throw e; }
   // Hard cap so a single request can't blow the function body limit (~4MB raw).
   if (buffer.length > 8 * 1024 * 1024) { const e = new Error('Image is too large. Please retake at lower quality.'); e.status = 413; throw e; }
   return { mime, buffer };
+}
+
+// What a private note photo is served AS. Keyed off the stored file's
+// extension (which uploadPrivateImage picked via extFor, and which the
+// isPrivateNotePhoto regex restricts), never off the Content-Type Supabase
+// hands back -- a proxy that echoes a stored type lets whoever uploaded the
+// file choose how our own origin serves it.
+export const NOTE_PHOTO_CONTENT_TYPES = {
+  jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic',
+};
+export function notePhotoContentType(pathOrUrl) {
+  const ext = String(pathOrUrl || '').split('.').pop().toLowerCase();
+  return NOTE_PHOTO_CONTENT_TYPES[ext] || 'application/octet-stream';
 }
 
 function extFor(mime) {

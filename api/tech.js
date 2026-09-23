@@ -36,8 +36,8 @@ function jobStripePk(slug) {
   if (slug === 'doms') return process.env.DOMS_STRIPE_PUBLISHABLE_KEY || null;
   return STRIPE_PK_GLOBAL;
 }
-import { uploadImage, deleteImage } from './_lib/storage.js';
-import { denverToday, noteIsLive } from './_lib/notes.js';
+import { uploadImage, deleteImage, readPrivateImage, notePhotoContentType } from './_lib/storage.js';
+import { denverToday, noteIsLive, isPrivateNotePhoto } from './_lib/notes.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan, isRetired } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
@@ -143,7 +143,9 @@ export default async function handler(req, res) {
     if (action === 'apply_start') return await applyStart(req, res, body);
     if (action === 'apply_submit') return await applySubmit(req, res, body);
 
-    const auth = verifyToken(getBearer(req));
+    // <img src> can't send an Authorization header, so note_photo alone also
+    // accepts the same signed token as ?token= (admin.js note_photo does too).
+    const auth = verifyToken(action === 'note_photo' ? (getBearer(req) || (req.query.token || '').toString()) : getBearer(req));
     if (!auth || auth.kind !== 'tech') return res.status(401).json({ error: 'Unauthorized' });
 
     const db = serviceClient();
@@ -174,6 +176,7 @@ export default async function handler(req, res) {
       case 'review_listings': return await techReviewListings(req, res, db, auth);
       case 'review_checkin_set': return await techReviewCheckinSet(req, res, db, auth, body);
       case 'tech_notes_active':  return await techNotesActive(req, res, db, auth);
+      case 'note_photo':         return await techNotePhoto(req, res, db, auth);
       case 'tech_note_dismiss':  return await techNoteDismiss(req, res, db, auth, body);
       case 'tech_bonus_unseen': return await techBonusUnseen(req, res, db, auth);
       case 'tech_bonus_ack':    return await techBonusAck(req, res, db, auth, body);
@@ -2435,6 +2438,32 @@ async function techNotesActive(req, res, db, auth) {
     .filter(n => noteIsLive(n, today))
     .map(n => ({ id: n.id, body: n.body, photo_urls: n.photo_urls || [], created_by: n.created_by, created_at: n.created_at }));
   return res.status(200).json({ notes });
+}
+
+// GET ?path=priv:note-photos/xxx.jpg&token=... -- a private note photo
+// (storage.js uploadPrivateImage), streamed back only if it is on a note
+// aimed at THIS tech: to them by name, to their city, or to everyone.
+async function techNotePhoto(req, res, db, auth) {
+  const raw = (req.query.path || '').toString();
+  if (!isPrivateNotePhoto(raw)) return res.status(400).json({ error: 'Bad photo path' });
+  const [{ data: me }, { data: notes, error }] = await Promise.all([
+    db.from('technicians').select('id, area:service_areas ( name )').eq('id', auth.tech_id).maybeSingle(),
+    db.from('tech_notes').select('target_type, technician_id, city').contains('photo_urls', [raw]).is('deleted_at', null).limit(20),
+  ]);
+  if (error) throw error;
+  const myCity = me?.area?.name || null;
+  const mine = (notes || []).some(n => n.target_type === 'all'
+    || (n.target_type === 'tech' && n.technician_id === auth.tech_id)
+    || (n.target_type === 'city' && myCity && n.city === myCity));
+  if (!mine) return res.status(403).json({ error: 'Not your photo' });
+  const { buffer } = await readPrivateImage(raw.slice(5));
+  // Type pinned from the extension, never echoed from storage -- see
+  // notePhotoContentType in _lib/storage.js.
+  res.setHeader('Content-Type', notePhotoContentType(raw));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.status(200).send(buffer);
 }
 
 async function techNoteDismiss(req, res, db, auth, body) {

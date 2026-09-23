@@ -917,7 +917,7 @@ async function loadTechNotes(){
     box.innerHTML=notes.map(n=>`<div class="owner-note" data-id="${esc(n.id)}">
       <div class="on-h">Note from ${esc(n.created_by||'Andrew')}</div>
       <div class="on-b">${esc(n.body)}</div>
-      ${(n.photo_urls||[]).length?`<div class="on-photos">${n.photo_urls.map(u=>`<img src="${esc(u)}" data-photo="${esc(u)}" loading="lazy" alt="Photo attached to the note">`).join('')}</div>`:''}
+      ${(n.photo_urls||[]).length?`<div class="on-photos">${n.photo_urls.map(u=>{ const src=notePhotoSrc(u); return `<img src="${esc(src)}" data-photo="${esc(src)}" loading="lazy" alt="Photo attached to the note">`; }).join('')}</div>`:''}
       <button class="on-x" aria-label="Dismiss note" data-dismiss="${esc(n.id)}">✕</button>
     </div>`).join('');
     box.querySelectorAll('[data-dismiss]').forEach(b=>b.onclick=()=>dismissTechNote(b.getAttribute('data-dismiss')));
@@ -1639,6 +1639,12 @@ function relTime(iso){
     if(s<86400) return Math.floor(s/3600)+'h ago';
     return d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
   catch{ return ''; }
+}
+// A private note photo ("priv:...") has no public URL; it comes through the
+// tech API's note_photo proxy, which checks the note is aimed at this tech.
+function notePhotoSrc(u){
+  u=String(u||'');
+  return u.startsWith('priv:') ? API+'?action=note_photo&path='+encodeURIComponent(u)+'&token='+encodeURIComponent(token) : u;
 }
 function openLightbox(url){
   const lb=document.getElementById('lightbox'); document.getElementById('lightboxImg').src=url; lb.classList.remove('hidden');

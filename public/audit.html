@@ -286,7 +286,43 @@
   .seg button.on{background:var(--ink);color:#fff;}
   .cstat{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;}
   .cstat .tile{margin:0;}
-  .call{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;background:var(--panel);}
+  .call{border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--panel);overflow:hidden;}
+/* Collapsed-by-default list (owner, 2026-09-23: like the iPhone Recents
+   list -- name, one gray sub-line, time; tap a row for the full card). */
+.call-head{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;}
+.call-head:hover{background:var(--line2);}
+.call-ic{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;}
+.call-ic.good{background:#dcfce7;color:#15803d;}
+.call-ic.bad{background:#fee2e2;color:#b91c1c;}
+.call-ic.warn{background:#fef3c7;color:#92400e;}
+.call-ic.live{background:var(--line2);color:var(--ink-2);}
+.call-line{flex:1;min-width:0;}
+.call-name{display:block;font-weight:700;font-size:14.5px;}
+.call-name.missed{color:#b91c1c;}
+.call-line .call-sub{display:block;color:var(--mute);font-size:12.5px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.call-when2{flex:none;font-size:12.5px;color:var(--mute);white-space:nowrap;}
+.call-chev{flex:none;font-size:12px;color:var(--mute);transition:transform .15s;margin-left:2px;}
+.call.open .call-chev{transform:rotate(90deg);}
+.call-detail{display:none;padding:0 14px 14px;}
+.call.open .call-detail{display:block;}
+/* Messages (read-only). Same collapsed-row idea as the call list: a tidy
+   list, tap one open to read the whole conversation. */
+.mrow{border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--panel);overflow:hidden;}
+.mrow-head{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;}
+.mrow-head:hover{background:var(--line2);}
+.mrow-ava{flex:none;width:36px;height:36px;border-radius:50%;background:#9aa1ab;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;}
+.mrow-line{flex:1;min-width:0;}
+.mrow-name{display:block;font-weight:700;font-size:14.5px;}
+.mrow-prev{display:block;color:var(--mute);font-size:12.5px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mrow-when{flex:none;font-size:12.5px;color:var(--mute);white-space:nowrap;}
+.mrow-n{flex:none;background:#b91c1c;color:#fff;border-radius:999px;font-size:11px;font-weight:800;padding:1px 7px;}
+.mrow-body{display:none;padding:4px 14px 14px;}
+.mrow.open .mrow-body{display:block;}
+.mbub{max-width:76%;width:fit-content;border-radius:18px;padding:8px 13px;font-size:14px;line-height:1.35;white-space:pre-wrap;word-break:break-word;margin-bottom:3px;}
+.mbub.them{background:#E9E9EB;color:#050505;border-bottom-left-radius:5px;}
+.mbub.us{background:#0B84FF;color:#fff;margin-left:auto;border-bottom-right-radius:5px;}
+.mwhen{font-size:11px;color:var(--mute);margin-bottom:9px;}
+.mwhen.us{text-align:right;}
   .call-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
   .call-when{font-weight:800;font-size:14.5px;white-space:nowrap;}
   .call-who{font-weight:700;}
@@ -348,6 +384,7 @@
       <button type="button" data-nav="calls" class="on"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
       <button type="button" data-nav="audit"><span class="nav-ic">📝</span>Audit</button>
       <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
+      <button type="button" data-nav="messages"><span class="nav-ic">💬</span>Messages</button>
       <button type="button" data-nav="notes"><span class="nav-ic">📌</span>Notes</button>
     </nav>
     <div class="pages">
@@ -356,6 +393,21 @@
          the top of every page; now its own tab, per owner instruction 2026-09-22) ══════════ -->
     <section class="page" data-page="secretaries" id="pageSecretaries">
       <div class="conv-wrap" id="convWrap"></div>
+    </section>
+
+    <!-- ══════════ Page: Messages (owner rule 2026-09-23: "add the messages tab
+         to jiyahs portal") -- READ-ONLY. Same threads the office sees on the
+         CRM's Messages screen, so she can audit what was actually said in
+         text as well as on the phone; her token cannot send or block. ══════════ -->
+    <section class="page" data-page="messages" id="pageMessages">
+      <div class="card">
+        <div class="row" style="margin-bottom:10px;">
+          <input id="msgQ" type="search" placeholder="Name or phone" style="flex:1;min-width:170px;">
+          <select id="msgBiz"><option value="">All businesses</option></select>
+        </div>
+        <div class="sub" style="margin-bottom:8px;">Texts customers sent to the business numbers. Read only — the office replies.</div>
+        <div id="msgList"><div class="sub">Loading messages…</div></div>
+      </div>
     </section>
 
     <!-- ══════════ Page: Notes (owner rule 2026-09-23) -- write Andrew, Heather,
@@ -1561,7 +1613,7 @@ async function enter(){
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
   const fromHash=(location.hash||'').replace('#','');
-  showPage(['calls','audit','secretaries','notes'].includes(fromHash)?fromHash:'calls');
+  showPage(['calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'calls');
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
@@ -1573,9 +1625,84 @@ function showPage(p){
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
   if(p==='calls') loadCalls();
+  if(p==='messages') loadMessages();
   if(p==='notes') loadNotesSent();
 }
 $('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'); if(b) showPage(b.dataset.nav); });
+
+// ── Messages page (read-only) ───────────────────────────────────
+// Owner rule 2026-09-23: "add the messages tab to jiyahs portal". The same
+// threads the office reads on the CRM's own Messages screen (messages_list /
+// messages_thread), collapsed into a tidy list; tapping one loads the whole
+// conversation underneath it. Her token is on neither messages_send nor
+// messages_block (AUDITOR_ADMIN_ACTIONS is GET-only), so this can show her
+// everything that was said and give her nothing to say back with.
+let msgThreads=[], msgLoaded=false, msgReq=0, msgOpenKey='', msgCache={};
+const msgKeyOf=t=>t.our_phone+'|'+t.customer_phone;
+async function loadMessages(){
+  const req=++msgReq;
+  if(!msgLoaded) $('msgList').innerHTML='<div class="sub">Loading messages\u2026</div>';
+  try{
+    const d=await crm('messages_list',{});
+    if(req!==msgReq) return;
+    msgThreads=d.threads||[]; msgLoaded=true;
+    const cur=$('msgBiz').value;
+    const names=[...new Set(msgThreads.map(t=>t.business_name).filter(Boolean))].sort();
+    $('msgBiz').innerHTML='<option value="">All businesses</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+    if(names.includes(cur)) $('msgBiz').value=cur;
+    renderMessages();
+  }catch(err){ if(req===msgReq) $('msgList').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }
+}
+function msgInitials(t){
+  const p=String(t.customer_name||'').trim().split(/\s+/).filter(Boolean);
+  return p.length?(p[0][0]+(p.length>1?p[p.length-1][0]:'')).toUpperCase():'';
+}
+function renderMessages(){
+  const q=($('msgQ').value||'').trim().toLowerCase(), biz=$('msgBiz').value;
+  const rows=msgThreads.filter(t=>{
+    if(biz && t.business_name!==biz) return false;
+    if(q && !((t.customer_name||'')+' '+(t.customer_phone_pretty||'')+' '+(t.customer_phone||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  if(!rows.length){ $('msgList').innerHTML='<div class="sub">'+(msgThreads.length?'No conversations match.':'No text messages yet.')+'</div>'; return; }
+  $('msgList').innerHTML=rows.map(t=>{
+    const k=msgKeyOf(t), who=t.customer_name||t.customer_phone_pretty||t.customer_phone;
+    const ini=msgInitials(t);
+    const prev=(t.last_direction==='out'?'You: ':'')+String(t.last_body||'').slice(0,90);
+    const sub=[t.business_name, prev].filter(Boolean).join(' \u00b7 ');
+    return '<div class="mrow'+(msgOpenKey===k?' open':'')+'" data-mkey="'+esc(k)+'">'+
+      '<div class="mrow-head" data-mhead>'+
+        '<span class="mrow-ava">'+(ini?esc(ini):'\u260E')+'</span>'+
+        '<span class="mrow-line"><span class="mrow-name">'+esc(who)+'</span>'+
+          '<span class="mrow-prev">'+esc(sub)+'</span></span>'+
+        (t.unread?'<span class="mrow-n">'+t.unread+'</span>':'')+
+        '<span class="mrow-when">'+esc(fmtSentAt(t.last_at))+'</span>'+
+      '</div>'+
+      '<div class="mrow-body">'+(msgOpenKey===k?msgThreadHtml(msgCache[k]):'')+'</div>'+
+    '</div>';
+  }).join('');
+  $('msgList').querySelectorAll('[data-mhead]').forEach(h=>h.onclick=()=>openMsgThread(h.closest('.mrow').dataset.mkey));
+}
+function msgThreadHtml(d){
+  if(!d) return '<div class="sub">Loading conversation\u2026</div>';
+  if(d.error) return '<div class="err">'+esc(d.error)+'</div>';
+  if(!(d.messages||[]).length) return '<div class="sub">No messages in this conversation.</div>';
+  return d.messages.map(m=>{
+    const mine=m.direction==='out';
+    return '<div class="mbub '+(mine?'us':'them')+'">'+esc(m.body||'')+'</div>'+
+      '<div class="mwhen'+(mine?' us':'')+'">'+esc(fmtSentAt(m.created_at))+(mine&&m.sent_by?' \u00b7 '+esc(m.sent_by):'')+'</div>';
+  }).join('');
+}
+async function openMsgThread(k){
+  if(msgOpenKey===k){ msgOpenKey=''; renderMessages(); return; }   // tap again to close
+  msgOpenKey=k; renderMessages();
+  if(msgCache[k]) return;
+  const t=msgThreads.find(x=>msgKeyOf(x)===k); if(!t) return;
+  try{
+    msgCache[k]=await crm('messages_thread',{our:t.our_phone, customer:t.customer_phone});
+  }catch(err){ msgCache[k]={error:err.message}; }
+  if(msgOpenKey===k) renderMessages();
+}
 
 // ── Calls page ──────────────────────────────────────────────────────────────
 // Reads the CRM's OWN call handlers (api/admin.js: calls, call_recording) with
@@ -1755,13 +1882,27 @@ function renderCalls(){
     tile('Booked',all.filter(r=>r.booking).length)+
     tile('Graded',all.filter(r=>gradedIds.has(r.id)).length,(all.length-all.filter(r=>gradedIds.has(r.id)).length)+' not yet');
   if(!rows.length){ $('callsList').innerHTML='<div class="sub">No calls match.</div>'; return; }
+  const openIds=new Set([...$('callsList').querySelectorAll('.call.open')].map(el=>el.dataset.call));
   $('callsList').innerHTML=rows.map(r=>{
     const k=callKind(r), res=callResult(r), graded=gradedIds.has(r.id);
     const when=new Date(r.occurred_at).toLocaleString('en-US',{timeZone:CT,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
     const rec=r.recording_url?'<audio controls preload="none" src="/api/admin?action=call_recording&id='+encodeURIComponent(r.id)+'&token='+encodeURIComponent(token)+'"></audio>':'';
-    return '<div class="call'+(graded?' graded':'')+'" data-call="'+esc(r.id)+'">'+
-      '<div class="call-top"><span class="call-when">'+esc(when)+' CT</span>'+
-        '<span class="call-who">'+esc(r.caller_display||'Unknown caller')+'</span>'+
+    const missed=k.c==='bad';
+    // Collapsed header (owner, 2026-09-23: "like this... but if you dont
+    // click on it this is how it looks" -- an iPhone-Recents-style row:
+    // icon, name, one gray sub-line, time. Everything else moves into
+    // .call-detail, which only shows once the row is tapped open.
+    const subBits=[bizLineLabel(r)];
+    if(res.t) subBits.push(res.t); else if(!missed && k.t!=='Answered') subBits.push(k.t);
+    const head='<div class="call-head" data-callhead>'+
+        '<span class="call-ic '+k.c+'">'+(missed?'✕':r.left_voicemail?'📨':k.c==='live'?'📞':'✓')+'</span>'+
+        '<span class="call-line"><span class="call-name'+(missed?' missed':'')+'">'+esc(r.caller_display||'Unknown caller')+'</span>'+
+          '<span class="call-sub">'+esc(subBits.filter(Boolean).join(' · '))+'</span></span>'+
+        '<span class="call-when2">'+esc(when)+'</span>'+
+        '<span class="call-chev">›</span>'+
+      '</div>';
+    const detail='<div class="call-detail">'+
+      '<div class="call-top">'+
         (r.customer&&r.customer.name?'<span class="call-meta">'+esc(r.caller_pretty||'')+'</span>':'')+
         (r.is_new_caller?'<span class="pill">New caller</span>':'')+(r.blocked?'<span class="pill bad">Blocked</span>':'')+
         '<span class="pill '+k.c+'">'+esc(k.t)+'</span>'+(r.duration_sec?'<span class="call-meta">'+fmtDur(r.duration_sec)+'</span>':'')+
@@ -1779,11 +1920,13 @@ function renderCalls(){
       (r.notes?'<div class="call-meta" style="margin-top:6px;">Office note: '+esc(r.notes)+'</div>':'')+
       callMoreLinks(r)+
     '</div>';
+    return '<div class="call'+(graded?' graded':'')+(openIds.has(r.id)?' open':'')+'" data-call="'+esc(r.id)+'">'+head+detail+'</div>';
   }).join('');
-  $('callsList').querySelectorAll('[data-tx]').forEach(b=>b.onclick=()=>{ const t=b.closest('.call').querySelector('.call-tx'); t.hidden=!t.hidden; });
-  $('callsList').querySelectorAll('[data-grade]').forEach(b=>b.onclick=()=>gradeFromCall(callRows.find(r=>r.id===b.closest('.call').dataset.call)));
-  $('callsList').querySelectorAll('[data-ticket]').forEach(b=>b.onclick=()=>openTicket(b.dataset.ticket));
-  $('callsList').querySelectorAll('[data-callblock]').forEach(b=>b.onclick=()=>blockCaller(b.dataset.callblock, b.dataset.callphone, b));
+  $('callsList').querySelectorAll('[data-callhead]').forEach(h=>h.onclick=()=>h.closest('.call').classList.toggle('open'));
+  $('callsList').querySelectorAll('[data-tx]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); const t=b.closest('.call').querySelector('.call-tx'); t.hidden=!t.hidden; });
+  $('callsList').querySelectorAll('[data-grade]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); gradeFromCall(callRows.find(r=>r.id===b.closest('.call').dataset.call)); });
+  $('callsList').querySelectorAll('[data-ticket]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openTicket(b.dataset.ticket); });
+  $('callsList').querySelectorAll('[data-callblock]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); blockCaller(b.dataset.callblock, b.dataset.callphone, b); });
 }
 // Optional, rarely-used extras (owner rule 2026-09-23): block an obvious
 // scammer caller, or open the basic job ticket for a call that booked. Both

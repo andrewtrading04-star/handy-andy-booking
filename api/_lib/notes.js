@@ -52,10 +52,18 @@ export function resolveSendAt(body) {
 // accepted, so a note can't be made to embed an arbitrary outside image.
 export const NOTE_PHOTO_PREFIX = 'note-photos';
 export const NOTE_MAX_PHOTOS = 4;
+// Private-bucket photos (storage.js uploadPrivateImage, the only kind uploaded
+// since 2026-09-23) arrive as "priv:note-photos/<uuid>.<ext>". This filter
+// used to accept ONLY the old public URL shape, so it silently dropped every
+// private photo and notes saved with photo_urls [] -- Jiyah's four
+// "Website Inspiration" notes lost all 14 of their photos that way.
+const PRIVATE_NOTE_PHOTO_RE = new RegExp(`^priv:${NOTE_PHOTO_PREFIX}/[0-9a-f-]{36}\\.(jpg|png|webp|heic)$`);
+export function isPrivateNotePhoto(u) { return PRIVATE_NOTE_PHOTO_RE.test(String(u || '')); }
 export function cleanNotePhotos(input) {
   const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  if (!base || !Array.isArray(input)) return [];
-  const allowed = `${base}/storage/v1/object/public/booking-photos/${NOTE_PHOTO_PREFIX}/`;
-  return [...new Set(input.map(u => String(u || '').trim()).filter(u => u.startsWith(allowed) && u.length < 400))]
+  if (!Array.isArray(input)) return [];
+  const allowed = base ? `${base}/storage/v1/object/public/booking-photos/${NOTE_PHOTO_PREFIX}/` : null;
+  return [...new Set(input.map(u => String(u || '').trim())
+    .filter(u => u.length < 400 && (isPrivateNotePhoto(u) || (allowed && u.startsWith(allowed)))))]
     .slice(0, NOTE_MAX_PHOTOS);
 }
