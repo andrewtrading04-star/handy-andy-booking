@@ -14361,6 +14361,7 @@ function paintEstimates(){
     document.querySelectorAll('#estWrap [data-est-email]').forEach(b=>b.addEventListener('click',()=>{
       sendEstimateMessage(b.dataset.estEmail,'email',b);
     }));
+    document.querySelectorAll('#estWrap [data-est-coupon]').forEach(b=>b.addEventListener('click',()=>sendEstimateCoupon(b.dataset.estCoupon,b)));
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
@@ -14580,7 +14581,7 @@ function estCard(e){
   const fuLast=fuStamps.length?fuStamps[fuStamps.length-1]:null;
   const followedLine=fuLast?`<div class="est-fu-line">↻ We followed up with customer at ${esc(fmtSentAt(fuLast.at))}${fuLast.by?` · ${esc(fuLast.by)}`:''}${fuStamps.length>1?` · ${fuStamps.length} follow-ups`:''}</div>`:'';
   // The system's own 3-hour follow-up email (followup_emailed_at, migration 0131).
-  const autoLine=e.followup_emailed_at?`<div class="est-fu-line">✉ Follow-up email automatically sent · ${esc(fmtSentAt(e.followup_emailed_at))}</div>`:'';
+  const autoLine=e.followup_emailed_at?`<div class="est-fu-line">✉ $20-off coupon email ${e.followup_sent_by?'sent by '+esc(e.followup_sent_by):'automatically sent'} · ${esc(fmtSentAt(e.followup_emailed_at))}</div>`:'';
   const sentLine=textedLine+emailedLine+legacySentLine+autoLine+followedLine;
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
@@ -14623,6 +14624,10 @@ function estCard(e){
         <button class="btn ghost sm" data-est-edit="${e.id}" title="Add or edit line items">${buildLabel}</button>
         ${(canSend&&e.customer_phone&&e.sms_consent===true&&appConfig.sms)?`<button class="btn ${(isApproved||textSent)?'ghost':''} sm" data-est-sms="${e.id}" title="${textSent?'Text the quote to the customer again':'Send SMS quote'}">${textSent?'Resend text':'Send text'}</button>`:''}
         ${(canSend&&e.customer_email&&appConfig.email)?`<button class="btn ${(isApproved||emailSent)?'ghost':''} sm" data-est-email="${e.id}" title="${emailSent?'Email the quote to the customer again':'Send email quote'}">${emailSent?'Resend email':'Send email'}</button>`:''}
+        ${/* Owner rule 2026-09-23: only after the original quote went out and
+             before any coupon email has (by hand OR the 3-hour auto send --
+             both stamp followup_emailed_at, so either one hides this). */
+          (canSend&&!isApproved&&(e.texted_at||e.emailed_at)&&!e.followup_emailed_at&&e.customer_email&&appConfig.email)?`<button class="btn sm" data-est-coupon="${e.id}" style="background:#15803d;border-color:#15803d;" title="Email the quote again with $20 off. The automatic 3-hour coupon email will not send after this.">Send Quote via email (Coupon)</button>`:''}
         ${(canSend&&isApproved&&e.status==='scheduled')
           ? (e.booking_id?`<button class="btn sm" data-est-openjob="${esc(e.booking_id)}" title="This approval booked the job automatically — open it on the schedule">Open job →</button>`:`<span class="est-booked-tag">✓ Job booked</span>`)
           : canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
@@ -14921,6 +14926,26 @@ async function setEstimate(id, payload){
   catch(err){ toast(err.message); }
 }
 
+// "Send Quote via email (Coupon)": the same $20-off email the 3-hour auto
+// send uses (api/admin.js estimate_coupon_send). Sending it stamps the
+// estimate so the automatic one never goes out after it.
+async function sendEstimateCoupon(estimateId, btn){
+  if(!confirm('Email this quote to the customer with $20 off? The automatic coupon email will not be sent after this.')) return;
+  const prev=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  try{
+    const r=await api('estimate_coupon_send',{ method:'POST', body:{ business:current.slug, id:estimateId }});
+    toast('Coupon quote emailed ✓');
+    const stamp={ followup_emailed_at:r.sent_at||new Date().toISOString(), followup_sent_by:(typeof staffName!=='undefined'&&staffName)||'You' };
+    if(estCache[estimateId]) Object.assign(estCache[estimateId], stamp);
+    const row=_estRows.find(x=>x.id===estimateId); if(row) Object.assign(row, stamp);
+    paintEstimates();
+  }catch(err){
+    if(btn){ btn.disabled=false; btn.textContent=prev; }
+    toast(err.message||'Could not send the coupon email.');
+    if(/already sent/i.test(err.message||'')) renderEstimates();
+  }
+}
 async function sendEstimateMessage(estimateId, type, btn){
   const label = type === 'sms' ? 'text message' : 'email';
   if(!confirm(`Send this estimate to the customer via ${label}?`)) return;

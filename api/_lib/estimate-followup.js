@@ -57,36 +57,49 @@ export async function checkEstimateFollowups(opts = {}) {
 
     if (dryRun) { summary.details.push({ id: e.id, customer: e.customer_name, email: e.customer_email, sent_at: new Date(sentAt).toISOString() }); continue; }
 
-    // Claim the row FIRST (only if still unstamped) so two overlapping cron
-    // runs can't both email the same customer. If the send then fails, clear
-    // the stamp so the next run retries.
-    const stamp = new Date().toISOString();
-    const { data: claimed, error: claimErr } = await db.from('estimates')
-      .update({ followup_emailed_at: stamp }).eq('id', e.id).is('followup_emailed_at', null).select('id');
-    if (claimErr) { summary.errors++; console.error('[estimate_followup] claim failed', e.id, claimErr.message); continue; }
-    if (!claimed || !claimed.length) { summary.skipped++; continue; }
-
-    try {
-      const firstName = (e.customer_name || '').trim().split(/\s+/)[0];
-      const approveToken = signToken({ kind: 'estimate_approve', estimate_id: e.id, coupon: FOLLOWUP_COUPON_AMOUNT }, 7776000); // 90 days, same as the original
-      const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}&via=email` : '';
-      const upsells = (Array.isArray(e.upsells) ? e.upsells : []).map(u => ({
-        id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price,
-        badge: u.badge || '', blurb: u.blurb || '', default_on: !!u.default_on,
-      }));
-      const { subject, html } = estimateEmail(
-        { firstName, serviceLabel: e.service_label, description: e.description, customerNote: e.customer_note,
-          lineItems: e.line_items, taxRate: e.tax_rate, approveUrl, upsells, followUp: true, couponAmount: FOLLOWUP_COUPON_AMOUNT },
-        brandFor(slug)
-      );
-      await sendEmail({ slug, to: e.customer_email, subject, html, throwOnError: true, idempotencyKey: `est-followup-${e.id}` });
-      summary.sent++;
-      summary.details.push({ id: e.id, customer: e.customer_name, email: e.customer_email });
-    } catch (err) {
-      summary.errors++;
-      console.error('[estimate_followup] send failed, unstamping for retry', e.id, err.message);
-      await db.from('estimates').update({ followup_emailed_at: null }).eq('id', e.id);
-    }
+    const r = await sendCouponFollowup(db, e, slug, { baseUrl });
+    if (r.ok) { summary.sent++; summary.details.push({ id: e.id, customer: e.customer_name, email: e.customer_email }); }
+    else if (r.already) summary.skipped++;
+    else summary.errors++;
   }
   return summary;
+}
+
+// The one coupon follow-up email, shared by the 3-hour cron above and the
+// office's "Send Quote via email (Coupon)" button (admin.js
+// estimate_coupon_send). Owner rule 2026-09-23: whichever goes first wins and
+// the other never sends -- both claim the SAME followup_emailed_at stamp
+// (only if still null), so a customer can never get two coupon emails.
+// `by` = staff name for a manual send, null for the automatic one.
+// Returns { ok } | { already: true } | { error }.
+export async function sendCouponFollowup(db, e, slug, { by = null, baseUrl } = {}) {
+  baseUrl = baseUrl ?? (process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''));
+  const stamp = new Date().toISOString();
+  // Claim FIRST (only if still unstamped) so two overlapping runs -- or the
+  // cron and a button click -- can't both email the same customer. If the
+  // send then fails, clear the stamp so it can be tried again.
+  const { data: claimed, error: claimErr } = await db.from('estimates')
+    .update({ followup_emailed_at: stamp, followup_sent_by: by }).eq('id', e.id).is('followup_emailed_at', null).select('id');
+  if (claimErr) { console.error('[estimate_followup] claim failed', e.id, claimErr.message); return { error: claimErr.message }; }
+  if (!claimed || !claimed.length) return { already: true };
+  try {
+    const firstName = (e.customer_name || '').trim().split(/\s+/)[0];
+    const approveToken = signToken({ kind: 'estimate_approve', estimate_id: e.id, coupon: FOLLOWUP_COUPON_AMOUNT }, 7776000); // 90 days, same as the original
+    const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}&via=email` : '';
+    const upsells = (Array.isArray(e.upsells) ? e.upsells : []).map(u => ({
+      id: u.id, description: u.description, qty: u.qty, unit_price: u.unit_price,
+      badge: u.badge || '', blurb: u.blurb || '', default_on: !!u.default_on,
+    }));
+    const { subject, html } = estimateEmail(
+      { firstName, serviceLabel: e.service_label, description: e.description, customerNote: e.customer_note,
+        lineItems: e.line_items, taxRate: e.tax_rate, approveUrl, upsells, followUp: true, couponAmount: FOLLOWUP_COUPON_AMOUNT },
+      brandFor(slug)
+    );
+    await sendEmail({ slug, to: e.customer_email, subject, html, throwOnError: true, idempotencyKey: `est-followup-${e.id}` });
+    return { ok: true, sent_at: stamp };
+  } catch (err) {
+    console.error('[estimate_followup] send failed, unstamping for retry', e.id, err.message);
+    await db.from('estimates').update({ followup_emailed_at: null, followup_sent_by: null }).eq('id', e.id);
+    return { error: err.message || 'Email failed to send' };
+  }
 }

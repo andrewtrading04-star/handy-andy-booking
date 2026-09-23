@@ -23,6 +23,7 @@ import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage, textConsentFor } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
+import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { QUESTIONS as APPLY_QUESTIONS } from './_lib/apply-quiz.js';
@@ -528,6 +529,7 @@ export default async function handler(req, res) {
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
+      case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
       case 'estimate_bulk_close': return await estimateBulkClose(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
@@ -10483,7 +10485,7 @@ async function estimates(req, res, db, auth) {
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
-  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, followup_emailed_at, technician_id, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
+  let cols = 'id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, followup_emailed_at, followup_sent_by, technician_id, broker_company_name, broker_sub_price, broker_sell_price, broker_booked_at, broker_spread';
   const runQuery = () => {
     let q = db.from('estimates').select(cols)
       .eq('business_id', biz.id)
@@ -11105,6 +11107,31 @@ async function estimateFollowups(req, res, db, auth) {
 
 // One-tap reminder text for a sent estimate. Needs the customer's text consent;
 // re-uses the same signed 90-day approve link as the original estimate text.
+// POST { business, id } -- the "Send Quote via email (Coupon)" button (owner
+// rule 2026-09-23). Sends the SAME $20-off follow-up email the 3-hour cron
+// sends, through the same function, and claims the same followup_emailed_at
+// stamp -- so once either one has gone out, the other never sends.
+async function estimateCouponSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+  if (!body.id) return res.status(400).json({ error: 'id required' });
+  const { data: e, error } = await db.from('estimates')
+    .select('id, business_id, customer_name, customer_email, service_label, description, customer_note, line_items, tax_rate, upsells, status, approved_at, emailed_at, texted_at, contacted_at, followup_emailed_at')
+    .eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!e) return res.status(404).json({ error: 'Estimate not found' });
+  if (e.approved_at || e.status === 'scheduled') return res.status(409).json({ error: 'This estimate was already approved.' });
+  if (e.status === 'declined') return res.status(409).json({ error: 'This estimate was declined.' });
+  if (!(e.texted_at || e.emailed_at)) return res.status(400).json({ error: 'Send the original quote first.' });
+  if (e.followup_emailed_at) return res.status(409).json({ error: 'The coupon email was already sent.' });
+  if (!String(e.customer_email || '').includes('@')) return res.status(400).json({ error: 'No email address on this estimate.' });
+  if (!emailConfig(biz.slug).apiKey) return res.status(503).json({ error: 'Email is not set up for this business.' });
+  const r = await sendCouponFollowup(db, e, biz.slug, { by: auth.name || adminAuthorName(auth) });
+  if (r.already) return res.status(409).json({ error: 'The coupon email was already sent.' });
+  if (!r.ok) return res.status(502).json({ error: r.error || 'Email failed to send.' });
+  return res.status(200).json({ ok: true, sent_at: r.sent_at });
+}
+
 async function estimateRemind(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
