@@ -418,6 +418,11 @@
   .md-habit>button:first-child{border:2px solid var(--line);background:#fff;border-radius:999px;padding:8px 14px;font-weight:700;font-size:14px;cursor:pointer;}
   .md-habit.on>button:first-child{background:#16a34a;border-color:#16a34a;color:#fff;}
   .md-streak{font-size:12.5px;font-weight:800;color:#ea580c;}
+  .md-habit.skip>button:first-child{background:#f1f5f9;border-style:dashed;color:#64748b;text-decoration:line-through;}
+  .md-smart{background:linear-gradient(0deg,#eef4ff,#eef4ff);border:2px solid #c7d7fe;border-radius:14px;padding:10px;margin-bottom:10px;}
+  .md-smart textarea{width:100%;box-sizing:border-box;border:none;background:transparent;font:inherit;font-size:15.5px;resize:vertical;outline:none;min-height:44px;}
+  .md-smart-row{display:flex;justify-content:flex-end;gap:6px;margin-top:4px;} .md-smart-row .btn{width:auto;} .md-smart-row .md-mic{height:36px;}
+  .md-smart-reply{margin-top:8px;font-size:13.5px;background:#fff;border-radius:10px;padding:8px 10px;color:var(--ink-2);}
   .md-hx{border:none;background:none;color:#b91c1c;cursor:pointer;}
   .md-habit-add{display:flex;gap:4px;} .md-habit-add input{width:130px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;}
   .md-habit-add button{border:none;background:var(--accent);color:#fff;border-radius:999px;padding:0 12px;font-weight:700;}
@@ -9735,7 +9740,7 @@ function noteScheduledPill(n){
 // with a "carried" count. Daily habits with streaks, a "Keep in mind" list
 // with no dates, and a once-a-day 6 PM nudge if a habit is still open.
 // Server: api/_lib/my-day.js (action my_day). The page turns at 5 AM Bangkok.
-let _myDay=null, _myDayView=null, _myDayHabitEdit=false;
+let _myDay=null, _myDayView=null, _myDayHabitEdit=false, _myDaySmartReply='';
 const myDayFmt=d=>{ const t=new Date(d+'T12:00:00Z'); return t.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'}); };
 const myDayShift=(d,n)=>{ const t=new Date(d+'T12:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10); };
 async function myDayCall(op,body){
@@ -9762,8 +9767,8 @@ function paintMyDay(){
       <span class="md-tags">${t.time_hint?`<span class="md-time">${esc(t.time_hint)}</span>`:''}${t.carried>0&&!t.done?`<span class="md-carry" title="Carried over from ${esc(myDayFmt(t.origin_day))}">↻ ${t.carried}d</span>`:''}</span>
       ${live&&!t.done?`<span class="md-acts"><button type="button" data-mdstar="${esc(t.id)}" data-on="${t.starred?1:0}" title="Must do" aria-label="Star">${t.starred?'★':'☆'}</button><button type="button" data-mdtime="${esc(t.id)}" data-cur="${esc(t.time_hint||'')}" title="Set a loose time" aria-label="Time">⏰</button><button type="button" data-mddel="${esc(t.id)}" title="Delete" aria-label="Delete">✕</button></span>`:''}
     </div>`;
-  const habits=d.habits.map(h=>`<div class="md-habit${h.done?' on':''}">
-      <button type="button" data-mdhabit="${esc(h.id)}" data-done="${h.done?1:0}" ${live?'':'disabled'}>${h.done?'✓ ':''}${esc(h.name)}</button>
+  const habits=d.habits.map(h=>`<div class="md-habit${h.done?' on':''}${h.skipped?' skip':''}">
+      <button type="button" data-mdhabit="${esc(h.id)}" data-done="${(h.done||h.skipped)?1:0}" ${live?'':'disabled'} title="${h.skipped?'Skipped today — tap to undo':'Tap when done'}">${h.done?'✓ ':''}${esc(h.name)}${h.skipped?' · skipped':''}</button>
       ${h.streak?`<span class="md-streak" title="${h.streak} day streak">🔥${h.streak}</span>`:''}
       ${_myDayHabitEdit?`<button type="button" class="md-hx" data-mdhabitrm="${esc(h.id)}" aria-label="Remove habit">✕</button>`:''}
     </div>`).join('');
@@ -9779,6 +9784,11 @@ function paintMyDay(){
       <div><div class="md-date">${live?'Today':esc(myDayFmt(d.day))}</div><div class="md-sub">${live?esc(myDayFmt(d.day))+' · ':''}${done.length} of ${d.tasks.length} crossed off</div></div>
       <button type="button" class="md-nav" id="mdNext" ${live?'disabled':''} aria-label="Next page">›</button>
     </div>
+    ${live?`<form class="md-smart" id="mdSmart" autocomplete="off">
+      <textarea id="mdSmartText" rows="2" maxlength="2000" placeholder="Tell it anything… “took a nap, skip bedtime”, “gym tomorrow 5pm, buy milk”"></textarea>
+      <div class="md-smart-row">${hasMic?`<button type="button" id="mdSmartMic" class="md-mic" aria-label="Speak">🎙</button>`:''}<button type="submit" class="btn sm" id="mdSmartGo">Sort it out</button></div>
+      ${_myDaySmartReply?`<div class="md-smart-reply">${esc(_myDaySmartReply)}</div>`:''}
+    </form>`:''}
     ${live?`<form class="md-add" id="mdAdd" autocomplete="off">
       <input id="mdInput" placeholder="Add a task…" maxlength="300" enterkeyhint="done">
       ${hasMic?`<button type="button" id="mdMic" class="md-mic" title="Say it" aria-label="Speak a task">🎙</button>`:''}
@@ -9814,11 +9824,28 @@ function paintMyDay(){
       r.start();
     };
   }
+  if($('mdSmart')){
+    $('mdSmart').onsubmit=async e=>{
+      e.preventDefault(); const t=$('mdSmartText').value.trim(); if(!t) return;
+      const go=$('mdSmartGo'); go.disabled=true; go.textContent='Thinking…';
+      try{ const r=await api('my_day',{ method:'POST', body:{ op:'smart', text:t }}); _myDay=r; _myDaySmartReply=r.smart_reply||'Done.'; paintMyDay(); }
+      catch(err){ go.disabled=false; go.textContent='Sort it out'; toast(err.message||'Could not do that'); }
+    };
+    const sm=$('mdSmartMic');
+    if(sm) sm.onclick=()=>{
+      const SR=window.SpeechRecognition||window.webkitSpeechRecognition; const r=new SR();
+      r.lang='en-US'; r.interimResults=false; sm.classList.add('on');
+      r.onresult=ev=>{ $('mdSmartText').value=(($('mdSmartText').value+' ')+ev.results[0][0].transcript).trim(); };
+      r.onend=()=>sm.classList.remove('on'); r.onerror=()=>{ sm.classList.remove('on'); toast('Could not hear that. Try again.'); };
+      r.start();
+    };
+  }
   view.querySelectorAll('[data-mdtask]').forEach(b=>b.onclick=()=>myDayCall('task_done',{ id:b.dataset.mdtask, done:b.dataset.done!=='1' }));
   view.querySelectorAll('[data-mdstar]').forEach(b=>b.onclick=()=>myDayCall('task_edit',{ id:b.dataset.mdstar, starred:b.dataset.on!=='1' }));
   view.querySelectorAll('[data-mdtime]').forEach(b=>b.onclick=()=>{ const v=prompt('Loose time (like "3 PM" or "afternoon"). Leave empty to clear.', b.dataset.cur||''); if(v!==null) myDayCall('task_edit',{ id:b.dataset.mdtime, time_hint:v }); });
   view.querySelectorAll('[data-mddel]').forEach(b=>b.onclick=()=>{ if(confirm('Delete this task?')) myDayCall('task_delete',{ id:b.dataset.mddel }); });
   view.querySelectorAll('[data-mdhabit]').forEach(b=>b.onclick=()=>myDayCall('habit_check',{ id:b.dataset.mdhabit, done:b.dataset.done!=='1' }));
+  // (a skipped habit reports done=1 above, so a tap clears it -- same as un-checking)
   view.querySelectorAll('[data-mdhabitrm]').forEach(b=>b.onclick=()=>{ if(confirm('Remove this habit? Its streak history is kept.')) myDayCall('habit_remove',{ id:b.dataset.mdhabitrm }); });
   $('mdHabitEdit').onclick=()=>{ _myDayHabitEdit=!_myDayHabitEdit; paintMyDay(); };
   if($('mdHabitAdd')) $('mdHabitAdd').onsubmit=e=>{ e.preventDefault(); const v=$('mdHabitName').value.trim(); if(v) myDayCall('habit_add',{ name:v }); };
@@ -9837,7 +9864,7 @@ function startMyDayNudge(){
       const d=await api('my_day');
       const key='myday-nudge-'+d.today;
       try{ if(localStorage.getItem(key)) return; }catch(_){}
-      const left=d.habits.filter(x=>!x.done).map(x=>x.name);
+      const left=d.habits.filter(x=>!x.done&&!x.skipped).map(x=>x.name);
       if(!left.length) return;
       try{ localStorage.setItem(key,'1'); }catch(_){}
       const n=document.createElement('div'); n.className='md-nudge';
