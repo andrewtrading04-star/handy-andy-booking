@@ -4594,6 +4594,7 @@ function tvSizeIndex(name){
     if(v<=32) return 0; if(v<=59) return 1; if(v<=69) return 2; if(v<=84) return 3; if(v<=97) return 4; return 5; }
   return -1;
 }
+function liIsZeroExtra(name,total){ return !(Number(total)||0) && !/^tax/i.test(String(name||'').trim()); }
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
   let hiddenItems=[];   // default "TV Type: Regular TV" lines — kept in the data, hidden from the editor
@@ -4608,7 +4609,11 @@ function mountLineItemsEditor(b){
         if(qty<1) qty=1;
         if(!unit) unit=qty>0?Math.round((lt/qty)*100)/100:lt;   // derive per-item price if missing
         const name=li.label||'';
-        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
+        // $0 rows are hidden too (owner, 2026-09-23: "no point in displaying
+        // $0 line items") -- still kept on the ticket via hiddenItems, just
+        // not cluttering the editor. Tax is exempt: a $0 tax row still has to
+        // recompute once priced items are added.
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)||liIsZeroExtra(name,lt)){ hiddenItems.push({ name, price:lt, kind:li.kind||'service' }); return acc; }
         acc.push({ name, display:liCleanLabel(name), unit, qty, kind:li.kind||'service' });
         return acc;
       },[])
@@ -4792,7 +4797,7 @@ function mountLineItemsEditor(b){
       hiddenItems=[];
       rows=b.line_items.reduce((acc,li)=>{
         const name=li.label||'';
-        if(liIsDefaultType(name)||liIsDismountAnswer(name)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
+        if(liIsDefaultType(name)||liIsDismountAnswer(name)||liIsZeroExtra(name,Number(li.line_total!=null?li.line_total:li.price)||0)){ hiddenItems.push({ name, price:li.price, kind:li.kind }); return acc; }
         acc.push({ name, display:liCleanLabel(name), unit:Number(li.price)||0, qty:Math.max(1,Math.round(Number(li.quantity)||1)), kind:li.kind });
         return acc;
       },[]);
