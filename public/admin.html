@@ -380,6 +380,20 @@
   /* Phone layout, option A (owner pick 2026-09-23): one status dropdown +
      filter icon; Came from / Sort hide behind the icon; round + for new. */
   .est-mob{display:none;}
+  .est-mlist{display:flex;flex-direction:column;gap:8px;}
+  .est-mrow{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;}
+  .est-mrow.open{border-color:var(--accent);}
+  .est-mhead{display:flex;align-items:center;gap:10px;width:100%;padding:12px 13px;border:none;background:transparent;text-align:left;cursor:pointer;font:inherit;color:inherit;}
+  .est-mline{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .est-mline strong{font-size:15px;}
+  .est-mline span{font-size:12.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .est-mclock{flex:none;font-size:16px;font-weight:800;color:var(--ink-2);background:var(--line2);border-radius:9px;padding:5px 9px;white-space:nowrap;}
+  .est-mclock.late{color:#b91c1c;background:#fee2e2;}
+  .est-mclock.new{color:#92400e;background:#fef3c7;font-size:13px;}
+  .est-mchev{flex:none;color:var(--mute);font-size:18px;transition:transform .15s;}
+  .est-mrow.open .est-mchev{transform:rotate(90deg);}
+  .est-mbody{border-top:1px solid var(--line2);}
+  .est-mbody .est-card{border:none;border-radius:0;margin:0;}
   @media(max-width:880px){
     .est-page .rc-sub,.est-page #estFilters,.est-page #estNewBtn{display:none !important;}
     .est-page .rc-head{display:flex;align-items:center;justify-content:space-between;}
@@ -14197,7 +14211,26 @@ function estTotals(items, taxRate){
   return { subtotal, tax, total:Math.round((subtotal+tax)*100)/100 };
 }
 
-let _estRequest=0,_estRows=[],_estSelected=null,_estQuery='',_estSort='newest';
+let _estRequest=0,_estRows=[],_estSelected=null,_estQuery='',_estSort='newest',_estMobOpen=null;
+// The clock on a collapsed phone row: hours since the quote went out while
+// it's still waiting (same rule as the big timer inside the card), or how
+// long a new request has sat unanswered. Red once it's a day or more.
+// Latest time the quote went out, or 0 if it never did. NOT Date.parse(x||0):
+// Date.parse("0") is Jan 1 2000 in Chrome, so an unsent estimate read as
+// sent 26 years ago ("234296 hours").
+function estSentAtMs(e){
+  const t=v=>v?(Date.parse(v)||0):0;
+  return Math.max(t(e.texted_at),t(e.emailed_at),t(e.contacted_at));
+}
+function estRowClock(e){
+  const sent=estSentAtMs(e);
+  if(sent&&!e.approved_at&&e.status!=='declined'){
+    const h=Math.floor((Date.now()-sent)/3600000);
+    return `<span class="est-mclock${h>=24?' late':''}">${h} hr${h===1?'':'s'}</span>`;
+  }
+  if(e.status==='new') return `<span class="est-mclock new">${esc(fmtWaitMinutes(estAgeMinutes(e)))}</span>`;
+  return '';
+}
 async function renderEstimates(){
   const request=++_estRequest;
   const view=document.getElementById('view');
@@ -14253,7 +14286,7 @@ async function renderEstimates(){
     refreshEstimateBadge();
     estCache={}; items.forEach(it=>{ estCache[it.id]=it; });
     _estRows=items;
-    if(pendingEstimateId){_estQuery='';view.querySelector('#estSearch').value='';_estSelected=pendingEstimateId;}
+    if(pendingEstimateId){_estQuery='';view.querySelector('#estSearch').value='';_estSelected=pendingEstimateId;_estMobOpen=pendingEstimateId;}
     paintEstimates();
     focusPendingEstimate();
   }catch(err){ if(request!==_estRequest||!onScreen('estimates'))return; const w=document.getElementById('estWrap'); if(w){w.innerHTML=`<div class="empty" role="alert">${esc(err.message)}</div><button class="rc-btn ghost" id="estRetry">Try again</button>`;w.querySelector('#estRetry').addEventListener('click',renderEstimates);} }
@@ -14272,9 +14305,27 @@ function paintEstimates(){
     if(!items.length){wrap.innerHTML='<div class="empty">No estimates match this view.</div>';return;}
     const selected=items.find(e=>e.id===_estSelected)||items[0];_estSelected=selected.id;
     const scroll=wrap.querySelector('.ci-list')?.scrollTop||0;
+    if(window.innerWidth<760){
+      // Phone (owner, 2026-09-23): a collapsed list, like the calls list --
+      // one row per estimate with the hours since it went out right on the
+      // row, and the full card opens under a row only when it's tapped.
+      // Tap the same row again to close it.
+      wrap.innerHTML=`<div class="est-mlist">${items.map(e=>{ const on=e.id===_estMobOpen;
+        return `<div class="est-mrow${on?' open':''}" id="estm-${esc(e.id)}"><button type="button" class="est-mhead" data-est-mob="${esc(e.id)}" aria-expanded="${on}">
+          <span class="est-mline"><strong>${esc(e.customer_name||e.customer_phone||'Unnamed customer')}</strong>
+            <span>${esc(e.service_label||'Estimate request')}</span>
+            <span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span></span>
+          ${estRowClock(e)}<span class="est-mchev">›</span></button>${on?`<div class="est-mbody">${estCard(e)}</div>`:''}</div>`; }).join('')}</div>`;
+      wrap.querySelectorAll('[data-est-mob]').forEach(b=>b.addEventListener('click',()=>{
+        const id=b.dataset.estMob; _estMobOpen=_estMobOpen===id?null:id; if(_estMobOpen)_estSelected=id;
+        paintEstimates();
+        if(_estMobOpen) document.getElementById('estm-'+id)?.scrollIntoView({behavior:'smooth',block:'start'});
+      }));
+    } else {
     wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email&&!e.customer_phone?' · <b style="color:#b45309;">No phone or email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
-    wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();if(window.innerWidth<760)wrap.querySelector('.est-detail')?.scrollIntoView({behavior:'smooth',block:'start'});}));
+    wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();}));
+    }
     // wire controls
     document.querySelectorAll('#estWrap [data-est-edit]').forEach(b=>b.addEventListener('click',()=>openEstimateEdit(b.dataset.estEdit)));
     document.querySelectorAll('#estWrap [data-est-sms]').forEach(b=>b.addEventListener('click',()=>{
@@ -14519,7 +14570,7 @@ function estCard(e){
   // hours since the quote went out, nothing else, bigger than "Waiting on
   // approval" and sitting right above it. Only makes sense once it's actually
   // been sent and is still waiting (not approved/declined).
-  const sentAtMs=Math.max(Date.parse(e.texted_at||0)||0,Date.parse(e.emailed_at||0)||0,Date.parse(e.contacted_at||0)||0);
+  const sentAtMs=estSentAtMs(e);
   const sentTimer=(sentAtMs&&!isApproved&&e.status!=='declined')
     ? `<div class="est-hours-timer">${Math.floor((Date.now()-sentAtMs)/3600000)} hour${Math.floor((Date.now()-sentAtMs)/3600000)===1?'':'s'}</div>` : '';
   return `<div class="job est-card${stale?' stale':''}${isWeb?' est-card-web':''}" data-status="${esc(e.status)}" data-est="${esc(e.id)}">
