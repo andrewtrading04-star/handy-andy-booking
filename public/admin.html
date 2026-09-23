@@ -377,6 +377,22 @@
   .ec-ok{background:#f0faf3;border:1px solid #bfe5c9;border-radius:10px;padding:10px 12px;font-size:13.5px;color:#15803d;font-weight:700;margin:8px 0;}
   /* Estimates page: where the estimate came from */
   .est-origin{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px;align-items:center;}
+  /* Phone layout, option A (owner pick 2026-09-23): one status dropdown +
+     filter icon; Came from / Sort hide behind the icon; round + for new. */
+  .est-mob{display:none;}
+  @media(max-width:880px){
+    .est-page .rc-sub,.est-page #estFilters,.est-page #estNewBtn{display:none !important;}
+    .est-page .rc-head{display:flex;align-items:center;justify-content:space-between;}
+    .est-mob{display:flex;}
+    .est-fab{width:38px;height:38px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:24px;line-height:1;cursor:pointer;flex:none;}
+    .est-mobbar{gap:8px;margin:4px 0 10px;}
+    .est-mobbar select{flex:1;min-width:0;font-size:15px;font-weight:600;padding:9px 10px;border-radius:10px;}
+    .est-fbtn{width:42px;flex:none;border:1px solid var(--line);border-radius:10px;background:var(--card,#fff);font-size:17px;cursor:pointer;}
+    .est-fbtn.on{background:var(--accent-soft);border-color:var(--accent);}
+    .est-page:not(.est-more) #estOrigin{display:none !important;}
+    .est-page:not(.est-more) .est-tools label:nth-of-type(2){display:none;}
+    .est-page .est-tools label:first-of-type{font-size:0;}
+  }
   .fu-box{border:1px solid var(--line2);border-radius:12px;background:#fff;margin:8px 0 10px;overflow:hidden;}
   .fu-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;background:#fffbeb;border-bottom:1px solid var(--line2);}
   .fu-head h3{margin:0;font-size:15px;}
@@ -14129,8 +14145,11 @@ async function renderEstimates(){
   // specially). Sits before Archived so it reads as a working folder.
   const filters=Object.entries({followup:'Follow up',all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
     `<button type="button" class="seg-btn ${estFilter===k?'on':''}" data-ef="${k}">${v}${k==='followup'?'<span id="fuTabN"></span>':''}</button>`).join('');
-  view.innerHTML=`<div class="wrap">
-    <div class="rc-head"><div><h2 class="rc-title">Estimates</h2><p class="rc-sub">Review requests, build quotes, and turn approved estimates into jobs.</p></div></div>
+  const estFilterOpts=Object.entries({followup:'Follow up',all:'All',...EST_STATUS,website:'Website messages',archived:'Archived'}).map(([k,v])=>
+    `<option value="${k}" ${estFilter===k?'selected':''}>${esc(v)}</option>`).join('');
+  view.innerHTML=`<div class="wrap est-page">
+    <div class="rc-head"><div><h2 class="rc-title">Estimates</h2><p class="rc-sub">Review requests, build quotes, and turn approved estimates into jobs.</p></div><button type="button" class="est-fab est-mob" id="estNewFab" aria-label="New estimate" title="New estimate">+</button></div>
+    <div class="est-mob est-mobbar"><select id="estFilterSel" aria-label="Estimate folder">${estFilterOpts}</select><button type="button" class="est-fbtn" id="estMoreBtn" aria-label="More filters" title="Came from and sort">⚙</button></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:2px;">
       <div class="est-filters" id="estFilters">${filters}</div>
       <button type="button" class="btn" id="estNewBtn" style="width:auto;flex:none;">+ New estimate</button>
@@ -14148,6 +14167,9 @@ async function renderEstimates(){
   // booking". Both buttons still work either way; nothing about how an
   // estimate actually gets priced or sent changes.
   document.getElementById('estNewBtn').addEventListener('click', ()=>openNewBooking({ _estimateOnly:true }));
+  document.getElementById('estNewFab').addEventListener('click', ()=>openNewBooking({ _estimateOnly:true }));
+  document.getElementById('estFilterSel').addEventListener('change', e=>{ estFilter=e.target.value; renderEstimates(); });
+  document.getElementById('estMoreBtn').addEventListener('click', e=>{ const on=view.querySelector('.est-page').classList.toggle('est-more'); e.currentTarget.classList.toggle('on',on); });
   view.querySelector('#estSort').value=_estSort;
   view.querySelector('#estSearch').addEventListener('input',e=>{_estQuery=e.target.value;paintEstimates();});
   view.querySelector('#estSort').addEventListener('change',e=>{_estSort=e.target.value;paintEstimates();});
