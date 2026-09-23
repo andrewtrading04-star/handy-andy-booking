@@ -16551,20 +16551,21 @@ async function messagesThread(req, res, db, auth) {
   // checked against the SAME brand guess for THIS customer, not just the number.
   let ctx; try { ctx = await businessForOurPhone(db, auth, req.query.our, customer); } catch (e) { return bail(res, e); }
 
-  const { data: rows, error } = await db.from('messages')
-    .select('id, direction, body, created_at, status, error, sent_by, read_at')
-    .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer)
-    .order('created_at', { ascending: true }).limit(500);
-  if (error) return res.status(500).json({ error: error.message });
-
   // Same cross-brand rule as messagesList: only name the customer from the
   // business whose line they texted. Unmapped line (ctx.biz null) => no name
   // rather than a name borrowed from whichever brand matched first.
   let cq = db.from('customers').select('id, name').eq('phone', customer);
   if (ctx.biz) cq = cq.eq('business_id', ctx.biz.id); else cq = cq.limit(0);
-  const { data: c } = await cq.limit(1);
-
-  const bizById = await businessesById(db);
+  // All three at once -- speed (owner, 2026-09-24).
+  const [{ data: rows, error }, { data: c }, bizById] = await Promise.all([
+    db.from('messages')
+      .select('id, direction, body, created_at, status, error, sent_by, read_at')
+      .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer)
+      .order('created_at', { ascending: true }).limit(500),
+    cq.limit(1),
+    businessesById(db),
+  ]);
+  if (error) return res.status(500).json({ error: error.message });
   let brand = null;
   if (ctx.biz) {
     const b = bizById.get(ctx.biz.id);

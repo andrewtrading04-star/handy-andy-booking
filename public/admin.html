@@ -3340,6 +3340,7 @@ function navTo(s){
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
   document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day'})[s];
+  if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
   if(sched){ renderSchedule(); renderGreeting(); pollTimer=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'&&calMode==='jobs') pollScheduleIfChanged(); }, 60000); }
@@ -13079,7 +13080,7 @@ async function renderMessages(){
     if(!firstLoad && !onScreen('messages')) return;
     _msgThreads=list.threads||[];
     if(_msgOpen){
-      const t=await api('messages_thread',{params:{ our:_msgOpen.our, customer:_msgOpen.customer }});
+      const t=await fetchMsgThread(_msgOpen.our, _msgOpen.customer);
       if(!onScreen('messages')) return;
       _msgThread=t;
     }
@@ -13194,6 +13195,11 @@ function paintMessages(){
     _msgFilter=el.value; paintMessages();
   }));
 
+  view.querySelectorAll('.msg-list [data-msgopen]').forEach(el=>el.addEventListener('pointerdown',()=>prefetchMsgThread(el.dataset.msgour, el.dataset.msgcust),{passive:true}));
+  if(!paintMessages._pre){ paintMessages._pre=1;
+    const top=[...view.querySelectorAll('.msg-list [data-msgopen]')].slice(0,6);
+    setTimeout(()=>top.forEach(el=>prefetchMsgThread(el.dataset.msgour, el.dataset.msgcust)),300);
+  }
   view.querySelectorAll('.msg-list [data-msgopen]').forEach(el=>el.addEventListener('click',()=>{
     const our=el.dataset.msgour, customer=el.dataset.msgcust;
     if(_msgOpen && _msgOpen.our===our && _msgOpen.customer===customer) return;
@@ -13386,27 +13392,50 @@ function msgLineNote(t){
 // Open (or reopen) the thread in _msgOpen: load it, clear its unread badge,
 // paint. Marking read is best-effort — failing to clear a badge must never
 // stop the conversation from opening.
+// Speed (owner, 2026-09-24: "shave any time possible"). Threads are cached
+// and prefetched -- on finger-down (before the click lands) and for the top
+// rows once the list paints -- so a tap usually shows the texts instantly;
+// a fresh copy then replaces the cached one in the background.
+const _msgCache=new Map(), _msgInflight=new Map();
+function fetchMsgThread(our, customer){
+  const k=our+'|'+customer;
+  if(_msgInflight.has(k)) return _msgInflight.get(k);
+  const p=api('messages_thread',{params:{ our, customer }})
+    .then(t=>{ _msgCache.set(k,{ t, at:Date.now() }); return t; })
+    .finally(()=>_msgInflight.delete(k));
+  _msgInflight.set(k,p);
+  return p;
+}
+function prefetchMsgThread(our, customer){
+  const c=_msgCache.get(our+'|'+customer);
+  if(c && Date.now()-c.at<20000) return;
+  fetchMsgThread(our, customer).catch(()=>{});
+}
 async function openMsgThread(){
   if(!_msgOpen) return;
+  const open=_msgOpen, k=open.our+'|'+open.customer;
+  const cached=_msgCache.get(k);
   // Repaint the whole 3-column view (not just swap in a loading string) so
   // the rail and list stay visible while the detail column shows its own
   // loading/error state — see paintMessages()'s _msgThreadLoading/_msgThreadError.
-  _msgThreadLoading=true; _msgThreadError=null;
+  _msgThreadError=null;
+  if(cached){ _msgThread=cached.t; _msgThreadLoading=false; } else _msgThreadLoading=true;
   paintMessages();
+  // Mark read alongside the load, not after it.
+  api('messages_read',{ method:'POST', body:{ our:open.our, customer:open.customer }}).then(()=>{
+    const row=(_msgThreads||[]).find(x=>x.our_phone===open.our&&x.customer_phone===open.customer);
+    if(row&&row.unread){ row.unread=0; refreshMessagesBadge(); if(onScreen('messages')) paintMessages(); }
+  }).catch(()=>{ /* badge only */ });
   try{
-    const t=await api('messages_thread',{params:{ our:_msgOpen.our, customer:_msgOpen.customer }});
-    if(!onScreen('messages')) return;
+    const t=(cached && Date.now()-cached.at<20000) ? cached.t : await fetchMsgThread(open.our, open.customer);
+    if(!onScreen('messages') || _msgOpen!==open) return;
+    if(t===_msgThread && !_msgThreadLoading) return;
     _msgThread=t;
     _msgThreadLoading=false;
     paintMessages();
-    try{
-      await api('messages_read',{ method:'POST', body:{ our:_msgOpen.our, customer:_msgOpen.customer }});
-      const row=(_msgThreads||[]).find(x=>x.our_phone===_msgOpen.our&&x.customer_phone===_msgOpen.customer);
-      if(row) row.unread=0;
-      refreshMessagesBadge();
-      paintMessages();
-    }catch(_){ /* badge only — the conversation is already open and readable */ }
   }catch(e){
+    if(_msgOpen!==open) return;
+    if(cached) return;   // keep showing the cached copy
     _msgThreadLoading=false;
     _msgThreadError=e.message||'';
     paintMessages();
