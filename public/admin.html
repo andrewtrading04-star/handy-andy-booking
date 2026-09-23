@@ -648,6 +648,20 @@
   .msg-auto-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:3px;}
   .msg-avatar{width:28px;height:28px;border-radius:50%;background:#D8DCE1;color:#3A3F47;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex:none;}
   .msg-reply{border-top:1px solid var(--line);padding:12px 16px;}
+  /* iPhone Messages conversation look (owner, 2026-09-23). */
+  .msg-ihead{position:relative;text-align:center;padding:10px 48px 10px;}
+  .msg-ihead .msg-back-arrow{position:absolute;left:8px;top:14px;font-size:24px;color:#0B84FF;}
+  .msg-iblock{position:absolute;right:10px;top:14px;border:none;background:transparent;font-size:12px;font-weight:700;color:#b91c1c;cursor:pointer;padding:4px 6px;border-radius:8px;}
+  .msg-iblock:hover{background:#fee2e2;}
+  .msg-ihead .msg-ava{width:52px;height:52px;margin:0 auto 4px;font-size:18px;}
+  .msg-iname{font-size:15px;font-weight:700;color:var(--ink);}
+  .msg-isub{font-size:11.5px;color:var(--mute);margin-top:1px;}
+  .msg-thread .msg-meta{font-size:11px;color:var(--mute);margin-top:3px;}
+  .msg-ireply{display:flex;align-items:flex-end;gap:8px;padding:8px 10px;}
+  .msg-icall{flex:none;width:34px;height:34px;border-radius:50%;border:none;background:var(--line2);font-size:15px;cursor:pointer;}
+  .msg-ibox{flex:1;min-width:0;border:1px solid var(--line);border-radius:18px;padding:8px 14px;font:inherit;font-size:15px;resize:none;max-height:140px;background:var(--card,#fff);color:var(--ink);outline:none;}
+  .msg-isend{flex:none;width:34px;height:34px;border-radius:50%;border:none;background:#0B84FF;color:#fff;font-size:18px;font-weight:800;cursor:pointer;line-height:1;}
+  @media(max-width:880px){ .msg-wrap:has(.msg-shell.detail-open) > .rc-head, .msg-wrap:has(.msg-shell.detail-open) > .rc-sub{display:none;} }
 
   @media(max-width:880px){
     .msg-shell{flex-direction:column;height:auto;border:none;border-radius:0;}
@@ -12821,20 +12835,16 @@ function paintMessages(){
 function msgDetailHtml(t){
   const who=t.customer_name || t.customer_phone_pretty;
   const key=msgKey(t.our_phone, t.customer_phone);
-  let html='<div class="msg-dhead">'
-    +'<div class="msg-conversation-brand">'+msgBrandChip(t)+'</div>'
-    +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">'
-    +'<div style="min-width:0;">'
-    +'<div style="display:flex;align-items:center;gap:4px;">'
-    +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">←</button>'
-    +'<h2 class="rc-title" style="font-size:18px;margin:0;">'+esc(who)+'</h2>'
-    +'</div>'
-    +'<div class="rc-sub">Customer phone: '+esc(t.customer_phone_pretty||t.customer_phone)+'</div>'
-    +'<div class="rc-sub">Sending line: '+(t.notify_line?'Automated Texts · Shared across businesses':esc(t.our_phone_pretty||t.our_phone))
-    +(!t.notify_line&&t.line_label?' ('+esc(String(t.line_label).replace(/^Please be aware\. This call is from /,'').replace(/\.$/,''))+')':'')
-    +'</div></div>'
-    +'<button class="rc-btn red" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">🚫 Block</button>'
-    +'</div></div>';
+  // iPhone-style header: back chevron left, avatar + name centered, one
+  // small gray line for brand + number (was 3 stacked label lines).
+  const sub=[t.business_name, t.customer_name?(t.customer_phone_pretty||t.customer_phone):null].filter(Boolean).map(esc).join(' · ');
+  let html='<div class="msg-dhead msg-ihead">'
+    +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">‹</button>'
+    +'<button class="msg-iblock" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">Block</button>'
+    +msgAvatar(t)
+    +'<div class="msg-iname">'+esc(who)+'</div>'
+    +(sub?'<div class="msg-isub">'+sub+'</div>':'')
+    +'</div>';
 
   html+='<div class="msg-thread">';
   if(!t.messages.length){
@@ -12852,7 +12862,7 @@ function msgDetailHtml(t){
       const fg = failed ? '#B91C1C' : mine ? '#fff' : '#050505';
       const border = failed ? '1.5px solid #DC2626' : automated ? '1.5px dashed rgba(255,255,255,.6)' : 'none';
       // The tail: a tighter corner on the side nearest whoever sent it.
-      const radius = mine ? '16px 16px 4px 16px' : '16px 16px 16px 4px';
+      const radius = mine ? '18px 18px 5px 18px' : '18px 18px 18px 5px';
       const align = mine ? 'margin-left:auto;' : '';
       let meta=msgWhen(m.created_at);
       if(mine){
@@ -12861,27 +12871,27 @@ function msgDetailHtml(t){
         else if(m.status==='queued') meta+=' · sending…';
         if(m.sent_by && m.sent_by!=='automated') meta+=' · '+m.sent_by;
       }
-      const bubble='<div style="background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 12px;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+'</div>';
-      html+='<div style="max-width:78%;'+align+'margin-bottom:12px;">'
+      const bubble='<div style="background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 13px;font-size:15px;line-height:1.35;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+'</div>';
+      html+='<div style="max-width:75%;width:fit-content;'+align+'margin-bottom:10px;">'
         +(automated?'<div class="msg-auto-label" style="text-align:right;">Automated</div>':'')
         +(mine ? bubble
           // The customer's side gets a small avatar next to every bubble —
           // there's only ever one "them" in a thread, so a plain neutral
           // circle (not a per-brand or per-customer color) is all it needs.
-          : '<div style="display:flex;align-items:flex-end;gap:6px;">'
-              +'<div class="msg-avatar">'+esc(initials(who))+'</div>'
-              +'<div style="flex:1;min-width:0;">'+bubble+'</div>'
-            +'</div>')
-        +'<div class="rc-meta" style="'+(mine?'text-align:right;':'margin-left:34px;')+'">'+esc(meta)+'</div>'
+          // iPhone shows no avatar beside each bubble -- just the bubble.
+          : bubble)
+        +'<div class="msg-meta" style="'+(mine?'text-align:right;':'')+'">'+esc(meta)+'</div>'
         +'</div>';
     }
   }
   html+='</div>';
 
-  html+='<div class="msg-reply">'
-    +'<textarea class="search" data-msgreply rows="3" maxlength="1200" placeholder="Type your reply…" style="width:100%;resize:vertical;">'+esc(_msgDraft[key]||'')+'</textarea>'
-    +'<div class="rc-actions" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-    +'<button class="btn" data-msgsend="1">Send</button>'
+  // iPhone-style compose bar: call button, rounded box, round blue send.
+  html+='<div class="msg-reply msg-ireply">'
+    +'<button class="msg-icall" data-msgcall="1" title="Call" aria-label="Call">📞</button>'
+    +'<textarea class="msg-ibox" data-msgreply rows="1" maxlength="1200" placeholder="Text Message">'+esc(_msgDraft[key]||'')+'</textarea>'
+    +'<button class="msg-isend" data-msgsend="1" title="Send" aria-label="Send">↑</button>'
+    +'<div class="rc-actions" style="display:none;">'
     // Dials from whoever clicks it, same as every other 📞 tel: link in the
     // dashboard (e.g. the Calls tab) — there is no server-initiated calling
     // built, so this just hands off to the secretary's own phone/browser.
