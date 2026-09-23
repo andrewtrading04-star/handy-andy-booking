@@ -144,6 +144,13 @@ test('a scheduled-tech override still uses tech_unavailable instead of a slot co
     scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:null,body:{scheduled_date:'2026-09-15',scheduled_slot:'s5'},batchTechSlotState:async()=>new Map([['one',{booked:new Set(),keys:new Set()}]])});
   await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'tech_unavailable');assert.equal(f.r.body.tech_id,'one');
 });
+test('phone booking rejects a selected technician or helper who became off or inactive',async()=>{
+  for(const secondary of [false,true])for(const changed of [{name:'Steve',status:'off'},{name:'Steve',active:false},null]){
+    const db=database(q=>({data:q.filters.some(([,key,value])=>key==='id'&&value===(secondary?'two':'one'))?changed:{name:'Steve',active:true}})).db;
+    const f=bookingStage(staffingStart,staffingEnd,{db,body:{technician_id:'one',secondary_technician_id:secondary?'two':null,require_available:true}});
+    await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'slot_unavailable');
+  }
+});
 test('an explicit schedule override cannot waive a collision on either technician',async()=>{
   for(const busy of ['one','two']){
     const f=bookingStage('  if (scheduled_at && (technician_id || secondary_technician_id)) {','  const paymentMethod =',{

@@ -28,7 +28,7 @@ function staffing({techs=[{id:'a',name:'Steve'},{id:'b',name:'TK'},{id:'c',name:
   const ctx=vm.createContext({Date,Intl,Map,Set,Promise,SLOTS,dayOfWeekFor,localDateStartUTC,addDaysStr,
     bookingLiftCols:true,extraSlotsCol:true,esCol:()=>', extra_slots',esOf:b=>b.extra_slots||[],
     isSecondaryIneligibleName:name=>/^(Juan|Zach)$/.test(name),applySoleTech:(_slug,techs)=>techs.filter(t=>t.name==='Zach')});
-  vm.runInContext(['missingColumn','localHHMM','slotKeyForLocalTime','normalizeRosterScopes','scopedRosterTechs','batchTechSlotState','pickAvailableTech','pickAvailableTechPair'].map(n=>fn(n)).join('\n'),ctx);
+  vm.runInContext(['missingColumn','localHHMM','slotKeyForLocalTime','normalizeRosterScopes','scopedRosterTechs','batchTechSlotState','rosterSlotState','pickAvailableTech','pickAvailableTechPair','pickOwnHelperPrimary','pickScheduledSecondary','resolveDefaultSecondary'].map(n=>fn(n)).join('\n'),ctx);
   return {ctx,db,pick:(...args)=>ctx.pickAvailableTech(db,scope,date,'s1',tz,...args),pair:(p=scope,s=scope)=>ctx.pickAvailableTechPair(db,p,s,date,'s1',tz)};
 }
 test('auto-assignment checks a busy roster in three schedule reads regardless of roster length',async()=>{
@@ -58,6 +58,33 @@ test('same-pool pair uses one roster read and one shared schedule batch',async()
   assert.equal(f.db.queries.length,4);
   const ids=f.db.queries.find(q=>q.table==='technician_availability').filters.find(([k])=>k==='in')[2];
   assert.deepEqual(plain(ids),['a','b','c']);
+});
+test('phone assignment excludes off technicians on both sides of a pair',async()=>{
+  const f=staffing({techs:[{id:'off',name:'Off',status:'off'},{id:'a',name:'Steve'},{id:'b',name:'TK'}]});
+  assert.equal(await f.pick(null,false,true,true),'a');assert.equal(await f.pick(null,false,true),'off','ordinary office selection retains its existing behavior');
+  assert.deepEqual(plain(await f.ctx.pickAvailableTechPair(f.db,scope,scope,date,'s1',tz,true)),{primaryId:'a',secondaryId:'b'});
+});
+test('phone own-helper fallback also excludes off technicians',async()=>{
+  const f=staffing({techs:[{id:'off',name:'Juan',status:'off'},{id:'on',name:'Zach'}]});f.ctx.bringsOwnSecondTech=name=>['Juan','Zach'].includes(name);
+  assert.equal(await f.ctx.pickOwnHelperPrimary(f.db,scope,date,'s1',tz,true),'on');
+});
+test('scheduled-helper assignment is batched, excludes the primary and rejects an unknown metro',async()=>{
+  const f=staffing();assert.equal(await f.ctx.pickScheduledSecondary(f.db,scope,date,'s1',tz,'a'),'b');assert.equal(f.db.queries.length,4);
+  assert.equal(await f.ctx.pickScheduledSecondary(f.db,[{bizId:'home',serviceAreaId:null}],date,'s1',tz,'a'),null);assert.equal(f.db.queries.length,4);
+  const bad=staffing({failTable:'technicians'});await assert.rejects(bad.ctx.pickScheduledSecondary(bad.db,scope,date,'s1',tz,'a'),/Unavailable/);
+});
+test('phone helper follows the explicit calendar pool without an unrelated partner lookup',async()=>{
+  const f=staffing({techs:[{id:'partner',name:'Partner',biz:'partner'},{id:'off',name:'Off',biz:'home',status:'off'},{id:'a',name:'Steve',biz:'home'},{id:'b',name:'TK',biz:'home'}]});
+  f.ctx.partnerBusiness=()=>{throw Error('phone must not change the offered pool');};
+  f.ctx.rosterScopes=async(_db,_biz,pool,zip)=>{assert.equal(pool,'own');assert.equal(zip,'80202');return scope;};
+  assert.equal(await f.ctx.resolveDefaultSecondary(f.db,{id:'home',slug:'doms'},'80202',date,'s1',tz,'a','own',true),'b');
+  assert.equal(f.db.queries.length,4);
+});
+test('ordinary office helper assignment retains the partner-first priority',async()=>{
+  const f=staffing({techs:[{id:'own',name:'Steve',biz:'home'},{id:'partner',name:'TK',biz:'partner'}]});
+  f.ctx.partnerBusiness=async()=>({id:'partner'});f.ctx.serviceAreaIdFromPostal=async()=> 'denver';
+  assert.equal(await f.ctx.resolveDefaultSecondary(f.db,{id:'home',slug:'doms'},'80202',date,'s1',tz,null,'own'),'partner');
+  assert.equal(f.db.queries.length,5);
 });
 test('pair matching preserves the only helper instead of greedily consuming them as primary',async()=>{
   const f=staffing({techs:[{id:'tk',name:'TK',biz:'helper'},{id:'steve',name:'Steve',biz:'home'}]});

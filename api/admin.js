@@ -3269,10 +3269,10 @@ async function freeSlotTechMap(db, bizIdOrScopes, techId, dateStr, dow, tz, excl
 // own estimate-approval auto-book), silently handing the job to someone who
 // never marked that slot available is never acceptable; better to come back
 // null and tell the customer to pick another time.
-async function pickAvailableTech(db, bizIdOrScopes, dateStr, slotKey, tz, excludeTechId = null, excludeIneligibleSecondary = false, strict = false) {
-  const rawLists = await scopedRosterTechs(db, bizIdOrScopes, 'id, name');
+async function pickAvailableTech(db, bizIdOrScopes, dateStr, slotKey, tz, excludeTechId = null, excludeIneligibleSecondary = false, strict = false, eligibleOnly = false) {
+  const rawLists = await scopedRosterTechs(db, bizIdOrScopes, 'id, name, status');
   const scopeLists = rawLists.map(techs => {
-    let list = techs.filter(t => !excludeTechId || t.id !== excludeTechId);
+    let list = techs.filter(t => (!excludeTechId || t.id !== excludeTechId) && (!eligibleOnly || t.status !== 'off'));
     if (excludeIneligibleSecondary) list = list.filter(t => !isSecondaryIneligibleName(t.name));
     return list;
   });
@@ -3322,16 +3322,16 @@ async function pickAvailableTech(db, bizIdOrScopes, dateStr, slotKey, tz, exclud
 // excludeIneligibleSecondary is implicit on the secondary side (Juan/Zach can
 // never be a second tech). Returns { primaryId, secondaryId }, both null if no
 // distinct pair exists for this exact date+slot.
-async function pickAvailableTechPair(db, scopesPrimary, scopesSecondary, dateStr, slotKey, tz) {
+async function pickAvailableTechPair(db, scopesPrimary, scopesSecondary, dateStr, slotKey, tz, eligibleOnly = false) {
   if (!dateStr || !slotKey) return { primaryId: null, secondaryId: null };
   const dow = dayOfWeekFor(dateStr);
-  const primaryP = scopedRosterTechs(db, scopesPrimary, 'id, name');
+  const primaryP = scopedRosterTechs(db, scopesPrimary, 'id, name, status');
   const sameScopes = JSON.stringify(scopesPrimary) === JSON.stringify(scopesSecondary);
   const [primary, secondary] = await Promise.all([
-    primaryP, sameScopes ? primaryP : scopedRosterTechs(db, scopesSecondary, 'id, name'),
+    primaryP, sameScopes ? primaryP : scopedRosterTechs(db, scopesSecondary, 'id, name, status'),
   ]);
-  const pTechs = primary.flat();
-  const sTechs = secondary.flat().filter(t => !isSecondaryIneligibleName(t.name));
+  const pTechs = primary.flat().filter(t => !eligibleOnly || t.status !== 'off');
+  const sTechs = secondary.flat().filter(t => (!eligibleOnly || t.status !== 'off') && !isSecondaryIneligibleName(t.name));
   const ids = [...new Set([...pTechs, ...sTechs].map(t => t.id))];
   const state = await batchTechSlotState(db, ids, dateStr, dow, tz);
   const free = t => state.get(t.id)?.keys.has(slotKey) && !state.get(t.id).booked.has(slotKey);
@@ -3345,9 +3345,9 @@ async function pickAvailableTechPair(db, scopesPrimary, scopesSecondary, dateStr
   return { primaryId: null, secondaryId: null };
 }
 
-async function pickOwnHelperPrimary(db, scopes, dateStr, slotKey, tz) {
+async function pickOwnHelperPrimary(db, scopes, dateStr, slotKey, tz, eligibleOnly = false) {
   const { techs, state } = await rosterSlotState(db, scopes, dateStr, dayOfWeekFor(dateStr), tz);
-  return techs.find(tech => bringsOwnSecondTech(tech.name) && state.get(tech.id)?.keys.has(slotKey) && !state.get(tech.id)?.booked.has(slotKey))?.id || null;
+  return techs.find(tech => (!eligibleOnly || tech.status !== 'off') && bringsOwnSecondTech(tech.name) && state.get(tech.id)?.keys.has(slotKey) && !state.get(tech.id)?.booked.has(slotKey))?.id || null;
 }
 
 // Pick a SECONDARY tech who is genuinely SCHEDULED to work AND free in this exact
@@ -3359,35 +3359,23 @@ async function pickOwnHelperPrimary(db, scopes, dateStr, slotKey, tz) {
 // free in any scope (caller leaves the 2nd-tech slot blank for manual assignment).
 async function pickScheduledSecondary(db, scopes, dateStr, slotKey, tz, excludeTechId = null) {
   if (!dateStr || !slotKey) return null;
-  const dow = dayOfWeekFor(dateStr);
-  for (const sc of scopes) {
-    if (!sc || !sc.bizId) continue;
-    let query = db.from('technicians').select('id, name')
-      .eq('business_id', sc.bizId).eq('active', true)
-      .order('created_at', { ascending: true });
-    if (sc.serviceAreaId) query = query.eq('service_area_id', sc.serviceAreaId);
-    const { data: techs } = await query;
-    for (const t of (techs || [])) {
-      if (excludeTechId && t.id === excludeTechId) continue;
-      if (isSecondaryIneligibleName(t.name)) continue;
-      const keys = await singleTechSlotKeys(db, t.id, dateStr, dow);
-      if (!keys.has(slotKey)) continue;                          // not scheduled this slot
-      const booked = await bookedSlotKeysForTech(db, sc.bizId, t.id, dateStr, tz);
-      if (!booked.has(slotKey)) return t.id;                     // scheduled + free → take
-    }
-  }
-  return null;
+  // Share the batched, metro-scoped picker. A missing area contributes no
+  // candidates, and a failed roster read must not look like an empty roster.
+  return pickAvailableTech(db, scopes, dateStr, slotKey, tz, excludeTechId, true, true);
 }
 
 // Resolve the default SECONDARY tech for a job. For a Dom's job the default is the
 // Handy Andy technician scheduled to work that day (same metro, roster order);
 // if none is scheduled+free, fall back to any tech scheduled+free that day (e.g.
 // the other Dom's tech). For a Handy Andy job, keep the existing pool-based pick.
-async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz, primaryTechId, pool2) {
-  const partner = await partnerBusiness(db, biz.slug);
+async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz, primaryTechId, pool2, eligibleOnly = false) {
+  // Phone bookings must use the same explicit team that offered the slot.
+  // Ordinary office bookings retain their existing partner-first default.
+  const partner = !eligibleOnly ? await partnerBusiness(db, biz.slug) : null;
   if (biz.slug === 'doms' && partner) {
-    const haArea  = await serviceAreaIdFromPostal(db, partner.id, postalCode);
-    const ownArea = await serviceAreaIdFromPostal(db, biz.id, postalCode);
+    const [haArea, ownArea] = await Promise.all([
+      serviceAreaIdFromPostal(db, partner.id, postalCode), serviceAreaIdFromPostal(db, biz.id, postalCode),
+    ]);
     return await pickScheduledSecondary(db, [
       { bizId: partner.id, serviceAreaId: haArea },   // Handy Andy first — the new default
       { bizId: biz.id,     serviceAreaId: ownArea },   // fallback: any available Dom's tech
@@ -3399,7 +3387,7 @@ async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz
   // pool-based partner auto-pick). strict: a silently off-schedule SECOND tech
   // is never acceptable — same doctrine as the Dom's branch above.
   const scopes2 = await rosterScopes(db, biz, (pool2 || '').toString(), postalCode);
-  return await pickAvailableTech(db, scopes2, dateStr, slotKey, tz, primaryTechId, true, true);
+  return await pickAvailableTech(db, scopes2, dateStr, slotKey, tz, primaryTechId, true, true, eligibleOnly);
 }
 
 async function singleTechSlotKeys(db, techId, dateStr, dow) {
@@ -3832,22 +3820,22 @@ async function bookingCreate(req, res, db, auth, body) {
       // secondary, when Steve-primary+TK-secondary would have worked). Match
       // the offered pair, not just the first primary candidate.
       const scopesSecondary = await rosterScopes(db, biz, (body.pool2 || '').toString(), effectivePostalCode);
-      const pair = await pickAvailableTechPair(db, scopes, scopesSecondary, body.scheduled_date, body.scheduled_slot, tz);
+      const pair = await pickAvailableTechPair(db, scopes, scopesSecondary, body.scheduled_date, body.scheduled_slot, tz, body.require_available === true);
       technician_id = pair.primaryId;
       if (pair.secondaryId) body.secondary_technician_id = pair.secondaryId; // resolved below; skips the redundant 'any' branch
       if (!technician_id) {
         // No valid pair — still try to staff SOMEONE for the primary role
         // alone rather than losing the booking entirely; the needs_lifting
         // check further down still refuses if a second tech is mandatory.
-        technician_id = body.needs_lifting ? await pickOwnHelperPrimary(db, scopes, body.scheduled_date, body.scheduled_slot, tz) : null;
-        if (!technician_id) technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true);
+        technician_id = body.needs_lifting ? await pickOwnHelperPrimary(db, scopes, body.scheduled_date, body.scheduled_slot, tz, body.require_available === true) : null;
+        if (!technician_id) technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, null, false, true, body.require_available === true);
       }
     } else {
       // excludeTechId=secondaryConcreteId so an 'any' primary can never land
       // on the exact person the office already picked as the second tech
       // (which used to trip the "must be different" refusal on a slot that
       // was, in fact, bookable with a different primary).
-      technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, secondaryConcreteId, false, true);
+      technician_id = await pickAvailableTech(db, scopes, body.scheduled_date, body.scheduled_slot, tz, secondaryConcreteId, false, true, body.require_available === true);
     }
     // The slot showed as available when the office picked it, but every tech
     // got booked in the meantime (a two-secretary race), or no ZIP/metro
@@ -3870,8 +3858,11 @@ async function bookingCreate(req, res, db, auth, body) {
   // "Meet your tech" block further down — one query serves both purposes.
   let primaryTechInfo = null;
   if (technician_id) {
-    const { data: pt, error } = await db.from('technicians').select('name, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
+    const { data: pt, error } = await db.from('technicians').select('name, active, status, photo_url, bio_years, bio_blurb').eq('id', technician_id).maybeSingle();
     if (error) throw error;
+    if (body.require_available === true && (!pt || pt.active === false || pt.status === 'off')) {
+      return res.status(409).json({ code: 'slot_unavailable', error: 'That technician is no longer available. Recheck the available times and choose another technician.' });
+    }
     primaryBringsOwnSecond = bringsOwnSecondTech(pt?.name);
     primaryTechInfo = pt || null;
   }
@@ -3891,13 +3882,16 @@ async function bookingCreate(req, res, db, auth, body) {
     // scheduled to work that day; otherwise the existing pool-based pick. Never
     // auto-picks Juan/Zach, and never picks a tech who isn't scheduled+free.
     secondary_technician_id = await resolveDefaultSecondary(
-      db, biz, effectivePostalCode, body.scheduled_date, body.scheduled_slot, tz, technician_id, body.pool2);
+      db, biz, effectivePostalCode, body.scheduled_date, body.scheduled_slot, tz, technician_id, body.pool2, body.require_available === true);
   }
   // Backstop: a concrete second tech (or one that slipped through) must never be
   // an out-of-town, primary-only tech (Juan/Zach). Verify by name before saving.
   if (secondary_technician_id) {
-    const { data: secTech, error } = await db.from('technicians').select('name').eq('id', secondary_technician_id).maybeSingle();
+    const { data: secTech, error } = await db.from('technicians').select('name, active, status').eq('id', secondary_technician_id).maybeSingle();
     if (error) throw error;
+    if (body.require_available === true && (!secTech || secTech.active === false || secTech.status === 'off')) {
+      return res.status(409).json({ code: 'slot_unavailable', error: 'The second technician is no longer available. Recheck the available times before booking.' });
+    }
     if (secTech && isSecondaryIneligibleName(secTech.name)) {
       return res.status(400).json({ error: `${secTech.name} can't be booked as a second technician. Pick another second tech or another time.` });
     }
