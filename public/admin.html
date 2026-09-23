@@ -1298,6 +1298,13 @@
   .gal-bulkbar .gal-bulk-del{background:#dc2626;color:#fff;}
   .gal-bulkbar .gal-bulk-clear{background:rgba(255,255,255,.18);color:#fff;margin-left:auto;}
   .gal-tabs{display:flex;gap:8px;margin-bottom:14px;}
+  /* Phone: a row of tab buttons becomes one dropdown (owner, 2026-09-23 --
+     same pattern as the Estimates folder picker). See tabsToSelect(). */
+  .mob-tabsel{display:none;}
+  @media(max-width:880px){
+    .mob-tabsrc{display:none !important;}
+    .mob-tabsel{display:block;width:100%;font-size:15px;font-weight:600;padding:9px 10px;border-radius:10px;margin:0 0 12px;}
+  }
   .gal-tab{background:#fff;border:1px solid var(--line);color:var(--mute);padding:7px 15px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;}
   .gal-tab.on{background:var(--accent);border-color:var(--accent);color:#fff;}
   .gal-count{background:rgba(0,0,0,.10);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:800;}
@@ -5695,7 +5702,7 @@ function drawGallery(){
     </div>` : '';
   view.innerHTML=`<div class="wrap">
     ${switcher}
-    <div class="gal-tabs">
+    <div class="gal-tabs" id="galMainTabs">
       ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
       ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryCounts?` <span class="gal-count">${galleryCounts.logo||0}</span>`:''}</button>`}
       ${(!crossBiz&&role==='owner')?`<button class="gal-tab ${jiyahView?'on':''}" data-g="jiyah" title="Photos Jiyah has sent, in one place -- only you can see this tab">🔒 Jiyah Photos${galleryCache.jiyah?` <span class="gal-count">${galleryCache.jiyah.photos.length}</span>`:''}</button>`:''}
@@ -5717,6 +5724,7 @@ function drawGallery(){
       : ''}
   </div>`;
   view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; gallerySelected.clear(); renderGallery(); }));
+  tabsToSelect(document.getElementById('galMainTabs'));
   view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{
     galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery();
     loadGalleryFolder(galleryGroup);   // no-op if this folder is already cached
@@ -10929,6 +10937,20 @@ function onScreen(name){
 function hubBackBar(){
   return `<button type="button" class="btn ghost sm" id="hubBack" style="margin-bottom:10px;width:auto;">← Back</button>`;
 }
+// Mirrors a row of tab buttons as a <select> shown only at phone width
+// (CSS .mob-tabsel/.mob-tabsrc); picking an option just clicks the matching
+// button, so every tab keeps its one existing click handler.
+function tabsToSelect(row){
+  if(!row) return;
+  const btns=[...row.querySelectorAll('button')];
+  if(btns.length<2) return;
+  row.classList.add('mob-tabsrc');
+  const sel=document.createElement('select');
+  sel.className='mob-tabsel'; sel.setAttribute('aria-label','Choose a tab');
+  btns.forEach((b,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=b.textContent.replace(/\s+/g,' ').trim(); if(b.classList.contains('on')) o.selected=true; sel.appendChild(o); });
+  sel.addEventListener('change',()=>btns[+sel.value].click());
+  row.insertAdjacentElement('afterend',sel);
+}
 async function renderHub(tabs, activeId, onPick){
   const view=document.getElementById('view');
   view.classList.toggle('calls-workspace',tabs===CALL_TABS);
@@ -10959,6 +10981,7 @@ async function renderHub(tabs, activeId, onPick){
   navigation.hidden=false;
   if(!onDefault) navigation.querySelector('#hubBack').addEventListener('click',()=>onPick(vis[0].id));
   navigation.querySelectorAll('[data-hub]').forEach(b=>b.addEventListener('click',()=>onPick(b.dataset.hub)));
+  tabsToSelect(navigation.querySelector('.hub-tabs'));
   await cur.render();
   return cur.id;
 }
