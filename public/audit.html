@@ -1208,7 +1208,7 @@ function visibleAnswers(){
   return out;
 }
 function scoreOf(a){
-  const v=Object.values(a.answers||{});
+  const v=Object.entries(a.answers||{}).filter(([k])=>!k.startsWith('cust_')).map(e=>e[1]);
   const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
   return (yes+no)?Math.round(100*yes/(yes+no)):null;
 }
@@ -1216,7 +1216,7 @@ function scoreOf(a){
 // not look as solid as one built on nine. Under 3 scored questions the number
 // is greyed and labelled, because a single answer swings it to 0 or 100.
 function scoreBasis(a){
-  const v=Object.values(a.answers||{});
+  const v=Object.entries(a.answers||{}).filter(([k])=>!k.startsWith('cust_')).map(e=>e[1]);
   const yes=v.filter(x=>x==='yes').length, no=v.filter(x=>x==='no').length;
   return {yes, n:yes+no};
 }
@@ -2157,24 +2157,32 @@ function qShow(){
   $('qSvc').querySelectorAll('button').forEach(b=>b.onclick=()=>{ qState.svc=b.dataset.s; qRenderQs(); });
   qRenderQs();
 }
+// Owner's call flow, 2026-09-24. Customer-outcome questions (cust_*) record
+// what happened, not how she did, so they never count toward the score.
+// Price accepted -> jump to the info check; refused -> the discount pair.
+const QFLOW=[
+  {k:'q_business_name', t:'Did she mention the business name?'},
+  {k:'q_scoping', t:'Did she ask the zip code, TV size, bracket, fireplace, wall type and wire concealment?'},
+  {k:'q_good_day', t:'Did she say “What’s a good day for you?”'},
+  {k:'cust_agreed_date', t:'Did the customer agree to a date?', cust:true},
+  {k:'q_price_words', t:'Did she say the price WITHOUT the words “hundred”, “thousand”, “cents” or “dollars”?'},
+  {k:'cust_accepted_price', t:'Did the customer accept the price?', cust:true},
+  {k:'q_discount_source', t:'Did she give the “Where did you hear about us?” discount?', show:a=>a.cust_accepted_price==='no'},
+  {k:'cust_accepted_discount', t:'Did the customer accept the discount?', cust:true, show:a=>a.cust_accepted_price==='no'},
+  {k:'q_info_correct', t:'Was all the customer’s information filled in correctly?'},
+  {k:'q_explained_comms', t:'Did she explain the texts and emails they’ll get, and ask “Is there anything else?”'},
+];
+QFLOW.forEach(q=>{ KEY_TEXT[q.k]=q.t; });
+function qVisible(){ return QFLOW.filter(q=>!q.show||q.show(qState.answers)); }
 function qRenderQs(){
   $('qSvc').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.s===qState.svc));
-  // SECTIONS' `when` checks read the form's service picker, so point it at ours.
-  if($('fSvc')) $('fSvc').value=qState.svc;
-  let h='';
-  SECTIONS.forEach(s=>{
-    if(s.when && !s.when(null)) return;
-    h+='<div class="qw-sec">'+esc(s.name)+(s.cond?' <span class="sub">('+esc(s.cond)+')</span>':'')+'</div>';
-    s.qs.forEach(q=>{
-      const v=qState.answers[q.k];
-      h+='<div class="q"><div class="qt">'+esc(q.t)+'</div><div class="yna" data-qk="'+q.k+'">'+
-        [['yes','Yes'],['no','No'],['na','N/A']].map(([val,lab])=>'<button type="button" data-v="'+val+'"'+(v===val?' class="on-'+val+'"':'')+'>'+lab+'</button>').join('')+'</div></div>';
-    });
-  });
-  $('qQs').innerHTML=h;
+  $('qQs').innerHTML=qVisible().map((q,i)=>{
+    const v=qState.answers[q.k];
+    return '<div class="q"><div class="qt"><b>'+(i+1)+'.</b> '+(q.cust?'<span class="pill" style="background:#eef2ff;color:#3730a3;">Customer</span> ':'')+esc(q.t)+'</div><div class="yna" data-qk="'+q.k+'">'+
+      [['yes','Yes'],['no','No']].map(([val,lab])=>'<button type="button" data-v="'+val+'"'+(v===val?' class="on-'+val+'"':'')+'>'+lab+'</button>').join('')+'</div></div>';
+  }).join('');
   $('qQs').querySelectorAll('[data-qk]').forEach(g=>g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-    qState.answers[g.dataset.qk]=b.dataset.v;
-    g.querySelectorAll('button').forEach(x=>x.className=x===b?'on-'+b.dataset.v:'');
+    qState.answers[g.dataset.qk]=b.dataset.v; qRenderQs();
   }));
 }
 async function qSave(){
@@ -2183,10 +2191,9 @@ async function qSave(){
   if(missing.length){ err.textContent='Give a star rating for: '+missing.map(m=>m[1]).join(', ')+'.'; err.scrollIntoView({block:'center'}); return; }
   const flagged=$('qFlag').checked;
   if(flagged && !$('qWhy').value.trim()){ err.textContent='Say why Andrew should listen.'; $('qWhy').focus(); return; }
-  // Only questions visible for the chosen service are saved.
-  if($('fSvc')) $('fSvc').value=qState.svc;
-  const keep=new Set(); SECTIONS.forEach(s=>{ if(!s.when||s.when(null)) s.qs.forEach(q=>keep.add(q.k)); });
-  const answers={}; Object.entries(qState.answers).forEach(([k,v])=>{ if(keep.has(k)) answers[k]=v; });
+  const vis=qVisible(), unanswered=vis.filter(q=>!qState.answers[q.k]);
+  if(unanswered.length){ err.textContent='Answer every question (question '+(vis.indexOf(unanswered[0])+1)+' is empty).'; err.scrollIntoView({block:'center'}); return; }
+  const answers={}; vis.forEach(q=>{ answers[q.k]=qState.answers[q.k]; });
   const who=qWho(r);
   const body={
     from_queue:true, business:qSlug(r),

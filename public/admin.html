@@ -17278,7 +17278,7 @@ function cwNewDraft(){
     // Customer details typed on the booking card. They were only ever read out
     // of the DOM at submit, so tapping Back (or any repaint) wiped the name,
     // phone, email and address and the secretary had to retype all of it.
-    cust:{ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:false },   // text consent starts OFF: tick only after the customer's verbal yes (A2P)
+    cust:{ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true },   // owner, 2026-09-24: texts box starts ON for every caller; untick only if they ask
     // Discount state, only ever populated on the "customer pushed back" branch.
     // econ holds the server's profit projection for THIS quote, which is what
     // caps how much can be given away.
@@ -19717,7 +19717,7 @@ async function renderCallWiz(){
   if(s==='customer'){
     const disc=cwDiscountApplied();
     const isTv=callWiz.service==='TV Mounting';
-    if(!callWiz.cust) callWiz.cust={ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:false };
+    if(!callWiz.cust) callWiz.cust={ name:'', phone:'', email:'', addr:'', city:'', state:'', pay:null, skipCard:false, sms:true };
     const c=callWiz.cust;
     const payVal=c.pay!==null ? c.pay : (isTv?'card':'');
     let whenTxt='';
