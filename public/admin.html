@@ -12318,6 +12318,12 @@ function callEarlierRow(r){
 function callCard(r,handled,g){
   const isLive=r.kind==='live';
   const isTracked=r.source==='twilio';
+  // "Line they called" has to be worked out BEFORE the facts list below is
+  // built -- it used to be set further down, after the list had already
+  // rendered, so the row always read "-" (Heather, 2026-09-24). fmtPhone()
+  // already wraps the area code in parens, so no extra parens around it.
+  { const ll=shortTrackingLabel(r.tracking_label), dn=isTracked&&r.grasshopper_number?fmtPhone(r.grasshopper_number):null;
+    r._calledLine=(ll&&ll!==r.business?.name)?(dn?ll+' · '+dn:ll):(dn||null); }
 
   // The 4 boxes (owner spec, 2026-08-26): Left a voicemail / Contacted /
   // Location / Recorded a message. contacted/left_voicemail/recorded_message

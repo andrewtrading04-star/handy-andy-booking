@@ -212,6 +212,7 @@ async function handleTwilioStatus(req, res) {
         await db.from('messages')
           .update({ status, error: errCode ? `Twilio ErrorCode ${errCode}` : 'Carrier did not deliver' })
           .eq('id', t.message_id);
+        if (errCode === '30034') await rescueUnregisteredAutoText(db, t.message_id);
       }
     }
   } catch (e) {
@@ -725,6 +726,31 @@ async function missedCallTextAfterDial(params, dialStatus) {
     await job;
   } catch (e) {
     console.error('[missed_call_text] failed:', e && e.message);
+  }
+}
+
+// 30034 = the carrier refused a text because the sending number isn't in an
+// approved A2P campaign. Owner report 2026-09-24: the Austin line's missed-call
+// text died this way. When an AUTOMATED text from a tracking line hits it:
+// switch that line to send from the toll-free from now on
+// (missed_call_via_tollfree, the same switch Dom's uses) and resend this one
+// text once from the toll-free, so the customer still gets it. Never throws.
+async function rescueUnregisteredAutoText(db, messageId) {
+  try {
+    const tollfree = tenDigits(process.env.TWILIO_PHONE_NUMBER || '');
+    const { data: m } = await db.from('messages').select('id, business_id, customer_phone, customer_id, our_phone, body, sent_by').eq('id', messageId).maybeSingle();
+    if (!m || m.sent_by !== 'automated' || !tollfree || m.our_phone === tollfree) return;
+    await db.from('tracking_numbers').update({ missed_call_via_tollfree: true }).eq('phone', m.our_phone);
+    const { data: row } = await db.from('messages').insert({
+      business_id: m.business_id, customer_phone: m.customer_phone, customer_id: m.customer_id,
+      our_phone: tollfree, direction: 'out', body: m.body, status: 'queued', sent_by: 'automated',
+    }).select('id').single();
+    if (!row) return;
+    const r = await sendSMSResult(m.customer_phone, m.body, { from: tollfree });
+    await db.from('messages').update(r.ok ? { status: 'sent', twilio_sid: r.sid || null } : { status: 'failed', error: r.error || 'not sent' }).eq('id', row.id);
+    console.log(`[sms_status] 30034 on line ...${String(m.our_phone).slice(-4)}: switched it to toll-free, resent ${r.ok ? 'ok' : 'FAILED'}`);
+  } catch (e) {
+    console.error('[sms_status] 30034 rescue failed:', e.message);
   }
 }
 
