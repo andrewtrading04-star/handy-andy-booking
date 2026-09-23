@@ -177,7 +177,9 @@ for(const kind of ['booking','estimate'])test(`uncertain ${kind} then definitive
 });
 test('a lost staffing slot sends the secretary back to scheduling with contact details preserved',async()=>{
   const f=setup();const run=f.ctx.cwSubmitBooking();await flush();assert.equal(f.requests[0].body.require_available,true);
+  let aborted=false;f.draft._calendarRequest={controller:{abort(){aborted=true;}}};f.draft._calendarSnapshot={slots_by_date:{}};
   f.requests[0].reject(Object.assign(new Error('Choose another time'),{status:409,code:'slot_unavailable'}));await run;
+  assert.equal(aborted,true);assert.equal(f.draft._calendarRequest,null);assert.equal(f.draft._calendarSnapshot,null);
   assert.equal(f.draft.step,'schedule');assert.equal(f.draft.selectedSlot,null);assert.equal(f.draft._slotVerifiedKey,null);assert.equal(f.node('cwCustPhone').value,'2025550147');
 });
 test('fractional displayed totals retain cents instead of rounding up the customer price',()=>{

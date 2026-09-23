@@ -272,7 +272,7 @@ test('every offered source, coupon and manual discount speaks its amount as befo
   for(const fractional of [false,true])for(const [name,startMarker] of [
     ['source',"    if(rung==='source'){"],['coupon',"    if(rung==='coupon'){"],['manual','    const committed=(Number(callWiz.discManual)||0)>0;'],
   ]){
-    const start=html.indexOf(startMarker),end=html.indexOf('body.innerHTML=',start);
+    const start=html.indexOf(startMarker),end=html.indexOf(name==='coupon'?'      // Yes or no first.':'body.innerHTML=',start);
     assert(start>=0&&end>start);
     const c=vm.createContext({rung:name,callWiz:{discSource:'Google',discCoupon:{code:'SAVE',amount:10},discManual:10},CW_SOURCE_DISCOUNT:10,
       econState:'ready',spend:{max:40,remaining:10,eff:{source:10,coupon:10}},room:10,delta:10,cents:fractional,

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {isHoustonBooking} from '../api/_lib/houston-bonus.js';
+import {hasDigits} from '../api/_lib/address.js';
+import {textConsentFor} from '../api/_lib/sms.js';
 
 const source=fs.readFileSync(new URL('../api/admin.js',import.meta.url),'utf8').replaceAll('\r\n','\n');
 function cut(start,end){const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,`Source boundary: ${start}`);return source.slice(a,b);}
@@ -25,7 +27,7 @@ function database(run){
 function context(extra={}){
   return vm.createContext({console:silent,Date,Set,Map,Promise,URLSearchParams,AbortController,setTimeout,clearTimeout,
     resolveBusiness:async()=>({id:'biz-1',slug:'doms',name:"Dom's"}),bail:(res,e)=>res.status(e.status||500).json({error:e.message}),
-    adminAuthorName:()=> 'Office',...extra});
+    adminAuthorName:()=> 'Office',textConsentFor,hasDigits,...extra});
 }
 const callSource=cut("const CALL_RESOLUTIONS =",'// Block a caller number')+
   cut('async function callLiveStart(', '// ── Click-to-call bridge')+

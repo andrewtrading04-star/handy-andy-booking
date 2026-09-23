@@ -2484,7 +2484,7 @@ let availViewSlug = null;      // which business the Availability tab is viewing
 const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
 // ── API helper ───────────────────────────────────────────────────────────
-async function api(action, { method='GET', params={}, body=null, timeoutMs=45000, authToken=null } = {}) {
+async function api(action, { method='GET', params={}, body=null, timeoutMs=45000, authToken=null, signal=null } = {}) {
   const url = new URL(API, location.origin);
   url.searchParams.set('action', action);
   for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
@@ -2497,6 +2497,9 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   // connection eventually gives up and lets the UI recover.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const cancel=()=>ctrl.abort();
+  if(signal?.aborted) ctrl.abort();
+  else signal?.addEventListener('abort',cancel,{once:true});
   // authToken: send a different session than the current one (View As -> Jiyah
   // needs the stashed OWNER token while this tab is running as a secretary).
   const sent=authToken||token;   // the session this request goes out with (see the 401 branch)
@@ -2507,13 +2510,17 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
       headers: { 'Content-Type':'application/json', ...(sent && { Authorization:`Bearer ${sent}` }) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
+      ...(['available_dates','available_slots'].includes(action) && {cache:'no-store'}),
     });
     // Keep the deadline active while downloading the body as well as headers.
     data = await res.json().catch(e=>{ if(e.name==='AbortError') throw e; return {}; });
   } catch (e) {
-    throw e.name === 'AbortError' ? new Error('Request timed out — check your connection and try again.') : e;
+    if(signal?.aborted) { const cancelled=new Error('Request cancelled'); cancelled.name='AbortError'; throw cancelled; }
+    if(e.name==='AbortError') { const timeout=new Error('Request timed out — check your connection and try again.'); timeout.code='request_timeout'; throw timeout; }
+    throw e;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort',cancel);
   }
   // A 401 on an AUTHENTICATED call means the saved token is stale — log out and
   // prompt re-login. But a 401 from the login / session_status calls is just a
@@ -2770,7 +2777,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 function dismissAllOverlays(){
   const step=fn=>{ try{ fn(); }catch(_){} };
   step(()=>cwCaptureQuote());
-  step(()=>{ if(callWiz){ callWiz._visible=false; callWiz._view++; } });
+  step(()=>{ if(callWiz){ callWiz._visible=false; callWiz._view++; callWiz._calendarRequest?.controller.abort(); callWiz._slotRequestController?.abort(); } });
   step(()=>nbStopProgressTimer());
   step(()=>{ nbModalSession++; });   // in-flight New Booking submits must not re-hide/re-show #modal later
   ['modal','callWizModal','bkModal','availModal','custModal','custDetailModal','estModal','lightbox','viewAsPopover']
@@ -17426,6 +17433,7 @@ function closeCallWiz(opts, draft=callWiz){
   if(draft._ending && !(opts&&opts.resolved)) return;
   cwCaptureQuote(draft);
   draft._visible=false; draft._view++;
+  draft._calendarRequest?.controller.abort(); draft._slotRequestController?.abort();
   document.getElementById('callWizModal').classList.add('hidden');
   // A RESOLVED call must be marked resolved on the local object, not just on the
   // server row. `resolution` was read in two places and assigned in none, so it
@@ -18564,6 +18572,7 @@ async function cwSubmitBooking(){
     failure=error;
     if(error.status>=400 && error.status<500 && error.status!==401) draft._bookingAttempt=null;
     if(error.code==='slot_unavailable'){
+      draft._calendarRequest?.controller.abort(); draft._calendarRequest=null; draft._calendarSnapshot=null;
       draft._slotVerifiedKey=null;draft.selectedSlot=null;draft.step='schedule';cwInvalidatePrice(draft);
     }
   }finally{
@@ -18661,7 +18670,7 @@ function cwScheduleParams(draft=callWiz){
   // technicianId: null unless the secretary picked one on the calendar screen
   // (owner rule 2026-09-23) -- 'any' keeps the exact autofill behavior this
   // already had, a real id narrows the calendar/slots to just that person.
-  const params={business:draft.business,technician_id:draft.technicianId||'any',pool:'own'};
+  const params={business:draft.business,technician_id:draft.technicianId||'any',pool:'own',strict_roster:'1'};
   if(draft.zip) params.postal_code=draft.zip;
   const mode=nbSecondTechMode(), lifting=nbSelectedLiftingKind();
   if(draft.service==='TV Mounting' && (mode==='mandatory' || (mode==='optional' && (lifting==='cannot'||lifting==='big')))){
@@ -18672,6 +18681,43 @@ function cwScheduleParams(draft=callWiz){
 function cwScheduleKey(draft=callWiz){ return JSON.stringify(cwScheduleParams(draft)); }
 function cwSlotIsVerified(draft=callWiz){
   return !!(draft && draft.prefDate && draft.selectedSlot && draft._slotVerifiedKey===cwScheduleKey(draft)+'|'+draft.prefDate+'|'+draft.selectedSlot.key);
+}
+// Only these read-only scheduling requests may retry. A booking/payment is
+// never replayed here. Short deadlines cover the response body as well.
+async function cwAvailabilityRead(action,params,{signal,valid=()=>true}={}){
+  if(!['available_dates','available_slots'].includes(action)) throw new Error('Invalid availability request');
+  for(let attempt=0;attempt<2;attempt++){
+    if(signal?.aborted || !valid()) { const e=new Error('Request cancelled'); e.name='AbortError'; throw e; }
+    try{ return await api(action,{params,timeoutMs:8000,signal}); }
+    catch(e){
+      const transient=e.name==='TypeError' || e.code==='request_timeout' || [408,429,500,502,503,504].includes(e.status);
+      if(attempt || !transient || signal?.aborted || !valid()) throw e;
+    }
+  }
+}
+function cwMonthAvailability(draft,month){
+  const scope=cwScheduleKey(draft), params={...cwScheduleParams(draft),month,include_slots:'1'}, key=JSON.stringify(params);
+  const cached=draft._calendarRequest;
+  if(cached?.key===key && !cached.controller.signal.aborted && (cached.pending || Date.now()-cached.at<15000)) return cached.promise;
+  cached?.controller.abort();
+  const entry={key,at:Date.now(),controller:new AbortController(),pending:true};
+  draft._calendarRequest=entry;
+  entry.promise=cwAvailabilityRead('available_dates',params,{signal:entry.controller.signal,
+    valid:()=>cwIsActive(draft) && cwScheduleKey(draft)===scope})
+    .then(data=>{
+      if(!Array.isArray(data.dates)) throw new Error('The calendar returned an incomplete response. Please retry.');
+      entry.pending=false;
+      return {...data,_checkedAt:entry.at,_scope:scope,_month:month};
+    }).catch(error=>{if(draft._calendarRequest===entry)draft._calendarRequest=null;throw error;});
+  return entry.promise;
+}
+function cwFreshMonthSlots(draft,date){
+  const snapshot=draft._calendarSnapshot;
+  if(!snapshot || snapshot._scope!==cwScheduleKey(draft) || snapshot._month!==date.slice(0,7) || Date.now()-snapshot._checkedAt>=15000) return null;
+  const slots=snapshot.slots_by_date?.[date];
+  if(!Array.isArray(slots) || slots.some(s=>!s || typeof s.slot_key!=='string' || typeof s.label!=='string' || !/^\d{2}:\d{2}$/.test(s.start))) return null;
+  const today=cwScheduleToday(draft), now=new Intl.DateTimeFormat('en-GB',{timeZone:cwScheduleTimezone(draft),hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+  return {...snapshot,slots:slots.filter(s=>date>today || (date===today && s.start>now))};
 }
 // The Frame/Gallery stepper, asked after size and before brackets. Capped at the
 // number of TVs on the job — a frame TV is one of those TVs, not an extra one.
@@ -18729,6 +18775,8 @@ async function renderCallWiz(){
   document.getElementById('callWizEndBtn').disabled=!!draft._ending;
   if(draft._ending) return;
   const view=++draft._view;
+  draft._slotRequestController?.abort();
+  if(!['tvopts','schedule'].includes(draft.step)) draft._calendarRequest?.controller.abort();
   const isHere=()=>cwIsActive(draft,view);
   const body=document.getElementById('callWizBody');
   body.setAttribute('aria-busy','false');
@@ -18934,6 +18982,9 @@ async function renderCallWiz(){
     }
     const card=cards[callWiz.optStep];
     const tvCount=nbTotalTvs();
+    // Warm the calendar while the final question is being answered. Its scope
+    // includes the ZIP, selected technician and lifting requirement.
+    if(callWiz.optStep===cards.length-1) cwMonthAvailability(draft,cwScheduleToday(draft).slice(0,7)).catch(()=>{});
 
     let optsHtml, blocked=null;
     if(card.kind==='wire-overlap'){
@@ -19076,8 +19127,8 @@ async function renderCallWiz(){
     body.innerHTML=`${callWizScript("What's a good day for you?")}
       <div style="display:flex;align-items:center;gap:6px;margin:-2px 0 8px;font-size:11.5px;color:var(--mute);">
         <label for="cwTechPick" style="white-space:nowrap;">Select the technician</label>
-        <select id="cwTechPick" style="flex:none;max-width:180px;font-size:11.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2);background:#fff;">
-          <option value="">Auto-assign</option>
+        <select id="cwTechPick" disabled style="flex:none;max-width:180px;font-size:11.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2);background:#fff;">
+          <option value="">Auto-assign</option>${draft.technicianId?`<option value="${esc(draft.technicianId)}" selected>${esc((draft._scheduleTechnicians||[]).find(t=>t.id===draft.technicianId)?.name||'Selected technician')}</option>`:''}
         </select>
       </div>
       <div id="cwCalWrap" style="width:100%;min-width:0;background:#0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
@@ -19090,6 +19141,7 @@ async function renderCallWiz(){
         <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
       </div>
       <div id="cwTimeZone" style="margin-top:7px;font-size:12px;color:var(--mute);">All times are in ${esc(cwScheduleZoneLabel(draft))}.</div>
+      <div id="cwAvailabilityScope" style="margin-top:3px;font-size:12px;color:var(--mute);"></div>
       <div id="cwCalNote" style="display:none;background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:11px 13px;margin-top:9px;font-size:12.5px;line-height:1.55;color:#9a3412;"></div>
       <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
         <div id="cwSlotAsk" style="margin-bottom:8px;">${callWizScript('Would you prefer morning or afternoon?').replace('margin-bottom:12px','margin-bottom:0')}</div>
@@ -19111,6 +19163,20 @@ async function renderCallWiz(){
       document.getElementById('cwTimeZone').textContent=`All times are in ${cwScheduleZoneLabel(draft)}.`;
     };
     let cwCalSeq=0;
+    function showTechnicians(techs){
+      if(!Array.isArray(techs)) return;
+      draft._scheduleTechnicians=techs;
+      draft._scheduleRosterKey=JSON.stringify([draft.business,draft.zip]);
+      const sel=document.getElementById('cwTechPick');
+      sel.innerHTML='<option value="">Auto-assign</option>'+techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
+        (draft.technicianId && !techs.some(t=>t.id===draft.technicianId)?`<option value="${esc(draft.technicianId)}">Selected technician unavailable</option>`:'');
+      sel.value=draft.technicianId||''; sel.disabled=false;
+      const selected=techs.find(t=>t.id===draft.technicianId);
+      document.getElementById('cwAvailabilityScope').textContent=draft.technicianId
+        ? `Availability for ${selected?.name||'the selected technician'} only.`
+        : 'Availability across eligible technicians in this service area.';
+    }
+    if(draft._scheduleRosterKey===JSON.stringify([draft.business,draft.zip])) showTechnicians(draft._scheduleTechnicians);
     async function loadCwCalendar(){
       if(!scheduleHere()) return;
       const mySeq=++cwCalSeq;
@@ -19120,10 +19186,12 @@ async function renderCallWiz(){
       document.getElementById('cwCalNote').style.display='none';
       const params={...cwScheduleParams(draft),month:cwMonthKey(draft.calMonth)};
       try{
-        const r=await api('available_dates',{ params });
+        const r=await cwMonthAvailability(draft,params.month);
         if(!scheduleHere() || mySeq!==cwCalSeq) return;
         if(!Array.isArray(r.dates)) throw new Error('The calendar returned an incomplete response. Please retry.');
         readTimezone(r);
+        draft._calendarSnapshot=r;
+        showTechnicians(r.technicians);
         const today=cwScheduleToday(draft);
         callWiz.availDates=new Set(r.dates.filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d) && d.startsWith(params.month+'-') && d>=today));
         // A blank month has several very different causes and they all used to
@@ -19132,8 +19200,10 @@ async function renderCallWiz(){
         callWiz.calArea=r.area||callWiz.areaName||null;
       }catch(e){
         if(!scheduleHere() || mySeq!==cwCalSeq) return;
+        draft._calendarSnapshot=null; clearSlot(); ++cwSlotSeq; cwSlotController?.abort();
+        document.getElementById('cwSlotsWrap').style.display='none';
         callWiz.availDates=new Set();
-        callWiz.calReason='error'; callWiz.calError=e.message||'';
+        callWiz.calReason='error'; callWiz.calError=e.name==='TypeError'?'The connection dropped. Retry to check availability.':e.message||'';
       }
       renderCwCalendarGrid();
     }
@@ -19152,7 +19222,7 @@ async function renderCallWiz(){
         const cls=avail?(ds===callWiz.prefDate?'avail sel':'avail'):'off';
         html+=`<button type="button" class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:'disabled'} aria-label="${esc(ds)}" style="font-family:inherit;padding:0;${avail?'':'background:transparent;'}">${d}</button>`;
       }
-      grid.innerHTML=html;
+      grid.innerHTML=callWiz.calReason==='error'?'<div role="alert" style="grid-column:1/8;text-align:center;padding:16px;">Availability has not been checked.</div>':html;
       // Nothing open this month: say WHY, with the line to read out loud. A
       // silent grid of grey read as a broken screen and cost a whole call.
       const note=document.getElementById('cwCalNote');
@@ -19163,6 +19233,7 @@ async function renderCallWiz(){
           R==='zip_not_covered' ? `<b>We don't cover ${esc(callWiz.zip||'that zip')} yet.</b> Take their details and send an estimate — the office can follow up if we open the area.`
           : R==='area_unstaffed' ? `<b>No technician in ${esc(area)} yet.</b> This zip is on the map but unstaffed, so there's nothing to book. Send an estimate instead.`
           : R==='no_techs_in_area' ? `<b>No technician is assigned to ${esc(area)}.</b> Nothing can be booked here until someone covers it — send an estimate and tell the office.`
+          : R==='technician_unavailable' ? '<b>This technician is not available in this service area.</b> Choose Auto-assign or another technician.'
           : R==='error' ? `<b>Couldn't load the calendar.</b> ${esc(callWiz.calError||'')} <button type="button" class="btn ghost sm" id="cwCalRetry" style="margin-top:8px;">Retry calendar</button>`
           : `<b>Nothing open in ${esc(callWiz.calMonth.toLocaleDateString('en-US',{month:'long'}))}.</b> Try the next month with ›, or send an estimate.`;
         note.style.display=R?'':'none';
@@ -19183,6 +19254,7 @@ async function renderCallWiz(){
       }));
     }
     let cwSlotSeq=0;
+    let cwSlotController=null;
     async function loadCwSlots(date){
       // Same guard the calendar above already has: click date A then date B and
       // A's slower reply used to repaint B's list with A's times, so the
@@ -19190,6 +19262,7 @@ async function renderCallWiz(){
       // open on the date the booking is then submitted with.
       if(!scheduleHere() || date!==draft.prefDate) return;
       const mySeq=++cwSlotSeq, previousSlot=draft.selectedSlot;
+      cwSlotController?.abort(); cwSlotController=new AbortController(); draft._slotRequestController=cwSlotController;
       clearSlot();
       const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
       wrap.style.display='';
@@ -19198,7 +19271,7 @@ async function renderCallWiz(){
       const params={...cwScheduleParams(draft),date};
       const slotsHere=()=>scheduleHere() && mySeq===cwSlotSeq && date===draft.prefDate;
       try{
-        const r=await api('available_slots',{ params });
+        const r=cwFreshMonthSlots(draft,date) || await cwAvailabilityRead('available_slots',params,{signal:cwSlotController.signal,valid:slotsHere});
         if(!slotsHere()) return;
         if(!Array.isArray(r.slots) || r.slots.some(s=>!s || typeof s.slot_key!=='string' || typeof s.label!=='string')) throw new Error('The times returned an incomplete response. Please retry.');
         readTimezone(r);
@@ -19254,37 +19327,17 @@ async function renderCallWiz(){
       if(!scheduleHere() || (delta<0 && cwMonthKey(draft.calMonth)<=cwScheduleToday(draft).slice(0,7))) return;
       draft.calMonth.setDate(1); draft.calMonth.setMonth(draft.calMonth.getMonth()+delta);
       draft.prefDate=''; clearSlot(); ++cwSlotSeq;
+      cwSlotController?.abort();
       document.getElementById('cwSlotsWrap').style.display='none';
       loadCwCalendar();
     };
     document.getElementById('cwCalPrev').addEventListener('click', ()=>changeMonth(-1));
     document.getElementById('cwCalNext').addEventListener('click', ()=>changeMonth(1));
-    // "Select the technician" (owner rule 2026-09-23): really small, optional --
-    // left alone it stays "Auto-assign" and nothing about booking changes. Roster
-    // is the SAME zip-filtered list New Booking's own tech dropdown uses
-    // (service_area_id === nbZipAreaId, set by checkZip() earlier in this same
-    // wizard), so it follows the exact same city rule -- Houston only offers
-    // Juan, Austin only offers Zach, etc. Picking one re-renders this step,
-    // which (via cwScheduleKey depending on cwScheduleParams) naturally clears
-    // whatever date/time was picked under the OLD scope and re-fetches for the
-    // new one -- same mechanism the after-the-fact TV-option changes already use.
-    (async()=>{
-      const sel=document.getElementById('cwTechPick'); if(!sel) return;
-      let techs=[];
-      try{
-        const {tech}=await nbEnsureDataCached(draft.business);
-        // Same roster + same zip-metro filter New Booking's own tech dropdown
-        // uses (nbFilterOwn), including its fallback: if the zip match comes up
-        // empty, show everyone rather than an empty (and confusing) picker.
-        techs=nbFilterOwn((tech&&tech.technicians)||[]);
-      }catch(_){ return; }
-      if(!scheduleHere() || document.getElementById('cwTechPick')!==sel) return;
-      sel.innerHTML='<option value="">Auto-assign</option>'+
-        techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
-      sel.value=draft.technicianId||'';
-    })();
+    // The calendar response supplies the exact server-filtered ZIP roster.
+    // There is no separate services/technicians fetch or all-metros fallback.
     document.getElementById('cwTechPick').addEventListener('change',e=>{
       if(!scheduleHere()) return;
+      cwSlotController?.abort();
       draft.technicianId=e.target.value||null;
       cwTrack('technician_picked',{technician_id:draft.technicianId||'any'});
       renderCallWiz();

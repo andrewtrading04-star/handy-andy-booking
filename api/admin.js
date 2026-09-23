@@ -2896,7 +2896,7 @@ async function availableSlots(req, res, db, auth) {
   // a pair: we look for two DISTINCT free techs below.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
   const primaryAny = !techId || techId === 'any';
-  const allowOwnHelper = wantPair && primaryAny && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
+  const allowOwnHelper = wantPair && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
 
   // The primary side's full roster + per-tech slot state, fetched ONCE. It's
   // needed to answer "is anyone free" whenever the primary is "any" tech, AND
@@ -2906,16 +2906,25 @@ async function availableSlots(req, res, db, auth) {
   // thrown away, then recomputed from scratch a few lines later — the actual
   // cost behind every slow date-click on "Any Technician"). Resolved alongside
   // the secondary scope (independent lookup) instead of after it.
-  const [primaryRSS, scopesSecondary] = await Promise.all([
+  const [rosterState, scopesSecondary] = await Promise.all([
     rosterSlotState(db, scopesPrimary, dateStr, dow, tz)
       .catch(e => { console.warn('[available_slots] roster/slot-state lookup failed:', e.message); return null; }),
     wantPair ? ((req.query.pool2 || '') === (req.query.pool || '') ? Promise.resolve(scopesPrimary)
       : rosterScopes(db, biz, (req.query.pool2 || '').toString(), postalCode, bookingAreaId)) : Promise.resolve(null),
   ]);
+  const primaryRSS = rosterState && req.query.strict_roster === '1'
+    ? {...rosterState, techs:rosterState.techs.filter(t=>t.status!=='off')} : rosterState;
+
+  // Reuse the already-fetched state when a concrete tech is picked. Phone
+  // bookings must stay inside the ZIP roster; an unavailable roster is an
+  // error, never permission to broaden the search to another technician.
+  if (req.query.strict_roster === '1' && !primaryRSS) throw new Error('Could not check the technician roster. Please retry.');
+  const primaryState = primaryRSS && (primaryAny || primaryRSS.state.has(techId) || req.query.strict_roster === '1')
+    ? { ...primaryRSS, techs: primaryRSS.techs.filter(t => primaryAny || t.id === techId) } : null;
 
   let keys;
   if (!wantPair) {
-    keys = (primaryAny && primaryRSS) ? freeKeysFromState(primaryRSS)
+    keys = primaryState ? freeKeysFromState(primaryState)
       : await availableSlotKeys(db, scopesPrimary, techId, dateStr, dow, tz);
   } else {
     // Two-technician job (e.g. a large-TV lift): only offer slots where a
@@ -2924,7 +2933,7 @@ async function availableSlots(req, res, db, auth) {
     // a (possibly different) company pool. The two sides are unrelated, so
     // fetch them concurrently rather than one after the other.
     const [pMap, sMap] = await Promise.all([
-      (primaryAny && primaryRSS) ? Promise.resolve(freeMapFromState(primaryRSS))
+      primaryState ? Promise.resolve(freeMapFromState(primaryState))
         : freeSlotTechMap(db, scopesPrimary, techId, dateStr, dow, tz),
       // Ineligible-secondary filter on the SECOND-tech side so an "Any <company>"
       // pick never offers a slot only Juan/Zach can cover.
@@ -2942,7 +2951,7 @@ async function availableSlots(req, res, db, auth) {
     }
     if (allowOwnHelper) {
       const ownHelperState = primaryRSS || await rosterSlotState(db, scopesPrimary, dateStr, dow, tz);
-      for (const key of freeKeysFromState({ ...ownHelperState, techs: ownHelperState.techs.filter(t => bringsOwnSecondTech(t.name)) })) keys.add(key);
+      for (const key of freeKeysFromState({ ...ownHelperState, techs: ownHelperState.techs.filter(t => (primaryAny || t.id === techId) && bringsOwnSecondTech(t.name)) })) keys.add(key);
     }
   }
   // Drop slots that have already started, but only for TODAY (in the same
@@ -3054,14 +3063,6 @@ async function bookedSlotKeysForTech(db, bizId, techId, dateStr, tz, excludeId =
 async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
   const out = new Map(); techIds.forEach(id => out.set(id, { keys: new Set(), booked: new Set() }));
   if (!techIds.length) return out;
-  const [avR, excR] = await Promise.all([
-    db.from('technician_availability').select('technician_id, slot_key').in('technician_id', techIds).eq('day_of_week', dow),
-    db.from('technician_availability_exceptions').select('technician_id, slot_key, is_available').in('technician_id', techIds).eq('exception_date', dateStr),
-  ]);
-  if (avR.error) throw avR.error;
-  if (excR.error) throw excR.error;
-  for (const r of (avR.data || [])) { const s = out.get(r.technician_id); if (s) s.keys.add(r.slot_key); }
-  for (const e of (excR.data || [])) { const s = out.get(e.technician_id); if (!s) continue; if (e.is_available) s.keys.add(e.slot_key); else s.keys.delete(e.slot_key); }
   const dayStart = localDateStartUTC(tz, dateStr).toISOString();
   const dayEnd = localDateStartUTC(tz, addDaysStr(dateStr, 1)).toISOString();
   const idList = techIds.join(',');
@@ -3074,13 +3075,24 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
       ? q.or(`technician_id.in.(${idList}),secondary_technician_id.in.(${idList})`)
       : q.in('technician_id', techIds);
   };
-  let { data, error } = await run(bookingLiftCols);
-  if (['42703', 'PGRST204'].includes(error?.code) && ['secondary_technician_id', 'extra_slots'].includes(missingColumn(error.message))) {
-    if (missingColumn(error.message) === 'secondary_technician_id') bookingLiftCols = false;
-    if (missingColumn(error.message) === 'extra_slots') extraSlotsCol = false;
-    ({ data, error } = await run(bookingLiftCols));
-  }
-  if (error) throw error;
+  const [avR, excR, data] = await Promise.all([
+    db.from('technician_availability').select('technician_id, slot_key').in('technician_id', techIds).eq('day_of_week', dow),
+    db.from('technician_availability_exceptions').select('technician_id, slot_key, is_available').in('technician_id', techIds).eq('exception_date', dateStr),
+    (async () => {
+      let { data, error } = await run(bookingLiftCols);
+      if (['42703', 'PGRST204'].includes(error?.code) && ['secondary_technician_id', 'extra_slots'].includes(missingColumn(error.message))) {
+        if (missingColumn(error.message) === 'secondary_technician_id') bookingLiftCols = false;
+        if (missingColumn(error.message) === 'extra_slots') extraSlotsCol = false;
+        ({ data, error } = await run(bookingLiftCols));
+      }
+      if (error) throw error;
+      return data;
+    })(),
+  ]);
+  if (avR.error) throw avR.error;
+  if (excR.error) throw excR.error;
+  for (const r of (avR.data || [])) { const s = out.get(r.technician_id); if (s) s.keys.add(r.slot_key); }
+  for (const e of (excR.data || [])) { const s = out.get(e.technician_id); if (!s) continue; if (e.is_available) s.keys.add(e.slot_key); else s.keys.delete(e.slot_key); }
   for (const b of (data || [])) {
     const key = slotKeyForLocalTime(localHHMM(tz, b.scheduled_at));
     for (const tid of [b.technician_id, b.secondary_technician_id]) {
@@ -3099,7 +3111,7 @@ async function batchTechSlotState(db, techIds, dateStr, dow, tz) {
 // informational "who's free" circles all derive from this same result instead
 // of each re-fetching the roster and re-running batchTechSlotState.
 async function rosterSlotState(db, scopes, dateStr, dow, tz) {
-  const lists = await scopedRosterTechs(db, scopes, 'id, name, color');
+  const lists = await scopedRosterTechs(db, scopes, 'id, name, color, status');
   const techs = lists.flat();
   const state = await batchTechSlotState(db, techs.map(t => t.id), dateStr, dow, tz);
   return { techs, state };
@@ -3398,7 +3410,8 @@ async function availableDates(req, res, db, auth) {
   const month = (req.query.month || '').toString();        // 'YYYY-MM'
   const techId = (req.query.technician_id || '').toString();
   const techId2 = (req.query.secondary_technician_id || '').toString();
-  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month required (YYYY-MM)' });
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'month required (YYYY-MM)' });
+  const includeSlots = req.query.include_slots === '1';
 
   const [y, m] = month.split('-').map(Number);
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -3414,27 +3427,31 @@ async function availableDates(req, res, db, auth) {
   // vs. a known metro we simply don't staff). Reused for the timezone lookup
   // further down rather than resolved twice.
   const bookingAreaIdEarly = await serviceAreaIdFromPostal(db, biz.id, postalCode);
-  const tz = await areaTimezone(db, bookingAreaIdEarly, biz.timezone || 'America/Denver');
-  const nowISO = new Date().toISOString();
-  const todayStr = localDateStr(tz, nowISO), nowHHMM = localHHMM(tz, nowISO);
   const rosterCache = new Map();
   const rosterList = (pool) => {
     if (!rosterCache.has(pool)) rosterCache.set(pool, (async () => {
       const scopes = await rosterScopes(db, biz, pool, postalCode, bookingAreaIdEarly);
-      return (await scopedRosterTechs(db, scopes, 'id, name')).flat();
+      const roster = (await scopedRosterTechs(db, scopes, 'id, name, status')).flat();
+      return req.query.strict_roster === '1' ? roster.filter(t=>t.status!=='off') : roster;
     })());
     return rosterCache.get(pool);
   };
-  const primaryRoster = !techId || techId === 'any' ? await rosterList((req.query.pool || '').toString()) : [];
+  const [tz, primaryRoster] = await Promise.all([
+    areaTimezone(db, bookingAreaIdEarly, biz.timezone || 'America/Denver'),
+    !techId || techId === 'any' || includeSlots || req.query.strict_roster === '1' || req.query.needs_lifting
+      ? rosterList((req.query.pool || '').toString()) : [],
+  ]);
+  const nowISO = new Date().toISOString();
+  const todayStr = localDateStr(tz, nowISO), nowHHMM = localHHMM(tz, nowISO);
   const primaryIds = (techId && techId !== 'any')
-    ? [techId]
+    ? (req.query.strict_roster === '1' && !primaryRoster.some(t => t.id === techId) ? [] : [techId])
     : primaryRoster.map(t => t.id);
   // Want a two-tech pair whenever a second tech is requested — unless it's the
   // SAME concrete person as the primary (not a real pair). Two "any" sides ARE
   // a pair: distinctness is enforced per-slot below, not by filtering rosters.
   const wantPair = !!techId2 && !(techId2 === techId && techId2 !== 'any');
-  const allowOwnHelper = wantPair && (!techId || techId === 'any') && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
-  const ownHelperIds = allowOwnHelper ? primaryRoster.filter(t => bringsOwnSecondTech(t.name)).map(t => t.id) : [];
+  const allowOwnHelper = wantPair && techId2 === 'any' && ['1', 'true'].includes(String(req.query.needs_lifting));
+  const ownHelperIds = allowOwnHelper ? primaryRoster.filter(t => primaryIds.includes(t.id) && bringsOwnSecondTech(t.name)).map(t => t.id) : [];
   let secondaryIds = [];
   if (wantPair) {
     secondaryIds = (techId2 && techId2 !== 'any')
@@ -3458,7 +3475,9 @@ async function availableDates(req, res, db, auth) {
         reason = unstaffed ? 'area_unstaffed' : 'no_techs_in_area';
       }
     }
-    return res.status(200).json({ dates: [], month, reason, area: areaName, unstaffed, timezone: tz });
+    if (req.query.strict_roster === '1' && techId && techId !== 'any' && !primaryIds.length) reason = 'technician_unavailable';
+    return res.status(200).json({ dates: [], month, reason, area: areaName, unstaffed, timezone: tz,
+      ...(includeSlots ? { slots_by_date: {}, technicians: primaryRoster } : {}) });
   }
   const techIds = [...new Set([...primaryIds, ...secondaryIds])];
 
@@ -3560,29 +3579,27 @@ async function availableDates(req, res, db, auth) {
     }
     return map;
   };
-  // Is there a slot where a primary tech AND a DISTINCT second tech are both
-  // free? Both sides nonempty in a slot is a pair unless it's the same lone
-  // person on both sides (union of the two free sets must be ≥ 2 people).
-  const pairHasSlot = (pMap, sMap) => {
-    for (const [k, P] of pMap) {
-      const S = sMap.get(k);
-      if (!S || !S.size) continue;
-      if (new Set([...P, ...S]).size >= 2) return true;
-    }
-    return false;
-  };
-  const dates = [];
+  const dates = [], slotsByDate = {};
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${month}-${String(d).padStart(2, '0')}`;
     if (dateStr < todayStr) continue;                       // no past dates
     const dow = dayOfWeekFor(dateStr);
+    let keys;
     if (wantPair) {
-      if (pairHasSlot(sideSlotTechs(primaryIds, dow, dateStr), sideSlotTechs(secondaryIds, dow, dateStr)) || sideSet(ownHelperIds, dow, dateStr).size) dates.push(dateStr);
-    } else if (sideSet(primaryIds, dow, dateStr).size) {
+      keys = sideSet(ownHelperIds, dow, dateStr);
+      const primary = sideSlotTechs(primaryIds, dow, dateStr), secondary = sideSlotTechs(secondaryIds, dow, dateStr);
+      for (const [key, people] of primary) {
+        const helpers = secondary.get(key);
+        if (helpers?.size && new Set([...people, ...helpers]).size >= 2) keys.add(key);
+      }
+    } else keys = sideSet(primaryIds, dow, dateStr);
+    if (keys.size) {
       dates.push(dateStr);
+      if (includeSlots) slotsByDate[dateStr] = SLOTS.filter(s => keys.has(s.key)).map(s => ({slot_key:s.key,label:s.label,start:s.start,end:s.end}));
     }
   }
-  return res.status(200).json({ dates, month, timezone: tz });
+  return res.status(200).json({ dates, month, timezone: tz,
+    ...(includeSlots ? { slots_by_date: slotsByDate, technicians: primaryRoster } : {}) });
 }
 
 // Attach a tokenized payment method to a Stripe customer (card on file).

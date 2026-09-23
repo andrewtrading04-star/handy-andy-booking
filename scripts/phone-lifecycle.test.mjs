@@ -218,7 +218,7 @@ test('a paused phone quote restores all shared pricing fields after the real New
 test('actual New Booking open pauses the phone before resetting and cannot overwrite it on return',async()=>{
   const f=setup(),draft=await f.begin(),data=deferred();draft.step='tvopts';draft.optsLoaded=true;
   Object.assign(f.ctx,{nbOptionGroups:[{id:'size',options:[{id:'large',price:125}]}],nbQty:{size:{large:2}},nbServices:[{id:'phone-service'}],nbServiceId:'phone-service',nbAreaName:'Austin',nbZipAreaId:'area-1',nbAutoTravel:'25',nbUpsSel:{},nbUpsCustom:[],
-    smsConsentScript:()=>'',nbStartProgressTimer(){},attachAddressAutocomplete(){},loadNbCalendar(){},renderNbRequestedTimes(){},nbZipReplyIdle(){},nbEnsureDataCached:()=>data.promise,
+    TEXTS_ON_LABEL:'Text customer job updates',smsConsentScript:()=>'',nbStartProgressTimer(){},attachAddressAutocomplete(){},loadNbCalendar(){},renderNbRequestedTimes(){},nbZipReplyIdle(){},nbEnsureDataCached:()=>data.promise,
   });
   f.node('nbTravelFee').value='25';f.ctx.document.getElementById=f.node;f.ctx.document.querySelector=()=>f.node('nbSubmit');
   const start=html.indexOf('async function openNewBooking(prefill){'),end=html.indexOf('\n}\n',start)+3;
