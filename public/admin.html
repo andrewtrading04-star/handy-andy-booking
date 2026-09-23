@@ -7144,6 +7144,10 @@ async function loadWebAnalytics(){
         : Promise.resolve(null),
     ]);
     await chartReady;
+    // Owner, 2026-09-24: our own preview/testing tools are not traffic sources.
+    const junkRef=n=>/mobileviewer|github|clone|vercel\.app/i.test(String(n||''));
+    if(ref&&ref.referrers) ref.referrers=ref.referrers.filter(r=>!junkRef(r.name));
+    if(ses&&ses.sessions) ses.sessions=ses.sessions.filter(s=>!junkRef(s.referrer));
     webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,city,lastUpdated:new Date().toISOString()});
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
