@@ -291,6 +291,34 @@
    list -- name, one gray sub-line, time; tap a row for the full card). */
 .call-head{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;}
 .call-head:hover{background:var(--line2);}
+.q-start{display:block;width:100%;margin:0 0 12px;padding:18px 20px;border:none;border-radius:14px;background:var(--accent);color:#fff;cursor:pointer;text-align:center;box-shadow:0 6px 18px rgba(37,99,235,.28);}
+.q-start:hover{filter:brightness(1.06);}
+.q-start-t{display:block;font-size:20px;font-weight:800;}
+.q-start-s{display:block;font-size:13.5px;opacity:.9;margin-top:3px;}
+#qOverlay{position:fixed;inset:0;background:var(--bg);z-index:60;overflow-y:auto;}
+.qw{max-width:760px;margin:0 auto;padding:14px 16px 90px;}
+.qw .btn.sm{padding:7px 11px;font-size:12.5px;}
+.qw-top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.qw-prog{flex:1;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+.qw-prog i{display:block;height:100%;background:var(--accent);}
+.qw h3{margin:0 0 8px;font-size:15px;}
+.qw-facts{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:14px;}
+.qw-facts dt{color:var(--mute);} .qw-facts dd{margin:0;font-weight:600;}
+.qw audio{width:100%;margin-top:6px;}
+.qw-tx{white-space:pre-wrap;font-size:13.5px;background:var(--line2);border-radius:8px;padding:10px;margin-top:8px;max-height:260px;overflow:auto;}
+.qw-rate{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line2);}
+.qw-rate:last-child{border-bottom:none;}
+.qw-stars button{border:none;background:none;font-size:26px;cursor:pointer;color:#d1d5db;padding:0 2px;}
+.qw-stars button.on{color:#f59e0b;}
+.qw-seg{display:flex;gap:6px;} .qw-seg button{flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-weight:700;cursor:pointer;}
+.qw-seg button.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+.qw-sec{font-weight:800;font-size:13px;color:var(--ink-2);margin:12px 0 4px;}
+.qw textarea,.qw input[type=text]{width:100%;box-sizing:border-box;font:inherit;}
+.qw-flag{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--bad);margin-top:6px;}
+.qw-bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 16px;display:flex;gap:8px;justify-content:center;z-index:61;}
+.qw-bar .btn{min-width:110px;} .qw-bar .btn.go{background:var(--accent);flex:1;max-width:360px;}
+.qw-bub{max-width:80%;padding:7px 11px;border-radius:16px;margin:4px 0;font-size:14px;}
+.qw-bub.us{background:var(--accent);color:#fff;margin-left:auto;} .qw-bub.them{background:var(--line2);}
 .call-ic{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;}
 .call-ic.good{background:#dcfce7;color:#15803d;}
 .call-ic.bad{background:#fee2e2;color:#b91c1c;}
@@ -478,6 +506,12 @@
         <div class="t-s" id="tFlagSub">this week</div>
       </div>
     </div>
+
+    <!-- Guided audit queue (owner, 2026-09-24): one big button, one call at a time. -->
+    <button type="button" id="startQueue" class="q-start">
+      <span class="q-start-t">▶ Start auditing</span>
+      <span class="q-start-s" id="queueCount">Checking for calls…</span>
+    </button>
 
     <!-- Search + filter -->
     <div class="card">
@@ -1331,7 +1365,9 @@ function openView(id){
       (a.caller_zip?' &middot; zip'+(a.caller_zip.indexOf('/')>=0?'s ':' ')+esc(a.caller_zip):'')+
       (s!=null?' &middot; score '+scoreHtml(a):'')+
     '</div>'+
-    (a.flagged?'<div class="recon gap" style="margin-bottom:10px;">&#9888; Flagged for Andrew to listen to.</div>':'')+
+    (a.flagged?'<div class="recon gap" style="margin-bottom:10px;">&#9888; Flagged for Andrew to listen to.'+(a.listen_reason?' <b>Why:</b> '+esc(a.listen_reason):'')+'</div>':'')+
+    (a.ratings&&Object.keys(a.ratings).length?'<div style="margin-bottom:10px;">'+Q_RATINGS.filter(([k])=>a.ratings[k]).map(([k,t])=>'<div class="va"><b style="color:#f59e0b;min-width:70px;">'+'★'.repeat(a.ratings[k])+'</b><span>'+esc(t)+'</span></div>').join('')+'</div>':'')+
+    (a.complaint?'<div class="recon gap" style="margin-bottom:10px;"><b>Complaint:</b> '+esc(a.complaint)+'</div>':'')+
     ansRows+
     (a.notes?'<div class="recon clear" style="margin-top:10px;"><b>Notes:</b> '+esc(a.notes)+'</div>':'')+
     '</div>';
@@ -1609,6 +1645,7 @@ async function enter(){
   $('app').classList.remove('hidden');
   if(!$('date').value) $('date').value=todayStr();
   await load();
+  refreshQueueCount();
   // Calls is the landing page (owner instruction 2026-09-22: she needs all
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
@@ -2003,6 +2040,159 @@ async function gradeFromCall(r){
   if(r.service==='TV Mounting'||r.service==='Handyman') $('fSvc').value=r.service;
   try{ renderCtx(); }catch(_){}
   $('formCard').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ── Guided audit queue (owner, 2026-09-24) ─────────────────────────────────
+// "She will click the main button. It starts a process where she is given the
+// call, the customer's information, if they booked, if they texted, and all
+// other information she needs." One ungraded call at a time, oldest first:
+// listen -> rate -> questions -> complaints / flag for the owner -> Save & next.
+// Queue = answered calls with a recording in the staffed markets, last 7 days,
+// not graded yet. A graded call is one whose CRM call id is on an audit.
+const Q_RATINGS=[
+  ['friendly','Friendly and professional'],
+  ['script','Followed the script'],
+  ['price','Handled the price well'],
+  ['booking','Tried hard to book the job'],
+];
+let qList=[], qIdx=0, qDone=0, qSkipped=new Set(), qState=null;
+async function loadQueue(){
+  const from=dayStartCT(-6);
+  const [d,g]=await Promise.all([
+    crm('calls',{limit:300, from:from.toISOString()}),
+    api('graded_ids',{params:{from:new Date(from.getTime()-864e5).toISOString()}}).catch(()=>({ids:[]})),
+  ]);
+  const graded=new Set(g.ids||[]);
+  qList=[...(d.open||[]),...(d.handled||[])]
+    .filter(r=>STAFFED_MARKETS.has(r.market) && r.recording_url && (r.kind==='live'||r.answered===true)
+      && !r.blocked && !graded.has(r.id) && !qSkipped.has(r.id))
+    .sort((a,b)=>a.occurred_at<b.occurred_at?-1:1);
+  return qList;
+}
+async function refreshQueueCount(){
+  const el=$('queueCount'); if(!el) return;
+  try{ const n=(await loadQueue()).length;
+    el.textContent=n?n+' call'+(n===1?'':'s')+' waiting for you':'All caught up. No calls waiting.';
+  }catch(_){ el.textContent='Tap to load the calls waiting for you'; }
+}
+$('startQueue').onclick=async()=>{
+  const b=$('startQueue'); b.disabled=true; $('queueCount').textContent='Loading calls…';
+  try{ await loadQueue(); }catch(e){ b.disabled=false; $('queueCount').textContent=e.message||'Could not load calls'; return; }
+  b.disabled=false; qIdx=0; qDone=0;
+  let ov=$('qOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='qOverlay'; document.body.appendChild(ov); }
+  qShow();
+};
+function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount(); if(qDone) load(); }
+function qSlug(r){ const s=r.business&&r.business.slug; if(s) return s; return /dom/i.test((r.business&&r.business.name)||'')?'doms':'handy-andy'; }
+function qShow(){
+  const ov=$('qOverlay'); if(!ov) return;
+  const r=qList[qIdx];
+  if(!r){
+    ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button></div>';
+    $('qEnd').onclick=qClose; return;
+  }
+  const who=whoLabel(r);
+  qState={ r, svc: r.service==='Handyman'?'Handyman':'TV Mounting', ratings:{}, answers:{} };
+  const left=qList.length-qIdx, pct=Math.round(100*qIdx/Math.max(1,qList.length));
+  const h=r.history;
+  const hist=!h?'New caller, no history with us'
+    :[h.jobs?h.jobs+' job'+(h.jobs===1?'':'s')+(h.spent?' · $'+Math.round(h.spent)+' spent':''):'',
+      h.estimates?h.estimates+' estimate'+(h.estimates===1?'':'s'):''].filter(Boolean).join(' · ')||'New caller';
+  const booked=r.booking?'✅ Yes — '+esc(fmtSentAt(r.booking.scheduled_at))+(r.booking.price!=null?' · '+money2(r.booking.price):'')+(r.booking.technician&&r.booking.technician.name?' · '+esc(r.booking.technician.name):''):'❌ No';
+  const rec='<audio controls preload="auto" src="/api/admin?action=call_recording&id='+encodeURIComponent(r.id)+'&token='+encodeURIComponent(token)+'"></audio>';
+  ov.innerHTML='<div class="qw">'+
+    '<div class="qw-top"><button class="btn ghost sm" id="qExit">✕ Exit</button><div class="qw-prog"><i style="width:'+pct+'%"></i></div><span class="sub"><b>'+left+'</b> left</span></div>'+
+    '<div class="card"><h3>📞 '+esc(r.caller_display||r.caller_pretty||'Unknown caller')+'</h3>'+
+      '<dl class="qw-facts">'+
+        '<dt>Secretary</dt><dd>'+esc(who||'Unknown')+'</dd>'+
+        '<dt>When</dt><dd>'+esc(fmtSentAt(r.occurred_at))+' CT'+(r.duration_sec?' · '+fmtDur(r.duration_sec):'')+'</dd>'+
+        '<dt>Business</dt><dd>'+bizLineLabel(r)+'</dd>'+
+        '<dt>Phone</dt><dd>'+esc(r.caller_pretty||prettyPhone(r.caller_phone))+'</dd>'+
+        '<dt>Booked?</dt><dd>'+booked+'</dd>'+
+        '<dt>History</dt><dd>'+esc(hist)+'</dd>'+
+        '<dt>Texts</dt><dd>'+(r.text_count?'<a href="#" id="qTexts">'+r.text_count+' text'+(r.text_count===1?'':'s')+' — show</a>':'None')+'</dd>'+
+        (r.notes?'<dt>Office note</dt><dd>'+esc(r.notes)+'</dd>':'')+
+      '</dl><div id="qTextBox"></div>'+
+      rec+
+      (r.transcript?'<button type="button" class="btn ghost sm" id="qTxBtn" style="margin-top:6px;">Show transcript</button><div class="qw-tx" id="qTx" hidden>'+esc(r.transcript)+'</div>':'')+
+    '</div>'+
+    '<div class="card"><h3>⭐ Rate '+esc(who||'the secretary')+'</h3><div id="qRates"></div></div>'+
+    '<div class="card"><h3>✅ Questions</h3><div class="qw-seg" id="qSvc"><button data-s="TV Mounting">TV Mounting</button><button data-s="Handyman">Handyman</button></div><div id="qQs"></div></div>'+
+    '<div class="card"><h3>💬 Complaints</h3><textarea id="qComplaint" rows="3" placeholder="Anything that went wrong on this call…"></textarea>'+
+      '<label class="qw-flag"><input type="checkbox" id="qFlag"> 🚩 Andrew should listen to this call</label>'+
+      '<input type="text" id="qWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">'+
+      '<h3 style="margin-top:12px;">📝 Notes</h3><textarea id="qNotes" rows="2" placeholder="Anything else (optional)"></textarea>'+
+    '</div><div class="err" id="qErr"></div></div>'+
+    '<div class="qw-bar"><button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
+  ov.scrollTop=0;
+  $('qExit').onclick=qClose;
+  $('qSkip').onclick=()=>{ qSkipped.add(r.id); qIdx++; qShow(); };
+  $('qSave').onclick=qSave;
+  $('qFlag').onchange=()=>{ $('qWhy').hidden=!$('qFlag').checked; if($('qFlag').checked) $('qWhy').focus(); };
+  if($('qTxBtn')) $('qTxBtn').onclick=()=>{ const t=$('qTx'); t.hidden=!t.hidden; $('qTxBtn').textContent=t.hidden?'Show transcript':'Hide transcript'; };
+  if($('qTexts')) $('qTexts').onclick=async e=>{
+    e.preventDefault(); const box=$('qTextBox'); box.innerHTML='<div class="sub">Loading texts…</div>';
+    try{ const t=await crm('messages_thread',{our:r.text_our||'', customer:String(r.caller_phone||'').replace(/\D/g,'').slice(-10)});
+      box.innerHTML='<div class="qw-tx" style="background:#fff;border:1px solid var(--line);">'+(t.messages||[]).map(m=>'<div class="qw-bub '+(m.direction==='out'?'us':'them')+'">'+esc(m.body||'')+'</div>').join('')+'</div>';
+    }catch(err){ box.innerHTML='<div class="err">'+esc(err.message||'Could not load texts')+'</div>'; }
+  };
+  $('qRates').innerHTML=Q_RATINGS.map(([k,t])=>'<div class="qw-rate"><span>'+esc(t)+'</span><span class="qw-stars" data-rk="'+k+'">'+[1,2,3,4,5].map(n=>'<button type="button" data-n="'+n+'">★</button>').join('')+'</span></div>').join('');
+  $('qRates').querySelectorAll('[data-rk]').forEach(g=>g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const n=Number(b.dataset.n); qState.ratings[g.dataset.rk]=n;
+    g.querySelectorAll('button').forEach(x=>x.classList.toggle('on',Number(x.dataset.n)<=n));
+  }));
+  $('qSvc').querySelectorAll('button').forEach(b=>b.onclick=()=>{ qState.svc=b.dataset.s; qRenderQs(); });
+  qRenderQs();
+}
+function qRenderQs(){
+  $('qSvc').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.s===qState.svc));
+  // SECTIONS' `when` checks read the form's service picker, so point it at ours.
+  if($('fSvc')) $('fSvc').value=qState.svc;
+  let h='';
+  SECTIONS.forEach(s=>{
+    if(s.when && !s.when(null)) return;
+    h+='<div class="qw-sec">'+esc(s.name)+(s.cond?' <span class="sub">('+esc(s.cond)+')</span>':'')+'</div>';
+    s.qs.forEach(q=>{
+      const v=qState.answers[q.k];
+      h+='<div class="q"><div class="qt">'+esc(q.t)+'</div><div class="yna" data-qk="'+q.k+'">'+
+        [['yes','Yes'],['no','No'],['na','N/A']].map(([val,lab])=>'<button type="button" data-v="'+val+'"'+(v===val?' class="on-'+val+'"':'')+'>'+lab+'</button>').join('')+'</div></div>';
+    });
+  });
+  $('qQs').innerHTML=h;
+  $('qQs').querySelectorAll('[data-qk]').forEach(g=>g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    qState.answers[g.dataset.qk]=b.dataset.v;
+    g.querySelectorAll('button').forEach(x=>x.className=x===b?'on-'+b.dataset.v:'');
+  }));
+}
+async function qSave(){
+  const r=qState.r, err=$('qErr'); err.textContent='';
+  const missing=Q_RATINGS.filter(([k])=>!qState.ratings[k]);
+  if(missing.length){ err.textContent='Give a star rating for: '+missing.map(m=>m[1]).join(', ')+'.'; err.scrollIntoView({block:'center'}); return; }
+  const flagged=$('qFlag').checked;
+  if(flagged && !$('qWhy').value.trim()){ err.textContent='Say why Andrew should listen.'; $('qWhy').focus(); return; }
+  // Only questions visible for the chosen service are saved.
+  if($('fSvc')) $('fSvc').value=qState.svc;
+  const keep=new Set(); SECTIONS.forEach(s=>{ if(!s.when||s.when(null)) s.qs.forEach(q=>keep.add(q.k)); });
+  const answers={}; Object.entries(qState.answers).forEach(([k,v])=>{ if(keep.has(k)) answers[k]=v; });
+  const who=whoLabel(r);
+  const body={
+    from_queue:true, business:qSlug(r),
+    date:ctDateStr(r.occurred_at),
+    grasshopper_number:String(r.grasshopper_number||'').replace(/\D/g,'').slice(-10),
+    call_id:r.id, time_local:ctTimeHM(r.occurred_at), direction:'incoming',
+    handled_by:['Heather','Joey'].includes(who)?who:(who||''),
+    service:qState.svc,
+    caller_phone:String(r.caller_phone||'').replace(/\D/g,'').slice(-10),
+    caller_name:(r.customer&&r.customer.name)||'', caller_zip:'',
+    answers, ratings:qState.ratings,
+    complaint:$('qComplaint').value, flagged, listen_reason:$('qWhy').value,
+    notes:$('qNotes').value,
+  };
+  const btn=$('qSave'); btn.disabled=true; btn.textContent='Saving…';
+  try{
+    await api('audit_save',{method:'POST',body});
+    gradedIds.add(r.id); qDone++; qIdx++; qShow();
+  }catch(e){ err.textContent=e.message||'Could not save'; btn.disabled=false; btn.textContent='Save & next ›'; }
 }
 
 // ── Notes (owner rule 2026-09-23) ──────────────────────────────────────────

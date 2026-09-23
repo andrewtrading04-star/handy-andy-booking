@@ -224,7 +224,7 @@ async function day(req, res, db, auth) {
   }));
 
   const { data: audits } = await db.from('call_audits')
-    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes')
+    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason')
     .eq('audit_date', date)
     .order('occurred_at', { ascending: true });
 
@@ -259,7 +259,7 @@ async function week(req, res, db, auth) {
     .gte('audit_date', monday).lte('audit_date', sunday);
 
   const { data: auditRows } = await db.from('call_audits')
-    .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes')
+    .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason')
     .gte('audit_date', monday).lte('audit_date', sunday)
     .order('occurred_at', { ascending: false });
 
@@ -339,7 +339,11 @@ async function auditSave(req, res, db, auth, body) {
   if (!isDate(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
 
   const number = (body.grasshopper_number || '').toString();
-  const line = auditLines().find(l => l.number === number);
+  // The guided queue (owner, 2026-09-24) grades calls straight from the CRM
+  // call log, which includes Twilio tracking lines that were never Grasshopper
+  // lines -- those carry their brand as body.business instead.
+  const line = auditLines().find(l => l.number === number)
+    || (body.from_queue && /^\d{10}$/.test(number) && ['handy-andy', 'doms'].includes(body.business) ? { number, business: body.business } : null);
   if (!line) return res.status(400).json({ error: 'Pick which line the call came in on' });
 
   const direction = (body.direction || 'incoming').toString();
@@ -365,6 +369,15 @@ async function auditSave(req, res, db, auth, body) {
   }
 
   const flagged = !!body.flagged;
+  // Guided-queue extras: 1-5 ratings per skill, a complaint, and why the
+  // owner should listen (a flag's reason).
+  const ratings = {};
+  if (body.ratings && typeof body.ratings === 'object') {
+    for (const [k, v] of Object.entries(body.ratings)) {
+      const n = Number(v);
+      if (/^[a-z_]{1,40}$/.test(k) && Number.isInteger(n) && n >= 1 && n <= 5) ratings[k] = n;
+    }
+  }
   const callerPhone = (body.caller_phone || '').toString().trim() || null;
   // A flagged call is a request for the owner to go listen to it in
   // Grasshopper. Without the caller's number he has nothing to search on --
@@ -412,6 +425,9 @@ async function auditSave(req, res, db, auth, body) {
     answers,
     flagged,
     notes: (body.notes || '').toString().trim() || null,
+    ratings,
+    complaint: (body.complaint || '').toString().trim().slice(0, 4000) || null,
+    listen_reason: flagged ? ((body.listen_reason || '').toString().trim().slice(0, 1000) || null) : null,
     audited_by: auth.name || 'Auditor',
     updated_at: new Date().toISOString(),
   };
@@ -420,6 +436,8 @@ async function auditSave(req, res, db, auth, body) {
   // client only as a row it already received from 'day', never as a way to
   // address an arbitrary row, since every row in this table belongs to the
   // auditor anyway and the table holds nothing else.
+  // The older one-page form doesn't send the queue extras; don't wipe them.
+  if (!('ratings' in body)) { delete row.ratings; delete row.complaint; delete row.listen_reason; }
   if (body.id) {
     const { error } = await db.from('call_audits').update(row).eq('id', body.id);
     if (error) return res.status(500).json({ error: error.message });
