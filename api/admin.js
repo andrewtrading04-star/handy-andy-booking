@@ -8891,6 +8891,50 @@ async function calls(req, res, db, auth) {
     } catch (e) { /* same: counts are a nicety */ }
   }
 
+  // Customer history per caller number (owner rule 2026-09-24: "add customers
+  // history with us to this card -- most will have none, some call back or
+  // work with us again"). Jobs and estimates matched on the caller's phone,
+  // limited to the businesses this viewer can see. A summary only; the full
+  // record is one tap away in the customer popup.
+  const historyBy = new Map();         // digits -> { jobs, completed, spent, last_job, upcoming, estimates, last_estimate }
+  if (callerPhones.length) {
+    try {
+      let vids = null;
+      if (viewerSlugs) { const { data: vb } = await db.from('businesses').select('id').in('slug', viewerSlugs); vids = (vb || []).map(b => b.id); }
+      const pretty = p => `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}`;
+      const forms = callerPhones.flatMap(p => [p, '+1' + p, pretty(p)]);
+      let cq = db.from('customers').select('id, phone').in('phone', forms);
+      if (vids) cq = cq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
+      const { data: custs } = await cq;
+      const digitsByCust = new Map((custs || []).map(c => [c.id, callerDigits(c.phone)]));
+      const custIds = [...digitsByCust.keys()];
+      const h = d => { let x = historyBy.get(d); if (!x) { x = { jobs: 0, completed: 0, spent: 0, last_job: null, upcoming: null, estimates: 0, last_estimate: null }; historyBy.set(d, x); } return x; };
+      if (custIds.length) {
+        const { data: bks } = await db.from('bookings').select('customer_id, scheduled_at, status, price, services(name)')
+          .in('customer_id', custIds).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(2000);
+        const nowIso = new Date().toISOString();
+        for (const b of (bks || [])) {
+          const x = h(digitsByCust.get(b.customer_id)); if (!x) continue;
+          x.jobs++;
+          if (b.status === 'completed') { x.completed++; x.spent += Number(b.price) || 0; }
+          const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null };
+          if (b.scheduled_at > nowIso && b.status !== 'completed') { if (!x.upcoming || b.scheduled_at < x.upcoming.at) x.upcoming = j; }
+          else if (!x.last_job) x.last_job = j;   // rows arrive newest first
+        }
+      }
+      let eq = db.from('estimates').select('customer_phone, created_at, status, approved_at, service_label').in('customer_phone', forms)
+        .order('created_at', { ascending: false }).limit(2000);
+      if (vids) eq = eq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
+      const { data: ests } = await eq;
+      for (const e of (ests || [])) {
+        const x = h(callerDigits(e.customer_phone));
+        x.estimates++;
+        if (!x.last_estimate) x.last_estimate = { at: e.created_at, status: e.approved_at ? 'approved' : e.status, service: e.service_label || null };
+      }
+      for (const x of historyBy.values()) x.spent = Math.round(x.spent * 100) / 100;
+    } catch (e) { /* history is a nicety; never fail the call list over it */ }
+  }
+
   // Who answers each forwarding number, so a card can say "routed to Joey"
   // instead of ten digits nobody memorises. Matched on digits alone: the
   // tracking rows store E.164 (+1XXXXXXXXXX) while staff_users stores bare
@@ -8957,6 +9001,7 @@ async function calls(req, res, db, auth) {
     blocked: blockedSet.has(callerDigits(r.caller_phone)),
     text_count: (textInfo.get(callerDigits(r.caller_phone)) || {}).total || 0,
     text_our: (textInfo.get(callerDigits(r.caller_phone)) || {}).our || null,
+    history: historyBy.get(callerDigits(r.caller_phone)) || null,
     text_in: (textInfo.get(callerDigits(r.caller_phone)) || {}).inbound || 0,
     text_last_at: (textInfo.get(callerDigits(r.caller_phone)) || {}).last || null,
   }));

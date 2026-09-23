@@ -432,6 +432,9 @@
   .md-nudge{position:fixed;right:16px;bottom:16px;z-index:200;max-width:320px;background:#fff;border:2px solid var(--accent);border-radius:14px;padding:14px;box-shadow:0 12px 32px rgba(0,0,0,.25);font-size:14px;}
   .md-nudge-b{display:flex;gap:8px;margin-top:10px;} .md-nudge-b .btn{width:auto;}
   .est-mob{display:none;}
+  .ch-hist{margin:10px 0 4px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 12px;font-size:13px;color:#14532d;line-height:1.55;}
+  .ch-hist-h{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#15803d;margin-bottom:2px;}
+  .ch-hist.new{background:#f8fafc;border-color:var(--line);color:var(--mute);}
   .cg-have-open{font:inherit;text-align:left;cursor:pointer;} .cg-have-open:hover{filter:brightness(.96);}
   .ctp-back{position:fixed;inset:0;z-index:300;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:16px;}
   .ctp{background:#fff;border-radius:16px;width:100%;max-width:440px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);}
@@ -12333,6 +12336,21 @@ function callEarlierRow(r){
   return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
     <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
 }
+// What this caller has done with us before (owner, 2026-09-24): jobs and
+// estimates matched on their phone number (api/admin.js calls -> history).
+// Most callers are new, so that case is one quiet line.
+function callHistoryHtml(r){
+  const h=r.history;
+  const d=iso=>iso?new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:new Date(iso).getFullYear()===new Date().getFullYear()?undefined:'numeric'}):'';
+  if(!h||(!h.jobs&&!h.estimates)) return `<div class="ch-hist new">🆕 New caller — no jobs or estimates with us yet.</div>`;
+  const job=j=>[d(j.at), j.service, j.price?money(j.price):null, j.status&&j.status!=='completed'?j.status:null].filter(Boolean).map(esc).join(' · ');
+  const lines=[];
+  if(h.jobs) lines.push(`<b>${h.jobs} job${h.jobs===1?'':'s'}</b>${h.spent?` · ${esc(money(h.spent))} spent`:''}`);
+  if(h.upcoming) lines.push(`Upcoming: ${job(h.upcoming)}`);
+  if(h.last_job) lines.push(`Last job: ${job(h.last_job)}`);
+  if(h.estimates) lines.push(`${h.estimates} estimate${h.estimates===1?'':'s'}${h.last_estimate?` · last ${esc(d(h.last_estimate.at))}${h.last_estimate.service?' · '+esc(h.last_estimate.service):''} (${esc(h.last_estimate.status==='approved'?'approved':h.last_estimate.status==='contacted'?'sent':h.last_estimate.status||'')})`:''}`);
+  return `<div class="ch-hist"><div class="ch-hist-h">🧾 Customer history</div>${lines.map(l=>`<div>${l}</div>`).join('')}</div>`;
+}
 function callCard(r,handled,g){
   const isLive=r.kind==='live';
   const isTracked=r.source==='twilio';
@@ -12539,7 +12557,7 @@ function callCard(r,handled,g){
       <div class="rc-name">${inIcon}${who}${r.customer?`<span class="rc-meta" style="font-weight:600;">${esc(r.caller_pretty)}</span>`:''}${durChip}</div>
       ${subLine?`<div class="rc-meta" style="margin-top:2px;">${subLine}</div>`:''}
       ${noNumber}
-      ${statusBoxes}${extra}${claimLine}
+      ${statusBoxes}${callHistoryHtml(r)}${extra}${claimLine}
       ${tx}${audio}${job}${handledLine}
     </div>
     <div class="rc-actions">
