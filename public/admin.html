@@ -608,6 +608,7 @@
      .search/.empty) — no new palette, no dark mode. */
   .msg-shell{display:flex;height:calc(100vh - 250px);min-height:480px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;}
   .msg-rail{width:200px;flex:none;border-right:1px solid var(--line);background:var(--bg);padding:10px 8px;overflow-y:auto;}
+  .msg-filter-sel{display:none;width:auto;max-width:190px;font-size:14px;font-weight:600;color:var(--accent);border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--card,#fff);}
   .msg-rail-hd{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);padding:6px 8px 8px;}
   .msg-rail-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:2px;}
   .msg-rail-item:hover{background:var(--line2);}
@@ -650,7 +651,14 @@
 
   @media(max-width:880px){
     .msg-shell{flex-direction:column;height:auto;border:none;border-radius:0;}
-    .msg-rail{width:100%;display:flex;flex-direction:row;overflow-x:auto;overflow-y:visible;border-right:none;border-bottom:1px solid var(--line);white-space:nowrap;}
+    .msg-rail{display:none !important;}
+    .msg-filter-sel{display:block !important;}
+    .msg-wrap .rc-sub{display:none;}
+    .msg-wrap .rc-title{font-size:30px;font-weight:800;letter-spacing:-.02em;}
+    .msg-wrap .rc-title .msg-ttl-ic{display:none;}
+    .msg-row .msg-line-note{display:none;}
+    .msg-row .msg-prev{white-space:normal !important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35;}
+    .msg-shell{background:var(--card,#fff);}
     .msg-rail-hd{display:none;}
     .msg-rail-item{flex:none;margin-bottom:0;margin-right:4px;}
     .msg-list{width:100%;border-right:none;max-height:none;}
@@ -12667,7 +12675,7 @@ function paintMessages(){
     for(const t of filtered){
       const who=t.customer_name || t.customer_phone_pretty || t.customer_phone;
       const preview=(t.last_body||'').slice(0,120);
-      const dir=t.last_direction==='out' ? 'You: ' : '';
+      const dir='';  // iPhone-style: no "You:" prefix (owner, 2026-09-23)
       const isSel=!!(_msgOpen && _msgOpen.our===t.our_phone && _msgOpen.customer===t.customer_phone);
       listHtml+='<div class="msg-row'+(isSel?' sel':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
         +msgAvatar(t)
@@ -12676,8 +12684,8 @@ function paintMessages(){
         +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
         +'<span class="msg-row-time">'+esc(msgWhen(t.last_at))+'</span>'
         +'</div>'
-        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
-        +'<div class="rc-meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+msgLineNote(t)+'</div>'
+        +'<div class="rc-meta msg-prev" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
+        +'<div class="rc-meta msg-line-note" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+msgLineNote(t)+'</div>'
         +'</div>'
         +'</div>';
     }
@@ -12696,10 +12704,16 @@ function paintMessages(){
   }
 
   let html='<div class="wrap msg-wrap" data-msgview>'
-    +'<div class="rc-head"><div>'
-    +'<h2 class="rc-title">💬 Messages</h2>'
+    +'<div class="rc-head" style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><div>'
+    +'<h2 class="rc-title"><span class="msg-ttl-ic">💬 </span>Messages</h2>'
     +'<div class="rc-sub">Texts customers sent to your business numbers. Reply and it goes back from the same number they texted.</div>'
-    +'</div></div>';
+    +'</div>'
+    // Phone-width brand filter: replaces the sideways-scrolling brand strip
+    // (owner: "theres no left and right scroll" on the iPhone look).
+    +'<select class="msg-filter-sel" data-msgfiltersel="1" aria-label="Filter by brand">'
+      +'<option value="all"'+(_msgFilter==='all'?' selected':'')+'>All'+(totalUnread?' ('+totalUnread+' new)':'')+'</option>'
+      +brands.map(g=>'<option value="'+esc(g.key)+'"'+(_msgFilter===g.key?' selected':'')+'>'+esc(g.name)+(g.unread?' ('+g.unread+' new)':'')+'</option>').join('')
+    +'</select></div>';
   if(totalUnread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+totalUnread+' unread</span></div>';
   html+='<div class="msg-shell'+(_msgOpen?' detail-open':'')+'">'+railHtml+listHtml+'<div class="msg-detail">'+detailInner+'</div></div>';
   html+='</div>';
@@ -12707,6 +12721,9 @@ function paintMessages(){
 
   view.querySelectorAll('[data-msgfilter]').forEach(el=>el.addEventListener('click',()=>{
     _msgFilter=el.dataset.msgfilter; paintMessages();
+  }));
+  view.querySelectorAll('[data-msgfiltersel]').forEach(el=>el.addEventListener('change',()=>{
+    _msgFilter=el.value; paintMessages();
   }));
 
   view.querySelectorAll('.msg-list [data-msgopen]').forEach(el=>el.addEventListener('click',()=>{
