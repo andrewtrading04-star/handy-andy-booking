@@ -2050,10 +2050,9 @@ async function gradeFromCall(r){
 // Queue = answered calls with a recording in the staffed markets, last 7 days,
 // not graded yet. A graded call is one whose CRM call id is on an audit.
 const Q_RATINGS=[
-  ['friendly','Friendly and professional'],
   ['script','Followed the script'],
-  ['price','Handled the price well'],
-  ['booking','Tried hard to book the job'],
+  ['objections','Handled objections'],
+  ['clear','Spoke clearly and confidently'],
 ];
 let qList=[], qIdx=0, qDone=0, qSkipped=new Set(), qState=null;
 async function loadQueue(){
@@ -2124,8 +2123,8 @@ function qShow(){
       rec+
       (r.transcript?'<button type="button" class="btn ghost sm" id="qTxBtn" style="margin-top:6px;">Show transcript</button><div class="qw-tx" id="qTx" hidden>'+esc(r.transcript)+'</div>':'')+
     '</div>'+
-    '<div class="card"><h3>⭐ Rate '+esc(who||'the secretary')+'</h3><div id="qRates"></div></div>'+
     '<div class="card"><h3>✅ Questions</h3><div class="qw-seg" id="qSvc"><button data-s="TV Mounting">TV Mounting</button><button data-s="Handyman">Handyman</button></div><div id="qQs"></div></div>'+
+    '<div class="card"><h3>⭐ Rate this call</h3><div id="qRates"></div></div>'+
     '<div class="card"><h3>💬 Complaints</h3><textarea id="qComplaint" rows="3" placeholder="Anything that went wrong on this call…"></textarea>'+
       '<label class="qw-flag"><input type="checkbox" id="qFlag"> 🚩 Andrew should listen to this call</label>'+
       '<input type="text" id="qWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">'+
