@@ -658,10 +658,16 @@ async function handleVoiceStatus(req, res) {
   const status = (params.DialCallStatus || '').toLowerCase();
   const answered = status === 'completed';
   const dur = parseInt(params.DialCallDuration, 10);
+  // Why a forward wasn't answered: no-answer (rang out), busy, failed (the
+  // handset's carrier rejected it) or canceled (caller hung up first). Heather
+  // 2026-09-24: a call showed as missed but her phone never rang -- without
+  // this there was no way to tell a blocked forward from an ignored one.
+  if (!answered) console.log(`[voice_status] ${sid.slice(-6)} dial ${status || 'unknown'} after ${Number.isFinite(dur) ? dur + 's' : '?'}`);
   try {
     const db = serviceClient();
     await db.from('calls').update({
       answered,
+      ...(!answered && status ? { warnings: [`Forward result: ${status}`] } : {}),
       duration_sec: Number.isFinite(dur) ? dur : null,
       ...(params.RecordingUrl ? { recording_url: params.RecordingUrl, has_recording: true } : {}),
       // An answered call needs no callback-queue entry — somebody already spoke
