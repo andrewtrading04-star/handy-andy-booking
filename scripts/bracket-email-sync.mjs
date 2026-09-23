@@ -203,6 +203,11 @@ const syncOrder = (payload) => syncTo('bracket_sync', payload);
 // mailboxes; per-term searches are simple and far more reliable, and a failure
 // of one term still lets the others through.
 const SEARCH_TERMS = [
+  // Gmail-native search (X-GM-RAW) first: it uses Gmail's own index, so it still
+  // answers on a huge inbox (andrewtrading04, 900+ unread) where the plain IMAP
+  // BODY searches below time out / come back NO. Scoped to the opened INBOX.
+  { gmraw: 'walmart' },
+  { gmraw: 'from:(auto-confirm@amazon.com OR ship-confirm@amazon.com OR order-update@amazon.com OR businessprofile-noreply@google.com OR landingsite.ai) OR "left a review for" OR "New customer message from" OR ANONION OR "brush wall plate" OR "cable pass through"' },
   { from: 'walmart.com' }, { body: 'walmart' },
   { from: 'auto-confirm@amazon.com' }, { from: 'ship-confirm@amazon.com' }, { from: 'order-update@amazon.com' },
   { body: 'ANONION' }, { body: 'brush wall plate' }, { body: 'cable pass through' },
@@ -218,7 +223,11 @@ async function searchUids(client, since) {
   for (const term of SEARCH_TERMS) {
     try {
       const uids = await client.search({ since, ...term }, { uid: true });
-      if (Array.isArray(uids)) for (const u of uids) all.add(u);
+      // imapflow returns `false` (it does NOT throw) when the server answers NO/BAD
+      // or the command dies. Counting that as "0 matches" is what made a mailbox
+      // full of Walmart orders report "no candidates" (2026-09-23).
+      if (!Array.isArray(uids)) throw new Error('SEARCH returned no result (server NO/BAD or command failed)');
+      for (const u of uids) all.add(u);
     } catch (e) {
       failed++; lastMsg = e.message;
       console.warn(`[bracket-sync] search ${JSON.stringify(term)} failed: ${e.message}`);
