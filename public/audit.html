@@ -2064,7 +2064,12 @@ async function loadQueue(){
   ]);
   const graded=new Set(g.ids||[]);
   qList=[...(d.open||[]),...(d.handled||[])]
+    // Only calls a secretary actually talked on (owner, 2026-09-24: "this call
+    // is just a voicemail, this shouldn't be audited"). Voicemails and calls
+    // "answered" by the phone system itself have no secretary to grade.
     .filter(r=>STAFFED_MARKETS.has(r.market) && r.recording_url && (r.kind==='live'||r.answered===true)
+      && !r.left_voicemail && (Number(r.duration_sec)||0)>=20
+      && r.occurred_at>=from.toISOString()
       && !r.blocked && !graded.has(r.id) && !qSkipped.has(r.id))
     .sort((a,b)=>a.occurred_at<b.occurred_at?-1:1);
   return qList;
@@ -2083,6 +2088,9 @@ $('startQueue').onclick=async()=>{
   qShow();
 };
 function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount(); if(qDone) load(); }
+// Every forwarded call is stored as handled_by "Answered"; the person is the
+// staff member it was forwarded to.
+function qWho(r){ const h=r.handled_by; return (h&&h!=='Answered'&&h!=='Booked')?h:(r.routed_to_name||h||''); }
 function qSlug(r){ const s=r.business&&r.business.slug; if(s) return s; return /dom/i.test((r.business&&r.business.name)||'')?'doms':'handy-andy'; }
 function qShow(){
   const ov=$('qOverlay'); if(!ov) return;
@@ -2091,7 +2099,7 @@ function qShow(){
     ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button></div>';
     $('qEnd').onclick=qClose; return;
   }
-  const who=whoLabel(r);
+  const who=qWho(r);
   qState={ r, svc: r.service==='Handyman'?'Handyman':'TV Mounting', ratings:{}, answers:{} };
   const left=qList.length-qIdx, pct=Math.round(100*qIdx/Math.max(1,qList.length));
   const h=r.history;
@@ -2123,11 +2131,16 @@ function qShow(){
       '<input type="text" id="qWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">'+
       '<h3 style="margin-top:12px;">📝 Notes</h3><textarea id="qNotes" rows="2" placeholder="Anything else (optional)"></textarea>'+
     '</div><div class="err" id="qErr"></div></div>'+
-    '<div class="qw-bar"><button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
+    '<div class="qw-bar"><button class="btn ghost" id="qVm" title="Voicemail or not a real conversation. Removes it from the list for good.">🔇 Voicemail</button><button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
   ov.scrollTop=0;
   $('qExit').onclick=qClose;
   $('qSkip').onclick=()=>{ qSkipped.add(r.id); qIdx++; qShow(); };
   $('qSave').onclick=qSave;
+  $('qVm').onclick=async()=>{
+    const b=$('qVm'); b.disabled=true; b.textContent='Removing…';
+    try{ await api('audit_skip',{method:'POST',body:{call_id:r.id, reason:'voicemail'}}); qList.splice(qIdx,1); qShow(); }
+    catch(e){ b.disabled=false; b.textContent='🔇 Voicemail'; $('qErr').textContent=e.message||'Could not remove it'; }
+  };
   $('qFlag').onchange=()=>{ $('qWhy').hidden=!$('qFlag').checked; if($('qFlag').checked) $('qWhy').focus(); };
   if($('qTxBtn')) $('qTxBtn').onclick=()=>{ const t=$('qTx'); t.hidden=!t.hidden; $('qTxBtn').textContent=t.hidden?'Show transcript':'Hide transcript'; };
   if($('qTexts')) $('qTexts').onclick=async e=>{
@@ -2174,7 +2187,7 @@ async function qSave(){
   if($('fSvc')) $('fSvc').value=qState.svc;
   const keep=new Set(); SECTIONS.forEach(s=>{ if(!s.when||s.when(null)) s.qs.forEach(q=>keep.add(q.k)); });
   const answers={}; Object.entries(qState.answers).forEach(([k,v])=>{ if(keep.has(k)) answers[k]=v; });
-  const who=whoLabel(r);
+  const who=qWho(r);
   const body={
     from_queue:true, business:qSlug(r),
     date:ctDateStr(r.occurred_at),

@@ -1,0 +1,1 @@
+create table if not exists app.audit_skips (call_id uuid primary key, reason text not null default 'voicemail', skipped_by text, created_at timestamptz not null default now()); alter table app.audit_skips enable row level security;

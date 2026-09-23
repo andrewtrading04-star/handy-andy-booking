@@ -92,6 +92,7 @@ export default async function handler(req, res) {
       case 'audit_save':   return await auditSave(req, res, db, auth, body);
       case 'audit_delete': return await auditDelete(req, res, db, auth, body);
       case 'graded_ids':   return await gradedIds(req, res, db);
+      case 'audit_skip':   return await auditSkip(req, res, db, auth, body);
       default:             return res.status(400).json({ error: 'Unknown action' });
     }
   } catch (e) {
@@ -140,7 +141,21 @@ async function gradedIds(req, res, db) {
   if (to) q = q.lt('occurred_at', to);
   const { data, error } = await q;
   if (error) throw error;
-  return res.status(200).json({ ids: (data || []).map(r => r.call_id) });
+  // Calls marked "not a real call" (voicemail) leave the queue for good too.
+  const { data: sk } = await db.from('audit_skips').select('call_id').limit(5000);
+  return res.status(200).json({ ids: (data || []).map(r => r.call_id).concat((sk || []).map(r => r.call_id)) });
+}
+
+// POST ?action=audit_skip -- owner, 2026-09-24: "this call is just a
+// voicemail. This shouldn't be audited." Removes one call from the queue.
+async function auditSkip(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = (body.call_id || '').toString();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'call_id required' });
+  const reason = ['voicemail', 'not_a_call'].includes(body.reason) ? body.reason : 'voicemail';
+  const { error } = await db.from('audit_skips').upsert({ call_id: id, reason, skipped_by: auth.name || 'Auditor' });
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }
 
 async function login(req, res, body) {
