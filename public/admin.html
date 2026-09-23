@@ -18478,13 +18478,16 @@ let cwStripe=null, cwStripeCard=null, cwStripePk=null, cwStripeLibraryPromise=nu
 function cwLoadStripeLibrary(){
   if(window.Stripe) return Promise.resolve();
   if(!cwStripeLibraryPromise){
+    let script;
     const loader=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src='https://js.stripe.com/v3/';
+      script=document.createElement('script');script.src='https://js.stripe.com/v3/';script.async=true;
       script.onload=()=>window.Stripe?resolve():reject(new Error('Card processor did not load.'));
       script.onerror=()=>reject(new Error('Could not load the card processor.'));
       document.head.appendChild(script);
     });
-    cwStripeLibraryPromise=nbWithTimeout(loader,20000,'Card processor did not answer. Check the connection and retry.').catch(error=>{cwStripeLibraryPromise=null;throw error;});
+    cwStripeLibraryPromise=nbWithTimeout(loader,20000,'Card processor did not answer. Check the connection and retry.')
+      .catch(error=>{script.remove();cwStripeLibraryPromise=null;throw error;})
+      .finally(()=>{script.onload=null;script.onerror=null;});
   }
   return cwStripeLibraryPromise;
 }
@@ -18837,7 +18840,12 @@ async function renderCallWiz(){
       busy(true);
       // The catalog can load while the call record is saved and the caller
       // gives their ZIP. This warms caches only; the active card owns the UI.
-      if(service==='TV Mounting') cwWarmTvCatalog(draft.business).catch(()=>{});
+      if(service==='TV Mounting'){
+        cwWarmTvCatalog(draft.business).catch(()=>{});
+        // Download only the library while the caller answers questions. The
+        // card Element and business-specific Stripe account are set at checkout.
+        cwLoadStripeLibrary().catch(()=>{});
+      }
       try{
         await cwStartRecord(draft);
         cwCallUpdate({service},draft).catch(()=>{});
@@ -22000,7 +22008,9 @@ let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
 // connection they can pend forever, which stranded the submit button on
 // "Processing…" (the 45s api() timeout only guards our own API calls).
 function nbWithTimeout(p,ms,msg){
-  return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
+  let timer;
+  return Promise.race([p,new Promise((_,rej)=>{timer=setTimeout(()=>rej(new Error(msg)),ms);})])
+    .finally(()=>clearTimeout(timer));
 }
 // Doms has its OWN Stripe account, separate from Handy Andy's — a card
 // tokenized with the wrong business's publishable key creates a real Stripe

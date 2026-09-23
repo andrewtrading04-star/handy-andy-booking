@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { signToken, verifyToken } from '../api/_lib/auth.js';
 import { compactReviewToken, expandReviewCode } from '../api/_lib/review-code.js';
 import { reviewRequestSms } from '../api/_lib/review-token.js';
+import { expandEstimateCode } from '../api/_lib/estimate-code.js';
 
 const booking_id = '2fa1333c-6072-4260-9c41-668599382e17';
 test('compact codes preserve booking and expiry, including legacy review claims', () => {
@@ -55,7 +56,7 @@ test('click handler resolves compact links and records original booking/channel'
   for(const input of [token,compactReviewToken(token),'invalid']) {
     const tracked=[];
     const db={from:()=>({update:patch=>({eq:(key,id)=>({is:async()=>{tracked.push({patch,id});return {};}})})})};
-    const ctx=vm.createContext({Buffer,Date,process:{env:{PUBLIC_URL:'https://booking.example'}},verifyToken,expandReviewCode,serviceClient:()=>db});
+    const ctx=vm.createContext({Buffer,Date,process:{env:{PUBLIC_URL:'https://booking.example'}},verifyToken,expandReviewCode,expandEstimateCode,serviceClient:()=>db});
     vm.runInContext(source.slice(start,end),ctx);
     const res={redirect:(status,url)=>({status,url})};
     const result=await ctx.serveReviewClick({query:{token:input,ch:'sms'}},res);
