@@ -380,6 +380,22 @@
   /* Phone layout, option A (owner pick 2026-09-23): one status dropdown +
      filter icon; Came from / Sort hide behind the icon; round + for new. */
   .est-mob{display:none;}
+  /* Calls on a phone: iPhone Recents look (see callInboxPhone). */
+  .cm-list{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .cm-row{border-bottom:1px solid var(--line2);}
+  .cm-row:last-child{border-bottom:none;}
+  .cm-head{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px 10px 8px;border:none;background:transparent;text-align:left;font:inherit;color:inherit;cursor:pointer;}
+  .cm-dir{flex:none;width:16px;color:#9aa1ab;display:flex;justify-content:center;}
+  .cm-line{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .cm-line strong{font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cm-line strong.missed{color:#e0242c;}
+  .cm-line span{font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cm-when{flex:none;font-size:14px;color:var(--mute);}
+  .cm-info{flex:none;width:22px;height:22px;border-radius:50%;border:1.5px solid #0B84FF;color:#0B84FF;font:italic 700 12px/19px Georgia,serif;text-align:center;}
+  .cm-row.open{box-shadow:inset 4px 0 0 var(--accent);}
+  .cm-row.open .cm-head{background:var(--accent-soft);}
+  .cm-body{padding:10px 10px 14px;border-top:1px solid var(--line2);}
+  @media(max-width:760px){ .ci-wrap > .rc-head .rc-sub{display:none;} .ci-wrap .rc-title{font-size:30px;font-weight:800;letter-spacing:-.02em;} }
   /* Customers: desktop shows the full table; a phone shows only name, phone
      and city, no sideways scroll (owner, 2026-09-23). Tap a row for the
      popup with everything else. */
@@ -12347,8 +12363,47 @@ function callFollowUp(r){
   if(r.status==='called_back') return 'Called back · Follow-up open';
   return 'Needs callback';
 }
+// iPhone Recents time: "4:12 PM" today, "Yesterday", weekday this week,
+// otherwise "9/14". Same per-market clock as callWhen.
+function callShortWhen(r){
+  const tz=CALL_TZ[r.market]||'America/Denver';
+  try{
+    const d=new Date(r.occurred_at), day=x=>new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).format(x);
+    const diff=Math.round((Date.parse(day(new Date()))-Date.parse(day(d)))/86400000);
+    if(diff<=0) return d.toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'});
+    if(diff===1) return 'Yesterday';
+    if(diff<7) return d.toLocaleDateString('en-US',{timeZone:tz,weekday:'long'});
+    return d.toLocaleDateString('en-US',{timeZone:tz,month:'numeric',day:'numeric'});
+  }catch(_){ return callWhen(r); }
+}
+let _callsMobOpen=null;
+// Phone (owner, 2026-09-23: "look more like an iphone"): the Recents list --
+// name (red when missed, "(3)" for repeat callers), one gray line, time and
+// an (i) on the right. Tap a row to open that caller's full card right under
+// it; tap again to close. Same detail content as the desktop right pane.
+function callInboxPhone(groups){
+  return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
+    const missed=r.answered===false;
+    const sub=[r.market||'Unrouted', g.blocked?'Blocked':callFollowUp(r)].join(' · ');
+    const later=g.rows.slice(1);
+    return `<div class="cm-row${on?' open':''}" id="cm-${esc(g.key)}">
+      <button type="button" class="cm-head" data-callmob="${esc(g.key)}" aria-expanded="${on}">
+        <span class="cm-dir" aria-hidden="true">${missed?'':'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/></svg>'}</span>
+        <span class="cm-line"><strong class="${missed?'missed':''}">${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}${g.rows.length>1?` (${g.rows.length})`:''}</strong><span>${esc(sub)}</span></span>
+        <span class="cm-when">${esc(callShortWhen(r))}</span>
+        <span class="cm-info" aria-hidden="true">i</span>
+      </button>
+      ${on?`<div class="cm-body">
+        ${g.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped.</div>`:''}
+        ${callHaveBoxes(g)}
+        ${callCard(r, !g.open, g)}
+        ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+      </div>`:''}
+    </div>`; }).join('')}</div>`;
+}
 function callInbox(groups){
-  if(_callFocusId){ const fg=groups.find(g=>g.rows.some(r=>r.id===_callFocusId)); if(fg) _callsSelected=fg.key; }
+  if(_callFocusId){ const fg=groups.find(g=>g.rows.some(r=>r.id===_callFocusId)); if(fg){ _callsSelected=fg.key; _callsMobOpen=fg.key; } }
+  if(window.innerWidth<760) return callInboxPhone(groups);
   const selected=groups.find(g=>g.key===_callsSelected)||groups[0];
   _callsSelected=selected.key;
   const later=selected.rows.slice(1);
@@ -12442,6 +12497,11 @@ function paintCalls(){
   </div>`;
   if(view.querySelector('.ci-list')) view.querySelector('.ci-list').scrollTop=listScroll;
   if(view.querySelector('.ci-detail')) view.querySelector('.ci-detail').scrollTop=detailScroll;
+  view.querySelectorAll('[data-callmob]').forEach(b=>b.addEventListener('click',()=>{
+    const k=b.dataset.callmob; _callsMobOpen=_callsMobOpen===k?null:k; if(_callsMobOpen) _callsSelected=k;
+    paintCalls();
+    if(_callsMobOpen) document.getElementById('cm-'+k)?.scrollIntoView({behavior:'smooth',block:'start'});
+  }));
   view.querySelectorAll('[data-callselect]').forEach(b=>b.addEventListener('click',()=>{
     _callsSelected=b.dataset.callselect; paintCalls();
     const selectedButton=[...view.querySelectorAll('[data-callselect]')].find(el=>el.dataset.callselect===_callsSelected);
