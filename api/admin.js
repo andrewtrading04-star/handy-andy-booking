@@ -24,6 +24,7 @@ import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage, textConsentFor } from './_lib/sms.js';
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendCouponFollowup } from './_lib/estimate-followup.js';
+import { myDay } from './_lib/my-day.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
 import { QUESTIONS as APPLY_QUESTIONS } from './_lib/apply-quiz.js';
@@ -530,6 +531,7 @@ export default async function handler(req, res) {
       case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
       case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
+      case 'my_day': return await myDay(req, res, db, auth, body);
       case 'estimate_bulk_close': return await estimateBulkClose(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
       case 'estimate_broker':          return await estimateBroker(req, res, db, auth, body);
