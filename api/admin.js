@@ -1392,9 +1392,9 @@ async function calendar(req, res, db, auth) {
     // brand's real schedule and needs no ghosts of itself. Still read-only and
     // still a separate list, so it can never leak into payroll or job counts.
     if (['handy-andy', 'doms'].includes(biz.slug)) {
-      // Owner, 2026-09-24: the other staffed brand too (Dom's jobs faded on the
-      // Handy Andy schedule and vice versa), not just the lead-gen brands.
-      const leadGenIds = otherBizIds;
+      // Owner, 2026-09-24: for the OWNER only, the other staffed brand too (Dom's
+      // jobs faded on Handy Andy and vice versa). Secretaries keep lead-gen only.
+      const leadGenIds = auth && auth.role === 'owner' ? otherBizIds : otherBizIds.filter(id => !['handy-andy', 'doms'].includes(otherBizById[id].slug));
       if (leadGenIds.length) {
         const { data: lgbk, error: lgErr } = await db.from('bookings')
           .select('id, business_id, technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
