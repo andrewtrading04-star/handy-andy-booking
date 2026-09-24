@@ -15529,7 +15529,13 @@ function estCard(e){
   const followedLine=fuLast?`<div class="est-fu-line">↻ We followed up with customer at ${esc(fmtSentAt(fuLast.at))}${fuLast.by?` · ${esc(fuLast.by)}`:''}${fuStamps.length>1?` · ${fuStamps.length} follow-ups`:''}</div>`:'';
   // The system's own 3-hour follow-up email (followup_emailed_at, migration 0131).
   const autoLine=e.followup_emailed_at?`<div class="est-fu-line">✉ $20-off coupon email ${e.followup_sent_by?'sent by '+esc(e.followup_sent_by):'automatically sent'} · ${esc(fmtSentAt(e.followup_emailed_at))}</div>`:'';
-  const sentLine=textedLine+emailedLine+legacySentLine+autoLine+followedLine;
+  // Owner, 2026-09-24: show every channel, including the ones that did NOT go out.
+  const _sentAny=!!(e.texted_at||e.emailed_at||e.contacted_at);
+  const missLine=t=>`<div class="est-sent-line" style="color:var(--mute);">✗ ${t}</div>`;
+  const noTextLine=(_sentAny&&!e.texted_at&&e.texted_at!==undefined)?missLine(e.customer_phone?'Not texted':'Not texted — no phone on file'):'';
+  const noEmailLine=(_sentAny&&!e.emailed_at&&e.emailed_at!==undefined)?missLine(e.customer_email?'Not emailed':'Not emailed — no email on file'):'';
+  const noCouponLine=(_sentAny&&!e.followup_emailed_at&&!e.approved_at&&e.status!=='declined')?missLine(e.customer_email?'3-hour coupon email not sent yet':'3-hour coupon email can’t go out — no email on file'):'';
+  const sentLine=textedLine+noTextLine+emailedLine+noEmailLine+legacySentLine+autoLine+noCouponLine+followedLine;
   // "Needs Response" past EST_STALE_MINUTES with nobody having touched it yet —
   // same threshold as the sidebar badge / dashboard banner / greeting sentence.
   const stale=isStaleEstimate(e);
