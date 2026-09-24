@@ -15466,7 +15466,7 @@ function estCard(e){
   const taxLines=eTax>0?
     `<div class="est-quote-sub"><span>Subtotal</span><span>${money2(t.subtotal)}</span></div>`+
     `<div class="est-quote-sub"><span>Tax</span><span>${money2(t.tax)}</span></div>`:'';
-  const quote=lines.length?`<div class="est-quote">${lines.map(it=>{
+  const quote=lines.length?`<div class="est-quote">${lines.filter(it=>liQty(it)*(Number(it.unit_price)||0)!==0).map(it=>{
     const qty=liQty(it); const lt=qty*(Number(it.unit_price)||0);
     return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
   }).join('')}${taxLines}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(t.total)}</span></div></div>`:'';

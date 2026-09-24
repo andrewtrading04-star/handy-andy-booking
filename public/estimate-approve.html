@@ -232,7 +232,7 @@ function showError(msg){ $('loading').style.display='none'; const e=$('errorBox'
 let TECH_FIRST='';   // set when the office tied this quote to one technician
 function renderQuote(info){
   TECH_FIRST = (info && info.technician_first_name) || '';
-  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&(it.description||Number(it.unit_price)!==0)&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
+  const items = Array.isArray(info.line_items) ? info.line_items.filter(it=>it&&((Number(it.qty)||1)*(Number(it.unit_price)||0))!==0&&!/^\s*tv\s*type\s*:\s*regular\b/i.test(it.description||'')) : [];
   const svc = info.service_label ? `<div class="svc">${esc(info.service_label)}</div>` : '';
   // $20 follow-up coupon (api/_lib/estimate-followup.js) — the discount line
   // is already folded into info.line_items above by estimate_approve_info, so

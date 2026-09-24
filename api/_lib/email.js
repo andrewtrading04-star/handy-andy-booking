@@ -1009,7 +1009,7 @@ export function estimateEmail(details = {}, brand = EMAIL_BRANDS['handy-andy']) 
       qty: Number(it && it.qty) || 0,
       unit_price: Number(it && it.unit_price) || 0,
     }))
-    .filter(it => (it.description || it.unit_price !== 0) && !isDefaultTypeLabel(it.description));
+    .filter(it => (it.qty || 1) * it.unit_price !== 0 && !isDefaultTypeLabel(it.description));
   const hasLineItems = lineItems.length > 0;
   // Fold the coupon in as a real line -- same as the approve page does with
   // the identical token, so the total below and the total after approving
