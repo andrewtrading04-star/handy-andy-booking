@@ -183,13 +183,10 @@ async function smart(req, res, db, body) {
   _client ||= new Anthropic();
   let msg;
   try {
-    msg = await _client.beta.messages.create({
-      model: 'claude-opus-5',
+    // Owner, 2026-09-24: Opus 5.5 only -- no fallback to any other model.
+    msg = await _client.messages.create({
+      model: 'claude-opus-5-5',
       max_tokens: 4000,
-      // A safety decline re-runs on Anthropic's recommended fallback model
-      // inside the same call instead of failing.
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SMART_SCHEMA } },
       system: SMART_SYSTEM,
       messages: [{ role: 'user', content: `Planner right now:\n${JSON.stringify(context)}\n\nHe says: ${text}` }],

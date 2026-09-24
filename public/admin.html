@@ -9891,9 +9891,55 @@ function noteScheduledPill(n){
 let _myDay=null, _myDayView=null, _myDayHabitEdit=false, _myDaySmartReply='';
 const myDayFmt=d=>{ const t=new Date(d+'T12:00:00Z'); return t.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'}); };
 const myDayShift=(d,n)=>{ const t=new Date(d+'T12:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10); };
+// Speed (owner, 2026-09-24: "this is laggy"): taps change the page at once,
+// the save runs behind it, and only the LAST save's answer repaints, so quick
+// taps never flicker back. A failed save reloads the real page.
+let _myDaySeq=0;
+function myDayLocal(op,body){
+  const d=_myDay; if(!d) return;
+  const t=(d.tasks||[]).find(x=>x.id===body.id), h=(d.habits||[]).find(x=>x.id===body.id), l=(d.list||[]).find(x=>x.id===body.id);
+  if(op==='task_done'&&t) t.done=!!body.done;
+  else if(op==='task_edit'&&t&&'starred' in body) t.starred=!!body.starred;
+  else if(op==='task_delete') d.tasks=(d.tasks||[]).filter(x=>x.id!==body.id);
+  else if(op==='habit_check'&&h){ h.done=!!body.done; if(!body.done) h.skipped=false; }
+  else if(op==='list_done'&&l) l.done=!!body.done;
+  else if(op==='list_delete') d.list=(d.list||[]).filter(x=>x.id!==body.id);
+  else if(op==='task_add') (d.tasks=d.tasks||[]).push({ id:'tmp'+Date.now(), title:body.title, done:false });
+  else if(op==='list_add') (d.list=d.list||[]).push({ id:'tmp'+Date.now(), title:body.title, done:false });
+  else return;
+  paintMyDay();
+}
 async function myDayCall(op,body){
-  try{ _myDay=await api('my_day',{ method:'POST', body:{ op, ...body }}); _myDayView=_myDay.day; paintMyDay(); }
-  catch(e){ toast(e.message||'Could not save'); }
+  const seq=++_myDaySeq;
+  try{ myDayLocal(op,body); }catch(_){}
+  try{
+    const r=await api('my_day',{ method:'POST', body:{ op, ...body }});
+    if(seq!==_myDaySeq) return;
+    _myDay=r; _myDayView=_myDay.day; paintMyDay();
+  }catch(e){ toast(e.message||'Could not save'); renderMyDay(); }
+}
+// Voice (owner: "the voice button doesn't work well"): keeps listening until you
+// tap again or pause, shows the words as you speak, and says why if the mic is blocked.
+function myDayDictate(btn,input){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR||!input) return;
+  if(btn._rec){ try{ btn._rec.stop(); }catch(_){} return; }
+  const r=new SR(); btn._rec=r;
+  r.lang='en-US'; r.interimResults=true; r.continuous=true; r.maxAlternatives=1;
+  const base=input.value.trim(); let finalTxt='';
+  btn.classList.add('on');
+  r.onresult=ev=>{
+    let interim='';
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const tx=ev.results[i][0].transcript;
+      if(ev.results[i].isFinal) finalTxt+=tx+' '; else interim+=tx;
+    }
+    input.value=(base+' '+finalTxt+interim).replace(/\s+/g,' ').trim();
+  };
+  r.onend=()=>{ btn._rec=null; btn.classList.remove('on'); input.focus(); };
+  r.onerror=ev=>{ btn._rec=null; btn.classList.remove('on');
+    if(ev.error==='not-allowed'||ev.error==='service-not-allowed') toast('Microphone is blocked. Allow it in the browser address bar.');
+    else if(ev.error!=='aborted'&&ev.error!=='no-speech') toast('Could not hear that. Try again.'); };
+  try{ r.start(); }catch(_){ btn._rec=null; btn.classList.remove('on'); }
 }
 async function renderMyDay(){
   const view=document.getElementById('view');
@@ -9960,17 +10006,9 @@ function paintMyDay(){
   if($('mdNext')) $('mdNext').onclick=()=>{ if(live) return; _myDayView=myDayShift(d.day,1); renderMyDay(); };
   if($('mdToday')) $('mdToday').onclick=e=>{ e.preventDefault(); _myDayView=null; renderMyDay(); };
   if($('mdAdd')){
-    $('mdAdd').onsubmit=e=>{ e.preventDefault(); const v=$('mdInput').value.trim(); if(!v) return; $('mdInput').value=''; myDayCall('task_add',{ title:v }).then(()=>$('mdInput')?.focus()); };
+    $('mdAdd').onsubmit=e=>{ e.preventDefault(); const v=$('mdInput').value.trim(); if(!v) return; $('mdInput').value=''; myDayCall('task_add',{ title:v }); $('mdInput')?.focus(); };
     const mic=$('mdMic');
-    if(mic) mic.onclick=()=>{
-      const SR=window.SpeechRecognition||window.webkitSpeechRecognition; const r=new SR();
-      r.lang='en-US'; r.interimResults=false; r.maxAlternatives=1;
-      mic.classList.add('on');
-      r.onresult=ev=>{ const txt=ev.results[0][0].transcript; $('mdInput').value=(($('mdInput').value+' ')+txt).trim(); };
-      r.onend=()=>{ mic.classList.remove('on'); $('mdInput')?.focus(); };
-      r.onerror=()=>{ mic.classList.remove('on'); toast('Could not hear that. Try again.'); };
-      r.start();
-    };
+    if(mic) mic.onclick=()=>myDayDictate(mic,$('mdInput'));
   }
   if($('mdSmart')){
     $('mdSmart').onsubmit=async e=>{
@@ -9980,13 +10018,7 @@ function paintMyDay(){
       catch(err){ go.disabled=false; go.textContent='Sort it out'; toast(err.message||'Could not do that'); }
     };
     const sm=$('mdSmartMic');
-    if(sm) sm.onclick=()=>{
-      const SR=window.SpeechRecognition||window.webkitSpeechRecognition; const r=new SR();
-      r.lang='en-US'; r.interimResults=false; sm.classList.add('on');
-      r.onresult=ev=>{ $('mdSmartText').value=(($('mdSmartText').value+' ')+ev.results[0][0].transcript).trim(); };
-      r.onend=()=>sm.classList.remove('on'); r.onerror=()=>{ sm.classList.remove('on'); toast('Could not hear that. Try again.'); };
-      r.start();
-    };
+    if(sm) sm.onclick=()=>myDayDictate(sm,$('mdSmartText'));
   }
   view.querySelectorAll('[data-mdtask]').forEach(b=>b.onclick=()=>myDayCall('task_done',{ id:b.dataset.mdtask, done:b.dataset.done!=='1' }));
   view.querySelectorAll('[data-mdstar]').forEach(b=>b.onclick=()=>myDayCall('task_edit',{ id:b.dataset.mdstar, starred:b.dataset.on!=='1' }));
