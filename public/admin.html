@@ -12504,7 +12504,7 @@ async function renderMyCallPerformance(){
       ${n.flagged?'<span style="color:#b42318;font-weight:700;font-size:12px;">Flagged</span>':''}</div>
     <div style="font-size:12.5px;color:var(--ink-2);">${who}</div>
     ${meta||script?`<div style="font-size:12px;color:var(--mute);margin:2px 0 6px;">${meta}${meta&&script?' · ':''}${script}</div>`:'<div style="height:6px;"></div>'}
-    <div style="font-size:13px;line-height:1.45;color:var(--ink);"><span style="color:var(--mute);">${esc(n.audited_by||'Jiyah')}:</span> ${esc(n.notes)}</div></div>`;
+    <div style="font-size:13px;line-height:1.45;color:var(--ink);"><span style="color:var(--mute);">Office:</span> ${esc(n.notes)}</div></div>`;
   }).join('');
 
   view.innerHTML=`<div class="wrap">
@@ -12515,7 +12515,7 @@ async function renderMyCallPerformance(){
     ${ecBox}
     <div class="est-filters" style="margin-bottom:14px;">${rangeBtns}</div>
 
-    <div class="greet-stats" style="margin-bottom:18px;">
+    <div class="greet-stats" style="margin-bottom:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
       ${stat('Calls taken', String(d.calls||0), `${d.not_booked||0} did not book`)}
       ${stat('Booked', String(d.booked||0), `${d.estimates||0} estimate${(d.estimates||0)===1?'':'s'} sent`,'#15803d')}
       ${stat('Conversion', (d.conversion||0)+'%', 'calls that became jobs', convColor)}
@@ -12523,16 +12523,16 @@ async function renderMyCallPerformance(){
     </div>
 
     <section style="margin:0 0 22px;">
-      <div class="rc-count" style="margin-bottom:8px;">Jiyah’s audit feedback</div>
+      <div class="rc-count" style="margin-bottom:8px;">Office notes</div>
       <div style="font-size:13px;color:var(--mute);margin-bottom:10px;">Your script reviews and coaching notes for this period.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         ${auditStat('Script score',audit.script_score==null?'—':audit.script_score+'%',audit.audited?`across ${audit.audited} review${audit.audited===1?'':'s'}`:'No reviews yet','#315ad7')}
-        ${auditStat('Calls reviewed',String(audit.audited||0),'Jiyah’s completed audits')}
+        ${auditStat('Calls reviewed',String(audit.audited||0),'Completed reviews')}
         ${auditStat('Flagged',String(audit.flagged||0),audit.flagged?'Calls to revisit':'No flagged calls',audit.flagged?'#b42318':'#15803d')}
       </div>
       ${(audit.questions||[]).length||auditNotes?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
         ${(audit.questions||[]).length?`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;"><div style="font-size:13px;font-weight:800;padding:10px 0 6px;">Coaching focus</div>${auditQuestions}</div>`:''}
-        ${auditNotes?`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;"><div style="font-size:13px;font-weight:800;padding:10px 0 6px;">Jiyah’s notes</div>${auditNotes}</div>`:''}
+        ${auditNotes?`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;"><div style="font-size:13px;font-weight:800;padding:10px 0 6px;">Notes</div>${auditNotes}</div>`:''}
       </div>`:`<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;color:var(--mute);font-size:13px;">No audit feedback has been added for this period yet.</div>`}
     </section>
 
