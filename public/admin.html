@@ -467,6 +467,8 @@
   .pl-bar-fill.warn{background:#f59e0b;} .pl-bar-fill.bad{background:#dc2626;}
   .pl-bar-num{font-size:12.5px;color:var(--ink-2);font-weight:700;white-space:nowrap;}
   .pl-list{display:flex;flex-direction:column;gap:8px;}
+  body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
+  body.sec-nav #navOther{display:flex !important;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
   .pl-card.leak{border:2px solid #dc2626;}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
@@ -3107,6 +3109,9 @@ function enterApp(){
   // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
   if(navTech) navTech.style.display = '';
+  // Secretaries (owner, 2026-09-24): no Pipeline; Bracket Inventory, My
+  // Availability, Technicians, Customers and Photos move under their own Other tab.
+  document.body.classList.toggle('sec-nav', role==='secretary');
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
   renderSwitcher();
@@ -10916,6 +10921,19 @@ async function renderDomainWatch(){
 // ── "Other" tab: a home for occasional tools (currently Disputes) ────────────
 async function renderOther(){
   const view=document.getElementById('view');
+  if(role==='secretary'){
+    const tile=(nav,ic,t,d)=>`<div data-othernav="${nav}" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;"><div><div style="font-weight:700;">${ic} ${t}</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">${d}</div></div><span style="color:var(--mute);font-size:20px;">›</span></div>`;
+    view.innerHTML=`<div class="wrap"><h2 style="margin:0 0 16px;">Other</h2><div style="display:flex;flex-direction:column;gap:10px;max-width:520px;">
+      ${tile('customers','👥','Customers','Look up any customer and their jobs.')}
+      ${tile('technicians','🔧','Technicians','Your techs and their schedules.')}
+      ${tile('gallery','📷','Photos','Job photos from the techs.')}
+      ${tile('brackets','📦','Bracket Inventory','Brackets on hand with each tech.')}
+      ${tile('myavailability','🗓️','My Availability','Your work and off days.')}
+      ${tile('notes','📌','Notes','Notes from the owner, with photos.')}
+    </div></div>`;
+    view.querySelectorAll('[data-othernav]').forEach(el=>el.onclick=()=>{ const n=el.dataset.othernav; if(n==='notes') renderNotes(); else navTo(n); });
+    return;
+  }
   view.innerHTML=`<div class="wrap">
     <h2 style="margin:0 0 4px;">Other</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:16px;">Occasional tools and back-office tasks.</div>
