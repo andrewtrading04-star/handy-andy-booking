@@ -1,0 +1,1 @@
+-- 0143 applied via MCP: app.ask_questions, app.ask_knowledge

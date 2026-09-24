@@ -469,6 +469,16 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
+  .ask-wrap{max-width:760px;} .ask-chat{display:flex;flex-direction:column;gap:6px;max-height:calc(100dvh - 300px);overflow-y:auto;padding:4px 0 10px;}
+  .ask-q{align-self:flex-end;background:#2563eb;color:#fff;padding:9px 13px;border-radius:16px 16px 4px 16px;max-width:80%;white-space:pre-wrap;}
+  .ask-a{align-self:flex-start;background:var(--panel);border:1px solid var(--line);padding:9px 13px;border-radius:16px 16px 16px 4px;max-width:85%;white-space:pre-wrap;}
+  .ask-a.ask-unk{border-color:#fca5a5;background:#fef2f2;} .ask-wait{color:var(--mute);}
+  .ask-draft{margin-top:8px;border-top:1px dashed var(--line);padding-top:8px;font-size:13px;} .ask-draft span{float:right;} .ask-draft .btn{margin-top:8px;}
+  .ask-form{display:flex;flex-direction:column;gap:6px;} .ask-form textarea,.ask-teach textarea{width:100%;box-sizing:border-box;font:inherit;border:1px solid var(--line);border-radius:10px;padding:10px;}
+  .ask-row{display:flex;justify-content:flex-end;gap:6px;} .ask-row .btn{width:auto;}
+  .ask-log{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;} .ask-log-open{border:2px solid #fca5a5;}
+  .ask-log-h{font-size:12.5px;color:var(--mute);} .ask-log-q{font-weight:700;margin:4px 0;} .ask-log-a{font-size:14px;color:var(--ink-2);white-space:pre-wrap;}
+  .ask-teach{display:flex;flex-direction:column;gap:6px;margin-top:8px;} .ask-teach .btn{align-self:flex-end;width:auto;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
   .pl-card.leak{border:2px solid #dc2626;}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
@@ -2146,6 +2156,7 @@
       <button data-nav="gallery" id="navGallery"><span class="ic" data-ico="camera">📷</span> Photos</button>
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
+      <button data-nav="askandrew" id="navAskAndrew" style="display:none;"><span class="ic" data-ico="other">🤖</span> Ask Andrew</button>
       <button data-nav="myday" id="navMyDay"><span class="ic" data-ico="other">📝</span> My Day</button>
       <button data-nav="notes" id="navNotes" style="display:none;"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
@@ -3086,6 +3097,10 @@ function enterApp(){
   // My Day: the owner's personal planner -- nobody else ever sees it.
   const navMyDay=document.getElementById('navMyDay');
   if(navMyDay) navMyDay.style.display = role==='owner' ? '' : 'none';
+  // Ask Andrew (owner, 2026-09-24): owner-only while he teaches it.
+  const navAsk=document.getElementById('navAskAndrew');
+  if(navAsk) navAsk.style.display = role==='owner' ? '' : 'none';
+  if(role==='owner') askRefreshBadge();
   if(role==='owner') startMyDayNudge();
   // Pipeline: owner and both secretaries (they call back from it on their
   // phones). Never the auditor -- the server refuses that role too, and the
@@ -3453,7 +3468,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline',askandrew:'Ask Andrew'})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -3477,6 +3492,7 @@ function navTo(s){
     else if(s==='notes') renderNotes();
     else if(s==='myday') renderMyDay();
     else if(s==='pipeline') renderPipeline();
+    else if(s==='askandrew') renderAskAndrew();
   }
 }
 function refreshCurrent(){
@@ -11864,6 +11880,7 @@ const ANALYTICS_TABS=[
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
+  { id:'askq', get label(){ return _askOpen?`Ask Andrew (${_askOpen} to answer)`:'Ask Andrew'; }, screen:'askq', show:()=>role==='owner', render:()=>renderAskLog() },
 ];
 // callHubTab starts null and resolves on first render: the owner lands on
 // the Log (the by-number call view they asked for), while secretaries land
@@ -11945,6 +11962,82 @@ async function renderHub(tabs, activeId, onPick){
 async function renderCallHub(){
   if(!callHubTab) callHubTab = role==='owner' ? 'log' : 'reviewcalls';
   await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); });
+}
+// ── Ask Andrew (owner, 2026-09-24) ─────────────────────────────────────────
+// An AI version of the owner staff can ask anything; "I don't know" when it
+// isn't sure, never made up. Unknowns show as an alert here for him to answer
+// once -- his answer becomes its knowledge.
+let _askOpen=0, _askChat=[], _askBusy=false;
+async function askRefreshBadge(){
+  try{
+    const d=await api('ask_andrew');
+    _askOpen=d.unknown_open||0;
+    const nav=document.getElementById('navAnalyticsHub');
+    if(nav){ let b=nav.querySelector('.ask-badge'); if(!b){ b=document.createElement('span'); b.className='nav-badge ask-badge'; b.style.background='#dc2626'; nav.appendChild(b); } b.textContent=_askOpen; b.style.display=_askOpen?'':'none'; b.title=_askOpen+' Ask Andrew question(s) it could not answer'; }
+    return d;
+  }catch(_){ return null; }
+}
+function renderAskAndrew(){
+  const view=document.getElementById('view');
+  const bubbles=_askChat.map((m,i)=>`<div class="ask-q">${esc(m.q)}</div>`+(m.a==null?'<div class="ask-a ask-wait">Thinking…</div>':
+    `<div class="ask-a${m.known?'':' ask-unk'}">${esc(m.a)}${m.draft?`<div class="ask-draft"><b>Draft estimate · ${esc(m.draft.service_label||'')}</b>${(m.draft.line_items||[]).map(li=>`<div>${li.qty>1?'×'+li.qty+' ':''}${esc(li.description)} <span>$${(Number(li.unit_price)*(Number(li.qty)||1)).toFixed(2)}</span></div>`).join('')}<button class="btn sm" data-askdraft="${i}">Open as estimate</button></div>`:''}</div>`)).join('');
+  view.innerHTML=`<div class="wrap ask-wrap">
+    <h2 style="margin:0 0 2px;">Ask Andrew</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:12px;">Ask anything about the business. Short answers. It says “I don’t know” when it doesn’t.</div>
+    <div class="ask-chat" id="askChat">${bubbles||'<div class="empty" style="padding:24px 0;">Try: “Price for a 75 inch over a fireplace in 80219?”</div>'}</div>
+    <form id="askForm" class="ask-form" autocomplete="off">
+      <textarea id="askInput" rows="2" maxlength="2000" placeholder="Ask a question…"></textarea>
+      <div class="ask-row">${(window.SpeechRecognition||window.webkitSpeechRecognition)?'<button type="button" id="askMic" class="md-mic" aria-label="Speak">🎙</button>':''}<button type="submit" class="btn" id="askGo" ${_askBusy?'disabled':''}>Ask</button></div>
+    </form></div>`;
+  const chat=$('askChat'); chat.scrollTop=chat.scrollHeight;
+  const inp=$('askInput');
+  inp.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); $('askForm').requestSubmit(); } };
+  if($('askMic')) $('askMic').onclick=()=>myDayDictate($('askMic'),inp);
+  $('askForm').onsubmit=async e=>{
+    e.preventDefault(); const q=inp.value.trim(); if(!q||_askBusy) return;
+    const history=_askChat.filter(m=>m.a!=null).slice(-6).map(m=>({q:m.q,a:m.a}));
+    const m={q,a:null}; _askChat.push(m); _askBusy=true; renderAskAndrew();
+    try{ const r=await api('ask_andrew',{method:'POST',body:{op:'ask',question:q,history,business:current&&current.slug},timeoutMs:90000}); m.a=r.answer; m.known=r.known; m.draft=r.draft; }
+    catch(err){ m.a='Error: '+(err.message||'try again'); m.known=true; }
+    _askBusy=false; if(onScreen('askandrew')) renderAskAndrew(); askRefreshBadge();
+  };
+  view.querySelectorAll('[data-askdraft]').forEach(b=>b.onclick=()=>{
+    const d=_askChat[Number(b.dataset.askdraft)].draft;
+    openNewBooking({ _estimateOnly:true, line_items:(d.line_items||[]).map(li=>({ description:li.description, qty:li.qty, unit_price:li.unit_price })) });
+  });
+  setTimeout(()=>inp.focus(),0);
+}
+async function renderAskLog(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  const d=await askRefreshBadge();
+  if(!d){ view.innerHTML='<div class="wrap"><div class="empty">Could not load questions.</div></div>'; return; }
+  const qs=d.questions||[];
+  const when=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  const open=qs.filter(q=>!q.known&&!q.taught_at), rest=qs.filter(q=>q.known||q.taught_at);
+  const row=q=>`<div class="ask-log${!q.known&&!q.taught_at?' ask-log-open':''}">
+      <div class="ask-log-h"><b>${esc(q.asked_by||'Someone')}</b> · ${esc(when(q.created_at))}${!q.known?(q.taught_at?' · <span style="color:#15803d;">✓ you answered</span>':' · <span style="color:#dc2626;font-weight:700;">Didn’t know</span>'):''}</div>
+      <div class="ask-log-q">${esc(q.question)}</div>
+      <div class="ask-log-a">${esc(q.taught_answer||q.answer||'')}</div>
+      ${!q.known&&!q.taught_at?`<form class="ask-teach" data-askteach="${esc(q.id)}"><textarea rows="2" placeholder="Your answer. It will know this from now on."></textarea><button class="btn sm" type="submit">Teach it</button></form>`:''}
+    </div>`;
+  view.innerHTML=`<div class="wrap">
+    <h2 style="margin:0 0 4px;">Ask Andrew — questions</h2>
+    <div class="sub" style="color:var(--mute);margin-bottom:12px;">Everything staff asked. Red = it didn’t know. Answer once and it learns.</div>
+    <form class="ask-teach" id="askTeachFree" style="margin-bottom:16px;"><textarea rows="2" placeholder="Teach it anything (a rule, a price, how you handle something)…"></textarea><button class="btn sm" type="submit">Add to its knowledge</button></form>
+    ${open.length?`<div class="rc-count" style="margin:6px 0;">Needs your answer · ${open.length}</div>${open.map(row).join('')}`:''}
+    <div class="rc-count" style="margin:14px 0 6px;">All questions · ${qs.length}</div>
+    ${rest.map(row).join('')||'<div class="empty">No questions yet.</div>'}
+  </div>`;
+  const teach=async(form,id)=>{
+    const t=form.querySelector('textarea').value.trim(); if(!t) return;
+    const b=form.querySelector('button'); b.disabled=true; b.textContent='Saving…';
+    try{ await api('ask_andrew',{method:'POST',body:{op:'teach',id,answer:t}}); toast('Learned.'); renderAskLog(); }
+    catch(err){ b.disabled=false; b.textContent='Try again'; toast(err.message||'Could not save'); }
+  };
+  view.querySelectorAll('[data-askteach]').forEach(f=>f.onsubmit=e=>{ e.preventDefault(); teach(f,f.dataset.askteach); });
+  $('askTeachFree').onsubmit=e=>{ e.preventDefault(); teach(e.target,null); };
+  api('ask_andrew',{method:'POST',body:{op:'seen'}}).catch(()=>{});
 }
 async function renderAnalyticsHub(){
   await renderHub(ANALYTICS_TABS, analyticsHubTab, id=>{ analyticsHubTab=id; renderAnalyticsHub(); });

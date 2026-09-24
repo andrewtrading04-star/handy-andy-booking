@@ -25,6 +25,7 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutS
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { myDay } from './_lib/my-day.js';
+import { askHandler } from './_lib/ask.js';
 import { pipelineHandler, pipelineCallTarget, inboundForLiveStart } from './_lib/pipeline.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
@@ -539,6 +540,7 @@ export default async function handler(req, res) {
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
       case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
       case 'my_day': return await myDay(req, res, db, auth, body);
+      case 'ask_andrew': return await askHandler(req, res, db, auth, body);
       // Owner + secretaries only: pipelineHandler refuses role 'auditor', and
       // 'pipeline' must never be added to AUDITOR_ADMIN_ACTIONS.
       case 'pipeline': return await pipelineHandler(req, res, db, auth, body);
