@@ -167,7 +167,12 @@ Unused fields are null.`;
 let _client;
 async function smart(req, res, db, body) {
   const text = clean(body.text, 2000);
-  if (!text) return res.status(400).json({ error: 'Say something first' });
+  // Screenshots (owner, 2026-09-24): up to 4 compressed images as data URLs.
+  const images = (Array.isArray(body.images) ? body.images : []).slice(0, 4)
+    .map(u => /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(u || '')))
+    .filter(m => m && m[2].length < 6000000)
+    .map(m => ({ type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } }));
+  if (!text && !images.length) return res.status(400).json({ error: 'Say something first' });
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'AI is not set up (ANTHROPIC_API_KEY missing).' });
   const today = myDayToday();
   const page = await readPage(db, today);
@@ -189,7 +194,10 @@ async function smart(req, res, db, body) {
       max_tokens: 4000,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SMART_SCHEMA } },
       system: SMART_SYSTEM,
-      messages: [{ role: 'user', content: `Planner right now:\n${JSON.stringify(context)}\n\nHe says: ${text}` }],
+      messages: [{ role: 'user', content: [
+        ...images,
+        { type: 'text', text: `Planner right now:\n${JSON.stringify(context)}\n\n${images.length ? `He attached ${images.length} screenshot(s), often WhatsApp chats. Read them and turn anything he needs to do or remember into planner actions.\n\n` : ''}He says: ${text || '(nothing typed; use the screenshots)'}` },
+      ] }],
     });
   } catch (e) {
     console.error('[my_day smart] Claude call failed:', e.status, e.message);

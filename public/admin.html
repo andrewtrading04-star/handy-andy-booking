@@ -424,6 +424,8 @@
   .md-habit.skip>button:first-child{background:#f1f5f9;border-style:dashed;color:#64748b;text-decoration:line-through;}
   .md-smart{background:linear-gradient(0deg,#eef4ff,#eef4ff);border:2px solid #c7d7fe;border-radius:14px;padding:10px;margin-bottom:10px;}
   .md-smart textarea{width:100%;box-sizing:border-box;border:none;background:transparent;font:inherit;font-size:15.5px;resize:vertical;outline:none;min-height:44px;}
+  .md-smart-imgs{display:flex;gap:6px;flex-wrap:wrap;} .md-smart-img{position:relative;} .md-smart-img img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
+  .md-smart-img button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:#111;color:#fff;font-size:12px;line-height:20px;padding:0;cursor:pointer;}
   .md-smart-row{display:flex;justify-content:flex-end;gap:6px;margin-top:4px;} .md-smart-row .btn{width:auto;} .md-smart-row .md-mic{height:36px;}
   .md-smart-reply{margin-top:8px;font-size:13.5px;background:#fff;border-radius:10px;padding:8px 10px;color:var(--ink-2);}
   .md-hx{border:none;background:none;color:#b91c1c;cursor:pointer;}
@@ -9888,7 +9890,7 @@ function noteScheduledPill(n){
 // with a "carried" count. Daily habits with streaks, a "Keep in mind" list
 // with no dates, and a once-a-day 6 PM nudge if a habit is still open.
 // Server: api/_lib/my-day.js (action my_day). The page turns at 5 AM Bangkok.
-let _myDay=null, _myDayView=null, _myDayHabitEdit=false, _myDaySmartReply='';
+let _myDay=null, _myDayView=null, _myDayHabitEdit=false, _myDaySmartReply='', _myDayImgs=[];
 const myDayFmt=d=>{ const t=new Date(d+'T12:00:00Z'); return t.toLocaleDateString('en-US',{timeZone:'UTC',weekday:'long',month:'short',day:'numeric'}); };
 const myDayShift=(d,n)=>{ const t=new Date(d+'T12:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10); };
 // Speed (owner, 2026-09-24: "this is laggy"): taps change the page at once,
@@ -9980,7 +9982,8 @@ function paintMyDay(){
     </div>
     ${live?`<form class="md-smart" id="mdSmart" autocomplete="off">
       <textarea id="mdSmartText" rows="2" maxlength="2000" placeholder="Tell it anything… “took a nap, skip bedtime”, “gym tomorrow 5pm, buy milk”"></textarea>
-      <div class="md-smart-row">${hasMic?`<button type="button" id="mdSmartMic" class="md-mic" aria-label="Speak">🎙</button>`:''}<button type="submit" class="btn sm" id="mdSmartGo">Sort it out</button></div>
+      <div id="mdSmartImgs" class="md-smart-imgs">${_myDayImgs.map((u,i)=>`<span class="md-smart-img"><img src="${u}" alt=""><button type="button" data-mdimgrm="${i}" aria-label="Remove">×</button></span>`).join('')}</div>
+      <div class="md-smart-row"><label class="md-mic" title="Add screenshots" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">📷<input type="file" id="mdSmartFile" accept="image/*" multiple hidden></label>${hasMic?`<button type="button" id="mdSmartMic" class="md-mic" aria-label="Speak">🎙</button>`:''}<button type="submit" class="btn sm" id="mdSmartGo">Sort it out</button></div>
       ${_myDaySmartReply?`<div class="md-smart-reply">${esc(_myDaySmartReply)}</div>`:''}
     </form>`:''}
     ${live?`<form class="md-add" id="mdAdd" autocomplete="off">
@@ -10012,11 +10015,22 @@ function paintMyDay(){
   }
   if($('mdSmart')){
     $('mdSmart').onsubmit=async e=>{
-      e.preventDefault(); const t=$('mdSmartText').value.trim(); if(!t) return;
+      e.preventDefault(); const t=$('mdSmartText').value.trim(); if(!t&&!_myDayImgs.length) return;
       const go=$('mdSmartGo'); go.disabled=true; go.textContent='Thinking…';
-      try{ const r=await api('my_day',{ method:'POST', body:{ op:'smart', text:t }}); _myDay=r; _myDaySmartReply=r.smart_reply||'Done.'; paintMyDay(); }
+      try{ const r=await api('my_day',{ method:'POST', body:{ op:'smart', text:t, images:_myDayImgs }, timeoutMs:120000}); _myDayImgs=[]; _myDay=r; _myDaySmartReply=r.smart_reply||'Done.'; paintMyDay(); }
       catch(err){ go.disabled=false; go.textContent='Sort it out'; toast(err.message||'Could not do that'); }
     };
+    // Screenshots (owner, 2026-09-24: "i want the ai to see my whatsapp
+    // screenshots"): pick or paste up to 4, shrunk before upload.
+    const addImgs=async files=>{
+      for(const f of [...files].filter(f=>/^image\//.test(f.type)).slice(0,4-_myDayImgs.length)){
+        try{ _myDayImgs.push(await compressImage(f,1600,0.8)); }catch(_){}
+      }
+      const keep=$('mdSmartText').value; paintMyDay(); if($('mdSmartText')) $('mdSmartText').value=keep;
+    };
+    if($('mdSmartFile')) $('mdSmartFile').onchange=e=>addImgs(e.target.files);
+    $('mdSmartText').onpaste=e=>{ const fs=[...(e.clipboardData&&e.clipboardData.files||[])]; if(fs.length){ e.preventDefault(); addImgs(fs); } };
+    view.querySelectorAll('[data-mdimgrm]').forEach(b=>b.onclick=()=>{ const keep=$('mdSmartText').value; _myDayImgs.splice(Number(b.dataset.mdimgrm),1); paintMyDay(); $('mdSmartText').value=keep; });
     const sm=$('mdSmartMic');
     if(sm) sm.onclick=()=>myDayDictate(sm,$('mdSmartText'));
   }
