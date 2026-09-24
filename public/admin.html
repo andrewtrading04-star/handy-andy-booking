@@ -2143,7 +2143,7 @@
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="myday" id="navMyDay"><span class="ic" data-ico="other">📝</span> My Day</button>
-      <button data-nav="notes" id="navNotes"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
+      <button data-nav="notes" id="navNotes" style="display:none;"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
       <button data-nav="myavailability" id="navMyAvailability"><span class="ic" data-ico="myavailability">🗓️</span> My Availability</button>
@@ -15466,9 +15466,9 @@ function estCard(e){
   const taxLines=eTax>0?
     `<div class="est-quote-sub"><span>Subtotal</span><span>${money2(t.subtotal)}</span></div>`+
     `<div class="est-quote-sub"><span>Tax</span><span>${money2(t.tax)}</span></div>`:'';
-  const quote=lines.length?`<div class="est-quote">${lines.filter(it=>liQty(it)*(Number(it.unit_price)||0)!==0).map(it=>{
+  const quote=lines.length?`<div class="est-quote">${lines.filter(it=>liQty(it)*(Number(it.unit_price)||0)!==0).map((it,i)=>{
     const qty=liQty(it); const lt=qty*(Number(it.unit_price)||0);
-    return `<div class="est-quote-line"><span>${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
+    return `<div class="est-quote-line"><span>${i===0&&e.approved_at?'<span title="Approved" style="color:#15803d;font-weight:800;">✓</span> ':''}${qty&&qty!==1?`<b>×${qty}</b> `:''}${esc(liDesc(it)||'Item')}</span><b>${money2(lt)}</b></div>`;
   }).join('')}${taxLines}<div class="est-quote-total"><span>Estimated total</span><span class="amt">${money2(t.total)}</span></div></div>`:'';
   const hasQuote=lines.length>0;
   // Drives which action is the primary (blue) button vs. a secondary (ghost)
@@ -15553,7 +15553,7 @@ function estCard(e){
       <div style="flex:1;min-width:0;">
         ${webBadge}${receivedBadge}
         <div class="est-toprow"><div class="name">${esc(e.service_label||'Estimate request')}</div>${agePill}</div>
-        <div class="meta">${esc(e.customer_name||'—')} · ${tel}${email}${zip}</div>
+        <div class="meta">${(e.customer_name&&String(e.customer_name).replace(/\D/g,'').slice(-10)!==String(e.customer_phone||'').replace(/\D/g,'').slice(-10))?esc(e.customer_name)+' · ':''}${tel}${email}${zip}</div>
         ${addrLine}
         ${hasQuote ? '' : `<div class="est-desc${isWeb?' est-msg':''}">${esc(e.description||'')}</div>`}
         ${isWeb&&e.notes?`<div class="est-web-src">${esc(e.notes)}</div>`:''}
