@@ -19916,6 +19916,8 @@ async function renderCallWiz(){
     // needs a second tap to confirm, and Continue would be meaningless before
     // the question is even answered.
     const isExtrasGate = card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0;
+    // Reaching "anything else" is what makes a call count toward conversion (owner, 2026-09-25).
+    if(card.g && card.g.key==='extras' && !callWiz._extrasSeen){ callWiz._extrasSeen=true; cwTrack('extras_reached',{}); }
     const stepNo=callWiz.optStep+1;
     body.innerHTML=`${callWizScript(callWizGroupScript(card))}
       ${optsHtml}

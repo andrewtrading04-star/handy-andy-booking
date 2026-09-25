@@ -1192,7 +1192,7 @@ async function summary(req, res, db, auth) {
       const last7Start = localDayStartUTC(tz, -6);
       const rosterSince = new Date(last7Start.getTime() - 28 * 24 * 60 * 60 * 1000);
       const { data: cRows } = await db.from('calls')
-        .select('handled_by, booking_id, resolution, reached_step, occurred_at')
+        .select('handled_by, booking_id, resolution, reached_step, reached_extras, occurred_at')
         .eq('kind', 'live')
         .gte('occurred_at', rosterSince.toISOString());
       const by = {};
@@ -1201,7 +1201,7 @@ async function summary(req, res, db, auth) {
         if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
         const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
         if (new Date(c.occurred_at) < last7Start) continue;   // roster only
-        if (!(c.booking_id || c.resolution || (c.reached_step && c.reached_step !== 'greet'))) continue;
+        if (!(c.booking_id || c.reached_extras)) continue;   // owner 2026-09-25: counts once they reached "anything else"
         p.calls++;
         if (c.booking_id || c.resolution === 'booked') p.booked++;
       }
@@ -11935,7 +11935,7 @@ async function quoteEconomics(req, res, db, auth, body) {
 // apart. Also stamps the denormalized outcome columns on the call itself so the
 // day/week rollup is one scan instead of re-aggregating events every load.
 const CALL_EVENTS = new Set([
-  'started', 'service_picked', 'zip_checked', 'question_answered', 'options_done',
+  'started', 'service_picked', 'zip_checked', 'question_answered', 'options_done', 'extras_reached',
   'date_picked', 'slot_picked', 'price_quoted', 'read_to_customer',
   'accepted', 'pushback', 'source_picked', 'coupon_tried', 'coupon_applied',
   'manual_discount', 'discount_final', 'booking_started', 'booking_created',
@@ -11968,6 +11968,7 @@ async function callEvent(req, res, db, auth, body) {
   // Roll the interesting values onto the call row so reports don't have to dig
   // through jsonb for the numbers they show on every line.
   const patch = { reached_step: body.step ? String(body.step).slice(0, 40) : undefined };
+  if (event === 'extras_reached' || event === 'options_done' || ['schedule', 'recap', 'discount', 'customer', 'estimate'].includes(String(body.step || ''))) patch.reached_extras = true;
   if (event === 'price_quoted') {
     if (meta.total != null) patch.quoted_total = Number(meta.total) || 0;
     if (meta.tv_count != null) patch.tv_count = Number(meta.tv_count) || 0;
@@ -12440,7 +12441,7 @@ async function myCallPerformance(req, res, db, auth) {
   // changing browser parameters cannot expose another secretary's feedback.
   const [{ data: calls, error }, { data: audits, error: auditError }] = await Promise.all([
     db.from('calls')
-      .select('handled_by, resolution, booking_id, quoted_total, occurred_at, reached_step')
+      .select('handled_by, resolution, booking_id, quoted_total, occurred_at, reached_step, reached_extras')
       .eq('business_id', bizId).eq('kind', 'live')
       .eq('handled_by', name)
       .gte('occurred_at', since.toISOString())
@@ -12458,8 +12459,10 @@ async function myCallPerformance(req, res, db, auth) {
   // opened-and-abandoned greet screen is a misclick, not a call, and must not
   // drag this person's own conversion number down. Keep the two definitions
   // identical or her report and the owner's ranking disagree about the same week.
-  const rows = (calls || []).filter(r =>
-    !!r.booking_id || !!r.resolution || (r.reached_step && r.reached_step !== 'greet'));
+  // Owner rule 2026-09-25: a call counts only once the secretary reached the
+  // "Is there anything else?" card (or booked). Zip + TV size then stopping
+  // does not count.
+  const rows = (calls || []).filter(r => !!r.booking_id || !!r.reached_extras);
 
   const isBooked = r => !!r.booking_id || r.resolution === 'booked';
   const dayKeyOf = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
@@ -12629,7 +12632,7 @@ async function callAnalytics(req, res, db, auth) {
   // Live (script-taken) calls only. Grasshopper voicemails are a different
   // thing entirely and would wreck the conversion rate if mixed in.
   let callsQuery = db.from('calls')
-    .select('id, handled_by, service, market, status, resolution, booking_id, quoted_total, discount_amount, discount_detail, tv_count, reached_step, occurred_at, ended_at')
+    .select('id, handled_by, service, market, status, resolution, booking_id, quoted_total, discount_amount, discount_detail, tv_count, reached_step, reached_extras, occurred_at, ended_at')
     .eq('business_id', biz.id).eq('kind', 'live')
     .gte('occurred_at', since.toISOString());
   if (until) callsQuery = callsQuery.lt('occurred_at', until.toISOString());
@@ -12642,8 +12645,10 @@ async function callAnalytics(req, res, db, auth) {
   // 0% call against whoever opened it. A call counts once it moved past the
   // greeting (any later step stamped) or actually ended somewhere (resolution
   // or a booking).
-  const rows = (calls || []).filter(r =>
-    !!r.booking_id || !!r.resolution || (r.reached_step && r.reached_step !== 'greet'));
+  // Owner rule 2026-09-25: a call counts only once the secretary reached the
+  // "Is there anything else?" card (or booked). Zip + TV size then stopping
+  // does not count.
+  const rows = (calls || []).filter(r => !!r.booking_id || !!r.reached_extras);
 
   let eventsQuery = db.from('call_events')
     .select('call_id, actor, event, step, meta, created_at')
