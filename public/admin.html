@@ -3162,7 +3162,7 @@ async function loadBadAlerts(){
     const d=await api('bad_reviews'); renderBadAlerts(d.alerts||[]);
     // Email-scan health rides along (owner only). A missing field is itself a
     // problem worth showing — never silently hide the card on a bad read.
-    if(role==='owner'){ _syncHealth=d.sync_health||{error:'no data'}; _syncHealthAt=Date.now(); renderSyncAlerts(_syncHealth,false); if(section==='brackets') refreshSyncStat(); }
+    if(role==='owner' && d.sync_health){ _syncHealth=d.sync_health; _syncHealthAt=Date.now(); renderSyncAlerts(_syncHealth,false); if(section==='brackets') refreshSyncStat(); }
   }
   catch(e){ if(role==='owner'&&_syncHealth) renderSyncAlerts(_syncHealth,true); /* review banner: leave as-is */ }
   loadGoodAlerts();
