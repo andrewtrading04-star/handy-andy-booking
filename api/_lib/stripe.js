@@ -31,6 +31,9 @@ const ACCOUNT_KEY_ENV = {
   // Los Angeles brand: its OWN Stripe account (owner is creating it). Unstaffed
   // LA takes requests, not cards, so nothing charges here until it is staffed.
   tvmountinglosangeles: 'TVMOUNTINGLOSANGELES_STRIPE_SECRET_KEY',
+  // A1 TV Mounting (Dallas-Fort Worth, acquired 2026-09): its OWN Stripe
+  // account, which the owner is creating new. Nothing charges until it is set.
+  a1tvmounting:         'A1TVMOUNTING_STRIPE_SECRET_KEY',
 };
 
 // Legacy slug -> account for bookings made BEFORE per-booking stamping: Handy
@@ -60,6 +63,7 @@ const LEGACY_SLUG_ACCOUNT = {
   austinmountingpros:      'austin',
   austintvinstall:         'austin',
   tvmountinglosangeles:    'tvmountinglosangeles',
+  a1tvmounting:            'a1tvmounting',
 };
 
 // A "selector" passed to these helpers is EITHER a string slug (legacy callers)

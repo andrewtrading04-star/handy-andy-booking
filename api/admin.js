@@ -92,6 +92,10 @@ function bookingStripePk(slug) {
   if (slug === 'houstonmounting' || slug === 'houstontvinstallation' || slug === 'tvhanginghouston' || slug === 'htvmounting') {
     return process.env.Publishable_key_houston_mounting || null;
   }
+  // A1 TV Mounting (DFW) charges on its OWN account (see ACCOUNT_KEY_ENV in
+  // api/_lib/stripe.js), so New Booking must tokenize with its own key —
+  // never Handy Andy's global one.
+  if (slug === 'a1tvmounting') return process.env.A1TVMOUNTING_STRIPE_PUBLISHABLE_KEY || null;
   return STRIPE_PK_GLOBAL;
 }
 import { uploadImage, deleteImage, uploadPrivateImage, readPrivateImage, notePhotoContentType } from './_lib/storage.js';
@@ -5710,6 +5714,7 @@ function candidateAccounts(slug) {
   // (see LEGACY_SLUG_ACCOUNT in api/_lib/stripe.js), so that is the one
   // account their disputes can live in.
   if (slug === 'atxmountpros' || slug === 'atxtvmount' || slug === 'austinmountingpros' || slug === 'austintvinstall') return ['austin'];
+  if (slug === 'a1tvmounting') return ['a1tvmounting'];         // own account, born after the split
   return ['global'];
 }
 

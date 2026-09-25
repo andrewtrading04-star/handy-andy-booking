@@ -169,6 +169,19 @@ export function emailConfig(slug) {
       from:   process.env.TVMOUNTINGLOSANGELES_EMAIL_FROM || 'contact@tvmountinglosangeles.com',
     };
   }
+  // A1 TV Mounting (DFW, acquired 2026-09): its OWN Resend account, which the
+  // owner is creating new — so, unlike the micro-brands above, there is NO
+  // shared-account fallback here on purpose. Until A1TVMOUNTING_RESEND_API_KEY
+  // is set, sendEmail() skips with a logged reason instead of sending from
+  // another company's account. A1TVMOUNTING_EMAIL_FROM must be an address on a
+  // domain verified in THAT Resend account (a1tvmountingpros.com once it has
+  // transferred in), e.g. "A1 TV Mounting <contact@a1tvmountingpros.com>".
+  if (slug === 'a1tvmounting') {
+    return {
+      apiKey: process.env.A1TVMOUNTING_RESEND_API_KEY || null,
+      from:   process.env.A1TVMOUNTING_EMAIL_FROM || 'contact@a1tvmountingpros.com',
+    };
+  }
   // The other two LA brands (latvpro / lainstall) are still unstaffed
   // demand-gauging funnels with no sender of their own. Without this branch they
   // fall through to the Handy Andy default below and would email an LA customer
@@ -210,6 +223,8 @@ export const EMAIL_BRANDS = {
   'austintvinstall':    { slug: 'austintvinstall',    name: 'Austin TV Installation', accent: '#0D7A68', website: 'austintvinstall.com' },
   // Accent = the site's own blue (Tailwind blue-600, same as the site's buttons).
   'tvmountinglosangeles': { slug: 'tvmountinglosangeles', name: 'TV Mounting Los Angeles', accent: '#155DFC', website: 'tvmountinglosangeles.com' },
+  // A1 TV Mounting (DFW): site cloned from the LA template, same blue-600 accent.
+  'a1tvmounting':         { slug: 'a1tvmounting',         name: 'A1 TV Mounting',          accent: '#155DFC', website: 'a1tvmountingpros.com' },
 };
 // ── Request received (unstaffed-area request flow) ──────────────────────────
 // Sent to the CUSTOMER right after they submit the booking widget's request
