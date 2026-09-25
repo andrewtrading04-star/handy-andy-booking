@@ -6968,10 +6968,10 @@ function anaRender(d){
       return ` <span style="color:${color};font-size:12px;font-weight:700;">${d>0?'▲ +':d<0?'▼ ':''}${d} pts</span>`;
     };
     const row=(lab,val,extra)=>`<div><span style="font-size:13px;color:var(--mute);">${lab}</span> <span style="font-weight:700;">${val}</span>${extra||''}</div>`;
-    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;"><div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">This Period <span style="text-transform:none;letter-spacing:0;">· change vs previous</span></div>
-      <div style="display:grid;gap:8px;">${row('Sessions',t.sessions,chg(t.sessions,tc.sessions))}${row('Bookings',t.bookings,chg(t.bookings,tc.bookings))}${row('Booking rate',t.conversion+'%',pts(t.conversion,tc.conversion))}${row('Revenue',anaMoney(t.revenue),chg(t.revenue,tc.revenue))}</div></div>
-      <div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">Previous Period</div>
-      <div style="display:grid;gap:8px;">${row('Sessions',tc.sessions)}${row('Bookings',tc.bookings)}${row('Booking rate',tc.conversion+'%')}${row('Revenue',anaMoney(tc.revenue))}</div></div></div>`;
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;"><div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">Previous Period</div>
+      <div style="display:grid;gap:8px;">${row('Sessions',tc.sessions)}${row('Bookings',tc.bookings)}${row('Booking rate',tc.conversion+'%')}${row('Revenue',anaMoney(tc.revenue))}</div></div>
+      <div class="card" style="background:#f9fafb;"><div style="font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">This Period <span style="text-transform:none;letter-spacing:0;">· change vs previous</span></div>
+      <div style="display:grid;gap:8px;">${row('Sessions',t.sessions,chg(t.sessions,tc.sessions))}${row('Bookings',t.bookings,chg(t.bookings,tc.bookings))}${row('Booking rate',t.conversion+'%',pts(t.conversion,tc.conversion))}${row('Revenue',anaMoney(t.revenue),chg(t.revenue,tc.revenue))}</div></div></div>`;
   }
 
   const kpis=[
