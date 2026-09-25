@@ -316,7 +316,19 @@
     try { const s = localStorage.getItem('analytics_session_id') || ''; return /^session_\d{13}_[a-z0-9]{1,12}$/.test(s) ? s : null; }
     catch (e) { return null; }
   })();
+  // Owner's own testing is never tracked (owner, 2026-09-26). Open any site
+  // once with ?notrack=1 to switch this browser off (?notrack=0 turns it back on).
+  const NO_TRACK = (() => {
+    try {
+      const q = new URLSearchParams(location.search).get('notrack');
+      if (q === '1') localStorage.setItem('crm_notrack', '1');
+      if (q === '0') localStorage.removeItem('crm_notrack');
+      return localStorage.getItem('crm_notrack') === '1';
+    } catch (e) { return false; }
+  })();
+  const VISITOR_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; } })();
   async function logEvent(event_type, step_name, value = null, error_message = null) {
+    if (NO_TRACK) return;
     try {
       const loc = resolveLocation();
       await fetch('https://handy-andy-booking.vercel.app/api/log-event', {
@@ -343,6 +355,7 @@
           // (Mile High included) had 100% of its traffic silently filed under
           // Handy Andy's analytics instead of its own.
           widget: BUSINESS,
+          timezone: VISITOR_TZ,
         }),
       });
     } catch (e) { console.error('[analytics] log failed', e); }

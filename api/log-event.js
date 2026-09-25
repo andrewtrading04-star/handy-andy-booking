@@ -1,5 +1,5 @@
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
-import { isBotUserAgent } from './_lib/bot-filter.js';
+import { isBotUserAgent, isUsTimezone } from './_lib/bot-filter.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,6 +25,12 @@ export default async function handler(req, res) {
   const ipCountry = String(req.headers['x-vercel-ip-country'] || '').toUpperCase();
   if (ipCountry && ipCountry !== 'US') {
     return res.status(200).json({ ok: true, skipped: 'non-us' });
+  }
+  // A US VPN hides the owner's Bangkok IP, but not his computer's clock
+  // (owner, 2026-09-26: his own testing is useless data). Same rule the
+  // website-traffic reports already use.
+  if (req.body && req.body.timezone && !isUsTimezone(req.body.timezone)) {
+    return res.status(200).json({ ok: true, skipped: 'non-us-timezone' });
   }
 
   try {
