@@ -13463,7 +13463,7 @@ function callInbox(groups){
       <span>${g.rows.length>1?'Latest: ':''}${esc(callWhen(r))}</span><span class="ci-outcome">${esc(callOutcome(r))}</span>
       <span class="ci-status">${esc(g.blocked?'Blocked':callFollowUp(r))}</span>
       ${callPills(g)}
-      ${r.transcript?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
+      ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
     </button>`; }).join('')}
   </div><section class="ci-detail" aria-label="Selected caller details">
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
