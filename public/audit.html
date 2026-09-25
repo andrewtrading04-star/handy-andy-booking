@@ -1665,12 +1665,12 @@ async function enter(){
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
   const fromHash=(location.hash||'').replace('#','');
-  showPage(['calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'calls');
+  showPage(['calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'audit');   // owner, 2026-09-25: Audit is the landing page
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 // Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
-let page='calls';
+let page='audit';
 function showPage(p){
   page=p;
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
