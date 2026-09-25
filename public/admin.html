@@ -479,6 +479,35 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
+  .cv-item{flex-direction:row!important;align-items:center;gap:13px!important;padding:14px 14px!important;}
+  .cv-av{flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
+  .cv-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+  .cv-mid>span{font-size:12.5px;color:#536277;line-height:1.4;}
+  .cv-mid strong{font-size:15px;font-weight:800;}
+  .cv-when{display:flex;align-items:center;gap:5px;}
+  .cv-out{display:flex;align-items:center;gap:5px;font-weight:600;} .cv-out.ok svg{color:#16a34a;} .cv-out.miss{color:#b91c1c;}
+  .cv-right{flex:none;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink);} .cv-chev{font-size:22px;color:#94a3b8;line-height:1;}
+  .cv-head{display:flex;gap:18px;align-items:center;padding:4px 0 18px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap;}
+  .cv-head-main{flex:1;min-width:220px;} .cv-title{font-size:26px;font-weight:800;letter-spacing:-.3px;} .cv-sub-num{font-size:14px;font-weight:600;color:var(--mute);}
+  .cv-sub{color:#536277;font-size:14px;margin-top:2px;}
+  .cv-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+  .cv-pill{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;}
+  .cv-pill.green{background:#dcfce7;color:#15803d;border-color:#bbf7d0;} .cv-pill.red{background:#fee2e2;color:#b91c1c;border-color:#fecaca;}
+  .cv-pill.blue{background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe;} .cv-pill.amber{background:#fef3c7;color:#92400e;border-color:#fde68a;}
+  .cv-pill.purple{background:#ede9fe;color:#6d28d9;border-color:#ddd6fe;cursor:pointer;}
+  .cv-head-btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .cv-head-btns .rc-call{background:#1d4ed8;font-size:14.5px;padding:11px 20px;} .cv-head-btns .rc-call:hover{background:#1e40af;}
+  .cv-head-btns .rc-call.disabled{background:var(--line2);color:var(--mute);}
+  .cv-head-btns .rc-btn{padding:11px 18px;font-size:14.5px;}
+  .cv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:14px;}
+  .cv-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+  .cv-card h4{margin:0 0 12px;font-size:15px;font-weight:800;}
+  .cv .ci-facts{margin:0;}
+  .cv .tx-wrap{margin-top:0;} .cv .tx-sum{display:flex;flex-wrap:wrap;gap:8px;background:none;border:0;padding:0;}
+  .cv .tx-sum-i{background:#eef4ff;color:#1e3a8a;border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;gap:5px;}
+  .cv .tx-sum-i.tx-no{background:#fee2e2;color:#b91c1c;} .cv .tx-sum-i.tx-yes{background:#dcfce7;color:#15803d;}
+  .cv-rec{margin-bottom:14px;} .cv-rec>div{margin-top:0!important;max-width:none!important;}
+  .cv-foot{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px;}
   .tx-wrap{margin-top:8px;} .tx-sum{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13.5px;line-height:1.6;}
   .tx-sum-i{display:flex;gap:7px;} .tx-sum-i span{flex:none;width:18px;text-align:center;} .tx-no{color:#b91c1c;font-weight:600;} .tx-yes{color:#15803d;font-weight:600;}
   .tx-full summary{cursor:pointer;color:#2563eb;font-size:13px;font-weight:600;margin-top:7px;list-style:none;} .tx-full summary::-webkit-details-marker{display:none;}
@@ -13104,6 +13133,20 @@ function callPills(g){
   if(g.texts) p.push(`<span class="cg-pill txt">💬 Text${g.texts>1?' ×'+g.texts:''}</span>`);
   return p.length?`<div class="cg-pills">${p.join('')}</div>`:'';
 }
+// Calls design upgrade (owner, 2026-09-25): avatar list + header/cards detail.
+const CV_ICON={
+  ok:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/></svg>',
+  miss:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/><path d="M15 3l6 6m0 -6l-6 6"/></svg>',
+  cal:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>',
+};
+const CV_COLORS=[['#dbeafe','#1d4ed8'],['#fce7f3','#be185d'],['#dcfce7','#15803d'],['#ffedd5','#c2410c'],['#ede9fe','#6d28d9'],['#cffafe','#0e7490']];
+function cvAvatar(g,size){
+  const r=g.latest, name=r.customer?.name||r.routed_to_name||'';
+  const letter=(name.match(/[A-Za-z]/)||['#'])[0].toUpperCase();
+  let h=0; for(const c of String(g.key)) h=(h*31+c.charCodeAt(0))>>>0;
+  const [bg,fg]=CV_COLORS[h%CV_COLORS.length];
+  return `<span class="cv-av" style="width:${size}px;height:${size}px;font-size:${Math.round(size*.42)}px;background:${bg};color:${fg};">${esc(letter)}</span>`;
+}
 // The detail-side summary: the three things we may have from this caller, each
 // shown even when empty so the office can see at a glance what there is NOT.
 function callHaveBoxes(g){
@@ -13168,7 +13211,7 @@ function callHistoryHtml(r){
   if(h.estimates) lines.push(`${h.estimates} estimate${h.estimates===1?'':'s'}${h.last_estimate?` · last ${esc(d(h.last_estimate.at))}${h.last_estimate.service?' · '+esc(h.last_estimate.service):''} (${esc(h.last_estimate.status==='approved'?'approved':h.last_estimate.status==='contacted'?'sent':h.last_estimate.status||'')})`:''}`);
   return `<div class="ch-hist"><div class="ch-hist-h">🧾 Customer history</div>${lines.map(l=>`<div>${l}</div>`).join('')}</div>`;
 }
-function callCard(r,handled,g){
+function callCard(r,handled,g,v2){
   const isLive=r.kind==='live';
   const isTracked=r.source==='twilio';
   // "Line they called" has to be worked out BEFORE the facts list below is
@@ -13368,6 +13411,37 @@ function callCard(r,handled,g){
     ? `<div class="rc-meta" style="font-weight:800;color:#b91c1c;text-align:right;">🚫 Blocked</div>
        ${role==='owner'&&hasPhone?`<div class="rc-btn-row"><button class="rc-btn ghost" data-callunblock="${esc(r.caller_pretty)}" data-callphone="${esc(r.caller_pretty)}">Unblock</button></div>`:''}`
     : null;
+  if(v2&&g){
+    const missed=r.answered===false&&!isLive;
+    const pills=[`<span class="cv-pill ${missed?'red':'green'}">${missed?CV_ICON.miss:CV_ICON.ok} ${esc(callOutcome(r))}</span>`];
+    if(g.recordings) pills.push(`<span class="cv-pill blue">🎙 ${g.recordings} ${g.recordings>1?'recordings':'recording'}</span>`);
+    if(g.voicemails) pills.push(`<span class="cv-pill amber">📨 ${g.voicemails} ${g.voicemails>1?'voicemails':'voicemail'}</span>`);
+    if(g.texts) pills.push(g.latest.text_our&&g.latest.caller_phone
+      ? `<button type="button" class="cv-pill purple" data-calltexts="1" data-msgour="${esc(g.latest.text_our)}" data-msgcust="${esc(g.latest.caller_phone)}" title="Open the texts">💬 ${g.texts} ${g.texts>1?'texts':'text'} ›</button>`
+      : `<span class="cv-pill purple">💬 ${g.texts} ${g.texts>1?'texts':'text'}</span>`);
+    if(g.rows.length>1) pills.push(`<span class="cv-pill">${g.rows.length} calls</span>`);
+    const headBtns = blockedNow ? '' : `${claimBtn.replace('class="rc-call','class="rc-call cv-callbtn')}${msgBtn.replace('rc-btn ghost','rc-btn ghost cv-textbtn').replace('💬 Send a message','💬 Send text')}`;
+    const footActions = blockedActions || actions.replace(claimBtn+msgBtn,'');
+    return `<div class="cv" data-call="${esc(r.id)}">
+      <div class="cv-head">
+        ${cvAvatar(g,64)}
+        <div class="cv-head-main">
+          <div class="cv-title">${who}${r.customer?` <span class="cv-sub-num">${esc(r.caller_pretty)}</span>`:''}</div>
+          <div class="cv-sub">${esc(r.market||'Unrouted')} · ${esc(callWhen(r))}</div>
+          <div class="cv-pills">${pills.join('')}</div>
+        </div>
+        <div class="cv-head-btns">${headBtns}</div>
+      </div>
+      ${noNumber}
+      <div class="cv-grid">
+        <div class="cv-card"><h4>Contact information</h4>${statusBoxes}${extra}${claimLine}${job}</div>
+        ${r.transcript?`<div class="cv-card"><h4>${/^(Staff|Customer):/m.test(r.transcript)?'Call summary':'Message'}</h4>${tx}</div>`:''}
+      </div>
+      ${callHistoryHtml(r)}
+      ${audio?`<div class="cv-card cv-rec"><h4>Recording</h4>${audio}</div>`:''}
+      <div class="cv-foot">${handledLine}${footActions}</div>
+    </div>`;
+  }
   return `<div class="rc-card" data-call="${esc(r.id)}" style="align-items:flex-start;">
     ${dispIcon}
     <div class="rc-main">
@@ -13471,19 +13545,22 @@ function callInbox(groups){
   _callsSelected=selected.key;
   const later=selected.rows.filter(x=>x!==selected.latest);
   return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
-    ${groups.map(g=>{ const r=g.latest; return `<button type="button" class="ci-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
-      <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
-      ${r.customer?`<span>${esc(r.caller_pretty || '')}</span>`:''}
-      <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
-      <span>${g.rows.length>1?'Latest: ':''}${esc(callWhen(r))}</span><span class="ci-outcome">${esc(callOutcome(r))}</span>
-      <span class="ci-status">${esc(g.blocked?'Blocked':callFollowUp(r))}</span>
-      ${callPills(g)}
-      ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
+    ${groups.map(g=>{ const r=g.latest; const missed=r.answered===false&&r.kind!=='live';
+      const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); if(g.rows.length>1) bits.push(g.rows.length+' calls');
+      return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
+      ${cvAvatar(g,42)}
+      <span class="cv-mid">
+        <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
+        <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
+        <span class="cv-when">${CV_ICON.cal} ${esc(callShortWhen(r))}</span>
+        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss:CV_ICON.ok)+' '+bits.join(' • ')}</span>
+        ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
+      </span>
+      <span class="cv-right"><b>${r.duration_sec?esc(callDuration(r.duration_sec)):'—'}</b><span class="cv-chev">›</span></span>
     </button>`; }).join('')}
-  </div><section class="ci-detail" aria-label="Selected caller details">
+  </div><section class="ci-detail cv-detail" aria-label="Selected caller details">
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
-    ${callHaveBoxes(selected)}
-    ${callCard(selected.latest, !selected.open, selected)}
+    ${callCard(selected.latest, !selected.open, selected, true)}
     ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
   </section></div>`;
 }
