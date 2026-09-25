@@ -40,7 +40,7 @@ async function readPage(db, day) {
   ]);
   if (e1) throw e1; if (e2) throw e2;
   const tasks = [...(open || []).map(t => ({ ...t, done: false })), ...(done || []).map(t => ({ ...t, done: true }))]
-    .map(t => ({ id: t.id, title: t.title, starred: t.starred, priority: t.priority || 0, time_hint: t.time_hint, done: t.done,
+    .map(t => ({ id: t.id, title: t.title, starred: t.starred, priority: t.priority || 0, parent_id: t.parent_id || null, time_hint: t.time_hint, done: t.done,
       carried: Math.max(0, daysBetween(t.origin_day, day)), origin_day: t.origin_day, done_at: t.done_at }));
 
   const { data: habits, error: e3 } = await db.from('owner_habits').select('id, name, sort').eq('active', true).order('sort').order('created_at');
@@ -83,7 +83,9 @@ export async function myDay(req, res, db, auth, body) {
     case 'task_add': {
       const title = clean(body.title); if (!title) return res.status(400).json({ error: 'Write a task first' });
       const pr = [0, 1, 2].includes(Number(body.priority)) ? Number(body.priority) : (body.starred ? 1 : 0);
-      q = db.from('owner_tasks').insert({ title, origin_day: today, priority: pr, starred: pr > 0, time_hint: clean(body.time_hint, 40) || null }); break;
+      // Subtask (owner 2026-09-25): one level under a main task.
+      const parent = /^[0-9a-f-]{36}$/i.test(String(body.parent_id || '')) ? String(body.parent_id) : null;
+      q = db.from('owner_tasks').insert({ title, origin_day: today, priority: pr, starred: pr > 0, parent_id: parent, time_hint: clean(body.time_hint, 40) || null }); break;
     }
     case 'task_done':
       q = body.done
@@ -99,7 +101,9 @@ export async function myDay(req, res, db, auth, body) {
       if ('time_hint' in body) patch.time_hint = clean(body.time_hint, 40) || null;
       q = db.from('owner_tasks').update(patch).eq('id', id); break;
     }
-    case 'task_delete': q = db.from('owner_tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id); break;
+    // Deleting a main task takes its subtasks with it.
+    case 'task_delete': if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Bad id' });
+      q = db.from('owner_tasks').update({ deleted_at: new Date().toISOString() }).or(`id.eq.${id},parent_id.eq.${id}`); break;
     case 'habit_check':
       q = body.done
         ? db.from('owner_habit_checks').upsert({ habit_id: id, day: today, skipped: false }, { onConflict: 'habit_id,day' })

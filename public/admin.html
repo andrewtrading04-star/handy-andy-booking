@@ -421,6 +421,10 @@
   .md-acts button.md-lvl{width:20px;height:20px;border-radius:50%;border:2px solid #9aa1ab;background:#fff;padding:0;margin:0 5px;align-self:center;}
   .md-acts button.md-lvl.l1{background:#16a34a;border-color:#16a34a;}
   .md-acts button.md-lvl.l2{background:#dc2626;border-color:#dc2626;}
+  /* Subtasks (owner 2026-09-25): indented under their main task. */
+  .md-task.md-child{margin-left:30px;padding:6px 0;}
+  .md-task.md-child .md-title{font-size:14.5px;}
+  .md-prog{font-size:11.5px;font-weight:700;background:#f1f5f9;color:#334155;border-radius:6px;padding:2px 6px;}
   .md-empty{font-size:13.5px;color:var(--mute);padding:6px 0;}
   .md-habits{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
   .md-habit{display:flex;align-items:center;gap:4px;}
@@ -9949,7 +9953,7 @@ function myDayLocal(op,body){
   else if(op==='habit_check'&&h){ h.done=!!body.done; if(!body.done) h.skipped=false; }
   else if(op==='list_done'&&l) l.done=!!body.done;
   else if(op==='list_delete') d.list=(d.list||[]).filter(x=>x.id!==body.id);
-  else if(op==='task_add') (d.tasks=d.tasks||[]).push({ id:'tmp'+Date.now(), title:body.title, done:false });
+  else if(op==='task_add') (d.tasks=d.tasks||[]).push({ id:'tmp'+Date.now(), title:body.title, done:false, parent_id:body.parent_id||null });
   else if(op==='list_add') (d.list=d.list||[]).push({ id:'tmp'+Date.now(), title:body.title, done:false });
   else return;
   paintMyDay();
@@ -9998,13 +10002,16 @@ async function renderMyDay(){
 function paintMyDay(){
   const view=document.getElementById('view'); const d=_myDay; if(!d||!onScreen('myday')) return;
   const live=d.is_today;
-  const open=d.tasks.filter(t=>!t.done).sort((a,b)=>((b.priority||0)-(a.priority||0))||((!!b.time_hint)-(!!a.time_hint))||String(a.origin_day).localeCompare(String(b.origin_day)));
-  const done=d.tasks.filter(t=>t.done);
-  const taskRow=t=>`<div class="md-task${t.done?' done':''}${t.priority?' p'+t.priority:''}">
+  const ids=new Set(d.tasks.map(t=>t.id));
+  const isKid=t=>t.parent_id&&ids.has(t.parent_id);
+  const kidsOf=id=>d.tasks.filter(k=>k.parent_id===id).sort((a,b)=>(a.done-b.done)||((b.priority||0)-(a.priority||0)));
+  const open=d.tasks.filter(t=>!t.done&&!isKid(t)).sort((a,b)=>((b.priority||0)-(a.priority||0))||((!!b.time_hint)-(!!a.time_hint))||String(a.origin_day).localeCompare(String(b.origin_day)));
+  const done=d.tasks.filter(t=>t.done&&!isKid(t));
+  const taskRow=(t,kid)=>`<div class="md-task${kid?' md-child':''}${t.done?' done':''}${t.priority?' p'+t.priority:''}">
       <button type="button" class="md-check" data-mdtask="${esc(t.id)}" data-done="${t.done?1:0}" ${live?'':'disabled'} aria-label="${t.done?'Un-cross':'Cross off'}">${t.done?'✓':''}</button>
       <span class="md-title" ${live?`data-mdtask="${esc(t.id)}" data-done="${t.done?1:0}"`:''}>${esc(t.title)}</span>
-      <span class="md-tags">${t.time_hint?`<span class="md-time">${esc(t.time_hint)}</span>`:''}${t.carried>0&&!t.done?`<span class="md-carry" title="Carried over from ${esc(myDayFmt(t.origin_day))}">↻ ${t.carried}d</span>`:''}</span>
-      ${live&&!t.done?`<span class="md-acts"><button type="button" class="md-lvl l${t.priority||0}" data-mdlvl="${esc(t.id)}" data-lvl="${t.priority||0}" title="Tap: white, green, red" aria-label="Importance"></button><button type="button" data-mdtime="${esc(t.id)}" data-cur="${esc(t.time_hint||'')}" title="Set a loose time" aria-label="Time">⏰</button><button type="button" data-mddel="${esc(t.id)}" title="Delete" aria-label="Delete">✕</button></span>`:''}
+      <span class="md-tags">${!kid&&kidsOf(t.id).length?`<span class="md-prog">${kidsOf(t.id).filter(k=>k.done).length}/${kidsOf(t.id).length}</span>`:''}${t.time_hint?`<span class="md-time">${esc(t.time_hint)}</span>`:''}${t.carried>0&&!t.done?`<span class="md-carry" title="Carried over from ${esc(myDayFmt(t.origin_day))}">↻ ${t.carried}d</span>`:''}</span>
+      ${live&&!t.done?`<span class="md-acts"><button type="button" class="md-lvl l${t.priority||0}" data-mdlvl="${esc(t.id)}" data-lvl="${t.priority||0}" title="Tap: white, green, red" aria-label="Importance"></button>${kid?'':`<button type="button" data-mdsub="${esc(t.id)}" title="Add a subtask" aria-label="Add subtask">＋</button>`}<button type="button" data-mdtime="${esc(t.id)}" data-cur="${esc(t.time_hint||'')}" title="Set a loose time" aria-label="Time">⏰</button><button type="button" data-mddel="${esc(t.id)}" title="Delete" aria-label="Delete">✕</button></span>`:''}
     </div>`;
   const habits=d.habits.map(h=>`<div class="md-habit${h.done?' on':''}${h.skipped?' skip':''}">
       <button type="button" data-mdhabit="${esc(h.id)}" data-done="${(h.done||h.skipped)?1:0}" ${live?'':'disabled'} title="${h.skipped?'Skipped today — tap to undo':'Tap when done'}">${h.done?'✓ ':''}${esc(h.name)}${h.skipped?' · skipped':''}</button>
@@ -10039,8 +10046,8 @@ function paintMyDay(){
         ${_myDayHabitEdit?`<form id="mdHabitAdd" class="md-habit-add"><input id="mdHabitName" placeholder="New habit" maxlength="60"><button type="submit">Add</button></form>`:''}
       </div></div>
     <div class="md-sec"><div class="md-sec-h">${live?'To do':'Still open that day'} <span class="md-count">${open.length}</span></div>
-      ${open.map(taskRow).join('')||`<div class="md-empty">${live?'Nothing on the page. Add something above.':'Nothing was left open.'}</div>`}
-      ${done.length?`<div class="md-sec-h md-doneh">Crossed off <span class="md-count">${done.length}</span></div>${done.map(taskRow).join('')}`:''}
+      ${open.map(t=>taskRow(t)+kidsOf(t.id).map(k=>taskRow(k,true)).join('')).join('')||`<div class="md-empty">${live?'Nothing on the page. Add something above.':'Nothing was left open.'}</div>`}
+      ${done.length?`<div class="md-sec-h md-doneh">Crossed off <span class="md-count">${done.length}</span></div>${done.map(t=>taskRow(t)+kidsOf(t.id).map(k=>taskRow(k,true)).join('')).join('')}`:''}
     </div>
     <div class="md-sec"><div class="md-sec-h">Keep in mind <span class="md-sub">no date — groceries, errands</span></div>
       ${list||'<div class="md-empty">Nothing here.</div>'}
@@ -10079,6 +10086,7 @@ function paintMyDay(){
   }
   view.querySelectorAll('[data-mdtask]').forEach(b=>b.onclick=()=>myDayCall('task_done',{ id:b.dataset.mdtask, done:b.dataset.done!=='1' }));
   view.querySelectorAll('[data-mdlvl]').forEach(b=>b.onclick=()=>myDayCall('task_edit',{ id:b.dataset.mdlvl, priority:((+b.dataset.lvl||0)+1)%3 }));
+  view.querySelectorAll('[data-mdsub]').forEach(b=>b.onclick=()=>{ const v=prompt('Subtask:'); if(v&&v.trim()) myDayCall('task_add',{ title:v.trim(), parent_id:b.dataset.mdsub }); });
   view.querySelectorAll('[data-mdtime]').forEach(b=>b.onclick=()=>{ const v=prompt('Loose time (like "3 PM" or "afternoon"). Leave empty to clear.', b.dataset.cur||''); if(v!==null) myDayCall('task_edit',{ id:b.dataset.mdtime, time_hint:v }); });
   view.querySelectorAll('[data-mddel]').forEach(b=>b.onclick=()=>{ if(confirm('Delete this task?')) myDayCall('task_delete',{ id:b.dataset.mddel }); });
   view.querySelectorAll('[data-mdhabit]').forEach(b=>b.onclick=()=>myDayCall('habit_check',{ id:b.dataset.mdhabit, done:b.dataset.done!=='1' }));
