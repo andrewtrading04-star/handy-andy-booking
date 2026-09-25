@@ -1,3 +1,4 @@
+import { startTranscript, finishTranscript } from './_lib/transcribe.js';
 import { serviceClientPublic, serviceClient } from './_lib/supabase.js';
 import { verifyToken, signToken } from './_lib/auth.js';
 import { sendSMS, sendSMSResult, smsBrandName, HANDY_ANDY_SMS_BRAND, SMS_STOP_RE, SMS_START_RE, smsOptOutState, logAutomatedMessage } from './_lib/sms.js';
@@ -913,6 +914,12 @@ async function handleVoiceRecording(req, res) {
           `Missed call${row.market ? ` (${row.market})` : ''} from ${pretty}. They left a voicemail - it is in the Calls tab.`);
         if (!r.ok) await db.from('calls').update({ notified_at: null }).eq('id', row.id);
       }
+    }
+    // Transcribe every answered call's dual-channel recording (owner,
+    // 2026-09-25). Twilio calls vi_webhook when the text is ready.
+    if (row && fromDialLeg && params.RecordingSid && (!params.RecordingStatus || params.RecordingStatus === 'completed')) {
+      try { await startTranscript(db, row.id, params.RecordingSid); }
+      catch (e) { console.error('[voice_recording] transcript start failed:', e.message); }
     }
   } catch (e) {
     console.error('[voice_recording] update failed:', e.message);
@@ -2033,6 +2040,14 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && action === 'voice_whisper') return handleVoiceWhisper(req, res);
   if (req.method === 'POST' && action === 'voice_status') return handleVoiceStatus(req, res);
   if (req.method === 'POST' && action === 'voice_recording') return handleVoiceRecording(req, res);
+  // Twilio Voice Intelligence: a transcript finished. Only the sid is used;
+  // finishTranscript re-reads everything from Twilio with our credentials.
+  if (req.method === 'POST' && action === 'vi_webhook') {
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const tsid = String(b.transcript_sid || b.TranscriptSid || (req.query && req.query.transcript_sid) || '');
+    try { await finishTranscript(serviceClient(), tsid); } catch (e) { console.error('[vi_webhook]', e.message); }
+    return res.status(200).json({ ok: true });
+  }
   if (req.method === 'POST' && action === 'voice_gather') return handleVoiceGather(req, res);
   if (req.method === 'POST' && action === 'voice_bot_start') return handleVoiceBotStart(req, res);
   if (req.method === 'POST' && action === 'voice_bot_turn') return handleVoiceBotTurn(req, res);

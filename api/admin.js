@@ -26,6 +26,7 @@ import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail
 import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { myDay } from './_lib/my-day.js';
 import { askHandler } from './_lib/ask.js';
+import { startTranscript, finishTranscript } from './_lib/transcribe.js';
 import { pipelineHandler, pipelineCallTarget, inboundForLiveStart } from './_lib/pipeline.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
@@ -545,6 +546,7 @@ export default async function handler(req, res) {
       case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
       case 'my_day': return await myDay(req, res, db, auth, body);
       case 'ask_andrew': return await askHandler(req, res, db, auth, body);
+      case 'transcribe_recent': return await transcribeRecent(req, res, db, auth);
       // Owner + secretaries only: pipelineHandler refuses role 'auditor', and
       // 'pipeline' must never be added to AUDITOR_ADMIN_ACTIONS.
       case 'pipeline': return await pipelineHandler(req, res, db, auth, body);
@@ -9455,6 +9457,28 @@ function checkStaffCallBudget(auth) {
 // that ends up on the call is re-derived here from a database row she is
 // already allowed to see, the same way every other business-scoped action in
 // this file (messagesSend, callClaim) scopes itself.
+
+// POST ?action=transcribe_recent (owner): start Twilio transcripts for recent
+// recorded calls that have none, and pull in any that finished but whose
+// webhook was missed. Safe to run again; each call is started once.
+async function transcribeRecent(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+  const since = new Date(Date.now() - days * 864e5).toISOString();
+  const { data: rows, error } = await db.from('calls')
+    .select('id, recording_sid, transcript, transcript_sid, transcript_status')
+    .eq('kind', 'inbound').not('recording_sid', 'is', null).gte('occurred_at', since).limit(300);
+  if (error) return res.status(500).json({ error: error.message });
+  const out = { started: 0, finished: 0, failed: 0, errors: [] };
+  for (const r of rows || []) {
+    try {
+      if (!r.transcript_sid && !r.transcript) { if (await startTranscript(db, r.id, r.recording_sid)) out.started++; }
+      else if (r.transcript_sid && r.transcript_status !== 'done') { if (await finishTranscript(db, r.transcript_sid)) out.finished++; }
+    } catch (e) { out.failed++; if (out.errors.length < 3) out.errors.push(e.message); }
+  }
+  return res.status(200).json(out);
+}
+
 async function callStart(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const source = (body.source || '').toString();
