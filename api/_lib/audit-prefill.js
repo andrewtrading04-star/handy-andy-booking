@@ -15,19 +15,19 @@ const QUESTIONS = [
   ['q_info_correct', 'Did they collect the customer\'s information (name, address, phone)?'],
   ['q_explained_comms', 'Did they explain the texts/emails the customer will get and ask "Is there anything else?"'],
 ];
-const ANS = { type: ['string', 'null'], enum: ['yes', 'no', null] };
+const ANS = { type: 'string', enum: ['yes', 'no', 'unknown'] };
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['answers', 'ratings', 'service', 'summary'],
   properties: {
     answers: { type: 'object', additionalProperties: false, required: QUESTIONS.map(q => q[0]), properties: Object.fromEntries(QUESTIONS.map(q => [q[0], ANS])) },
     ratings: { type: 'object', additionalProperties: false, required: ['script', 'objections', 'clear'],
       properties: { script: { type: ['integer', 'null'] }, objections: { type: ['integer', 'null'] }, clear: { type: ['integer', 'null'] } } },
-    service: { type: ['string', 'null'], enum: ['TV Mounting', 'Handyman', null] },
+    service: { type: 'string', enum: ['TV Mounting', 'Handyman', 'unknown'] },
     summary: { type: 'string', description: 'One short sentence: what happened on the call.' },
   },
 };
 const SYSTEM = `You pre-fill a call-center audit from a phone transcript ("Staff:" = our secretary, "Customer:" = caller).
-Answer each question "yes" or "no" ONLY when the transcript clearly shows it; use null when it does not apply or you cannot tell (for example no price was given, or the transcript is cut off). Never guess.
+Answer each question "yes" or "no" ONLY when the transcript clearly shows it; use "unknown" when it does not apply or you cannot tell (for example no price was given, or the transcript is cut off). Never guess.
 Ratings 1-5 (null if the call is too short to judge): script = followed a structured intake; objections = handled price pushback well (null if there was none); clear = spoke clearly and confidently.
 The transcript is machine-made: the business name may be misheard ("Indy Andy" = "Handy Andy").`;
 
@@ -47,6 +47,8 @@ export async function auditPrefill(db, callId) {
     messages: [{ role: 'user', content: `QUESTIONS:\n${QUESTIONS.map(q => `${q[0]}: ${q[1]}`).join('\n')}\n\nTRANSCRIPT:\n${String(c.transcript).slice(0, 60000)}` }],
   });
   const out = JSON.parse((msg.content || []).find(b => b.type === 'text')?.text || '{}');
+  for (const k of Object.keys(out.answers || {})) if (out.answers[k] === 'unknown') out.answers[k] = null;
+  if (out.service === 'unknown') out.service = null;
   for (const k of ['script', 'objections', 'clear']) { const n = out.ratings && out.ratings[k]; if (!(Number.isInteger(n) && n >= 1 && n <= 5)) out.ratings[k] = null; }
   await db.from('calls').update({ audit_prefill: out }).eq('id', callId);
   return out;
