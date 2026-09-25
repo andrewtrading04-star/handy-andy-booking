@@ -2077,7 +2077,7 @@ export default async function handler(req, res) {
     const validWidget = WIDGET === 'handy-andy-handyman' || WIDGET === 'doms-handyman'
       ? true
       : !!(await serviceClient().from('businesses')
-          .select('id').eq('active', true).eq('analytics_config->>funnel_backend', WIDGET).maybeSingle()).data;
+          .select('id').eq('active', true).eq('analytics_config->>funnel_backend', WIDGET).limit(1)).data?.length;
     if (!validWidget) {
       return res.status(400).json({ error: 'Invalid widget' });
     }

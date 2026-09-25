@@ -13703,13 +13703,17 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   // Reuse an existing customer (by phone, then email) or create one — same
   // lookup order as the dashboard's booking_create.
   let customer_id = null;
+  // Newest match, not .maybeSingle(): duplicate customer rows exist and
+  // maybeSingle returns null on several, which inserted yet another duplicate.
   if (cust.phone) {
-    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', cust.phone).maybeSingle();
-    if (data?.id) customer_id = data.id;
+    const { data: rows, error } = await db.from('customers').select('id').eq('business_id', biz.id).eq('phone', cust.phone).order('created_at', { ascending: false }).limit(1);
+    if (error) throw error;
+    if (rows?.[0]?.id) customer_id = rows[0].id;
   }
   if (!customer_id && cust.email) {
-    const { data } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', cust.email).maybeSingle();
-    if (data?.id) customer_id = data.id;
+    const { data: rows, error } = await db.from('customers').select('id').eq('business_id', biz.id).eq('email', cust.email).order('created_at', { ascending: false }).limit(1);
+    if (error) throw error;
+    if (rows?.[0]?.id) customer_id = rows[0].id;
   }
   if (!customer_id) {
     const { data, error } = await db.from('customers').insert({

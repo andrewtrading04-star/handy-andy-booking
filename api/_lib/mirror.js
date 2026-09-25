@@ -80,8 +80,10 @@ export async function mirrorBooking(ctx = {}) {
         .upsert(custRow, { onConflict: 'business_id,zenbooker_customer_id' }).select('id').single();
       customer_id = data?.id || null;
     } else if (custRow.email) {
-      const { data: found } = await db.from('customers').select('id')
-        .eq('business_id', biz.id).eq('email', custRow.email).maybeSingle();
+      // Newest match: duplicate customer rows exist and .maybeSingle() returns null on several.
+      const { data: foundRows } = await db.from('customers').select('id')
+        .eq('business_id', biz.id).eq('email', custRow.email).order('created_at', { ascending: false }).limit(1);
+      const found = foundRows?.[0] || null;
       if (found) {
         // Refresh the matched row with what was JUST typed at checkout — the
         // most current truth about this customer. Previously this branch kept

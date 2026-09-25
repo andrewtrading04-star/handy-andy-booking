@@ -53,9 +53,11 @@ export async function resolveServiceArea(db, businessId, businessSlug, rawZip) {
   // No per-zip row. Only handy-andy has the unstaffed LA area, and only a CA
   // zip may fall back to it.
   if (LA_FALLBACK_SLUGS.has(businessSlug) && CA_ZIP_RE.test(zip)) {
-    const { data: la } = await db.from('service_areas')
+    const { data: laRows } = await db.from('service_areas')
       .select('id, name, state, timezone, unstaffed')
-      .eq('business_id', businessId).eq('state', 'CA').eq('active', true).maybeSingle();
+      .eq('business_id', businessId).eq('state', 'CA').eq('active', true)
+      .order('created_at', { ascending: true }).limit(1);   // a second CA area must not break this
+    const la = laRows?.[0] || null;
     if (la) {
       return {
         id: la.id, name: la.name, state: la.state,
