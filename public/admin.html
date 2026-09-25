@@ -20930,7 +20930,7 @@ async function openNewBooking(prefill){
       if(bIdx>=0) return 1;
       return a.localeCompare(b);
     });
-    if(isHandyAndy && !appConfig.demo) cats.push('Assurion');   // hidden in demo
+    // Assurion removed from New Booking (owner, 2026-09-25: no longer working with them).
     // Guaranteed Dismount Service — a free "remove one TV" booking that pays the
     // tech $60 (redeemed GDS). Bottom of the list for BOTH businesses. Links to the
     // TV-mounting service row (a dismount is a TV job); the price is $0. Hidden in demo.
