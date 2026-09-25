@@ -11979,6 +11979,7 @@ async function askRefreshBadge(){
 }
 function renderAskAndrew(){
   const view=document.getElementById('view');
+  const $=id=>document.getElementById(id);
   const bubbles=_askChat.map((m,i)=>`<div class="ask-q">${esc(m.q)}</div>`+(m.a==null?'<div class="ask-a ask-wait">Thinking…</div>':
     `<div class="ask-a${m.known?'':' ask-unk'}">${esc(m.a)}${m.draft?`<div class="ask-draft"><b>Draft estimate · ${esc(m.draft.service_label||'')}</b>${(m.draft.line_items||[]).map(li=>`<div>${li.qty>1?'×'+li.qty+' ':''}${esc(li.description)} <span>$${(Number(li.unit_price)*(Number(li.qty)||1)).toFixed(2)}</span></div>`).join('')}<button class="btn sm" data-askdraft="${i}">Open as estimate</button></div>`:''}</div>`)).join('');
   view.innerHTML=`<div class="wrap ask-wrap">
@@ -12009,6 +12010,7 @@ function renderAskAndrew(){
 }
 async function renderAskLog(){
   const view=document.getElementById('view');
+  const $=id=>document.getElementById(id);
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   const d=await askRefreshBadge();
   if(!d){ view.innerHTML='<div class="wrap"><div class="empty">Could not load questions.</div></div>'; return; }
