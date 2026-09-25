@@ -19,6 +19,7 @@
 // grade against, and it is read-only.
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
+import { auditPrefill } from './_lib/audit-prefill.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { GRASSHOPPER_LINES, prettyPhone } from './_lib/grasshopper.js';
 import { localDateStartUTC, localDateTimeUTC, addDaysStr, localDayStartUTC } from './_lib/time.js';
@@ -93,6 +94,7 @@ export default async function handler(req, res) {
       case 'audit_delete': return await auditDelete(req, res, db, auth, body);
       case 'graded_ids':   return await gradedIds(req, res, db);
       case 'audit_skip':   return await auditSkip(req, res, db, auth, body);
+      case 'audit_prefill': { const id = String(body.call_id || req.query.call_id || ''); if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'call_id required' }); try { return res.status(200).json(await auditPrefill(db, id)); } catch (e) { console.error('[audit_prefill]', e.message); return res.status(502).json({ error: 'AI could not read this call. Try again.' }); } }
       default:             return res.status(400).json({ error: 'Unknown action' });
     }
   } catch (e) {

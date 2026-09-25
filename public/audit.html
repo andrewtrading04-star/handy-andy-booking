@@ -2138,6 +2138,7 @@ function qShow(){
       rec+
       (r.transcript?'<button type="button" class="btn ghost sm" id="qTxBtn" style="margin-top:6px;">Show transcript</button><div class="qw-tx" id="qTx" hidden>'+esc(r.transcript)+'</div>':'')+
     '</div>'+
+    '<div id="qAi"></div>'+
     '<div class="card"><h3>✅ Questions</h3><div class="qw-seg" id="qSvc"><button data-s="TV Mounting">TV Mounting</button><button data-s="Handyman">Handyman</button></div><div id="qQs"></div></div>'+
     '<div class="card"><h3>⭐ Rate this call</h3><div id="qRates"></div></div>'+
     '<div class="card"><h3>💬 Complaints</h3><textarea id="qComplaint" rows="3" placeholder="Anything that went wrong on this call…"></textarea>'+
@@ -2171,6 +2172,26 @@ function qShow(){
   }));
   $('qSvc').querySelectorAll('button').forEach(b=>b.onclick=()=>{ qState.svc=b.dataset.s; qRenderQs(); });
   qRenderQs();
+  qPrefill(r);
+}
+// AI pre-fill (owner, 2026-09-25): Opus 5.5 reads the transcript and suggests
+// answers and stars; she checks and changes anything before saving. Only
+// fills what she hasn't touched yet.
+async function qPrefill(r){
+  const box=$('qAi'); if(!box) return;
+  if(!r.transcript){ box.innerHTML=''; return; }
+  box.innerHTML='<div class="card" style="background:#eef4ff;border-color:#c7d7fe;">✨ Reading the transcript…</div>';
+  let p;
+  try{ p=await api('audit_prefill',{method:'POST',body:{call_id:r.id}}); }catch(e){ if(qState&&qState.r===r) box.innerHTML=''; return; }
+  if(!qState||qState.r!==r||!$('qAi')) return;
+  if(!p||p.error){ box.innerHTML=''; return; }
+  const a=p.answers||{};
+  Object.entries(a).forEach(([k,v])=>{ if((v==='yes'||v==='no')&&!qState.answers[k]) qState.answers[k]=v; });
+  if(p.service==='TV Mounting'||p.service==='Handyman') qState.svc=p.service;
+  Object.entries(p.ratings||{}).forEach(([k,n])=>{ if(n&&!qState.ratings[k]){ qState.ratings[k]=n;
+    const g=document.querySelector('[data-rk="'+k+'"]'); if(g) g.querySelectorAll('button').forEach(x=>x.classList.toggle('on',Number(x.dataset.n)<=n)); } });
+  qRenderQs();
+  box.innerHTML='<div class="card" style="background:#eef4ff;border-color:#c7d7fe;"><b>✨ Pre-filled by AI from the transcript.</b> Check every answer and star before saving.'+(p.summary?'<div class="sub" style="margin-top:4px;">'+esc(p.summary)+'</div>':'')+'</div>';
 }
 // Owner's call flow, 2026-09-24. Customer-outcome questions (cust_*) record
 // what happened, not how she did, so they never count toward the score.
