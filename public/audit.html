@@ -2215,7 +2215,7 @@ function qRenderQs(){
   $('qQs').innerHTML=qVisible().map((q,i)=>{
     const v=qState.answers[q.k];
     return '<div class="q"><div class="qt"><b>'+(i+1)+'.</b> '+(q.cust?'<span class="pill" style="background:#eef2ff;color:#3730a3;">Customer</span> ':'')+esc(q.t)+'</div><div class="yna" data-qk="'+q.k+'">'+
-      [['yes','Yes'],['no','No']].map(([val,lab])=>'<button type="button" data-v="'+val+'"'+(v===val?' class="on-'+val+'"':'')+'>'+lab+'</button>').join('')+'</div></div>';
+      [['yes','Yes'],['no','No'],['na','N/A']].map(([val,lab])=>'<button type="button" data-v="'+val+'"'+(v===val?' class="on-'+val+'"':'')+'>'+lab+'</button>').join('')+'</div></div>';
   }).join('');
   $('qQs').querySelectorAll('[data-qk]').forEach(g=>g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     qState.answers[g.dataset.qk]=b.dataset.v; qRenderQs();
