@@ -40,7 +40,7 @@ async function readPage(db, day) {
   ]);
   if (e1) throw e1; if (e2) throw e2;
   const tasks = [...(open || []).map(t => ({ ...t, done: false })), ...(done || []).map(t => ({ ...t, done: true }))]
-    .map(t => ({ id: t.id, title: t.title, starred: t.starred, time_hint: t.time_hint, done: t.done,
+    .map(t => ({ id: t.id, title: t.title, starred: t.starred, priority: t.priority || 0, time_hint: t.time_hint, done: t.done,
       carried: Math.max(0, daysBetween(t.origin_day, day)), origin_day: t.origin_day, done_at: t.done_at }));
 
   const { data: habits, error: e3 } = await db.from('owner_habits').select('id, name, sort').eq('active', true).order('sort').order('created_at');
@@ -82,7 +82,8 @@ export async function myDay(req, res, db, auth, body) {
   switch (op) {
     case 'task_add': {
       const title = clean(body.title); if (!title) return res.status(400).json({ error: 'Write a task first' });
-      q = db.from('owner_tasks').insert({ title, origin_day: today, starred: !!body.starred, time_hint: clean(body.time_hint, 40) || null }); break;
+      const pr = [0, 1, 2].includes(Number(body.priority)) ? Number(body.priority) : (body.starred ? 1 : 0);
+      q = db.from('owner_tasks').insert({ title, origin_day: today, priority: pr, starred: pr > 0, time_hint: clean(body.time_hint, 40) || null }); break;
     }
     case 'task_done':
       q = body.done
@@ -92,7 +93,9 @@ export async function myDay(req, res, db, auth, body) {
     case 'task_edit': {
       const patch = {};
       if ('title' in body) { const t = clean(body.title); if (!t) return res.status(400).json({ error: 'Title can\'t be empty' }); patch.title = t; }
-      if ('starred' in body) patch.starred = !!body.starred;
+      if ('starred' in body) { patch.starred = !!body.starred; patch.priority = body.starred ? 1 : 0; }
+      // Three levels (owner 2026-09-25): 0 white, 1 green, 2 red.
+      if ('priority' in body) { const p = Number(body.priority); if (![0, 1, 2].includes(p)) return res.status(400).json({ error: 'Bad level' }); patch.priority = p; patch.starred = p > 0; }
       if ('time_hint' in body) patch.time_hint = clean(body.time_hint, 40) || null;
       q = db.from('owner_tasks').update(patch).eq('id', id); break;
     }
@@ -217,13 +220,13 @@ async function smart(req, res, db, body) {
     let r;
     switch (a.type) {
       case 'add_task': if (!clean(a.title)) continue;
-        r = await db.from('owner_tasks').insert({ title: clean(a.title), origin_day: day, starred: !!a.starred, time_hint: clean(a.time_hint, 40) || null }); break;
+        r = await db.from('owner_tasks').insert({ title: clean(a.title), origin_day: day, starred: !!a.starred, priority: a.starred ? 1 : 0, time_hint: clean(a.time_hint, 40) || null }); break;
       case 'complete_task': if (!taskIds.has(tid)) continue;
         r = await db.from('owner_tasks').update({ done_at: new Date().toISOString(), done_day: today }).eq('id', tid); break;
       case 'delete_task': if (!taskIds.has(tid)) continue;
         r = await db.from('owner_tasks').update({ deleted_at: new Date().toISOString() }).eq('id', tid); break;
       case 'star_task': if (!taskIds.has(tid)) continue;
-        r = await db.from('owner_tasks').update({ starred: a.starred !== false }).eq('id', tid); break;
+        r = await db.from('owner_tasks').update({ starred: a.starred !== false, priority: a.starred !== false ? 1 : 0 }).eq('id', tid); break;
       case 'set_time': if (!taskIds.has(tid)) continue;
         r = await db.from('owner_tasks').update({ time_hint: clean(a.time_hint, 40) || null }).eq('id', tid); break;
       case 'check_habit': case 'skip_habit': if (!habitIds.has(tid)) continue;
