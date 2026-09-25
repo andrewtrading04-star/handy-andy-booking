@@ -517,6 +517,7 @@
   .cv .ch-hist{background:#fff!important;border:1px solid var(--line)!important;border-radius:14px;padding:14px 18px;margin-bottom:14px;}
   .cv .ch-hist-h{color:var(--ink)!important;}
   .cv-rec>div{background:#fff!important;border:0!important;padding:0!important;} .cv-rec>div>div{color:var(--ink)!important;}
+  .tx-t{display:block;font-size:10.5px;font-weight:700;opacity:.65;margin-bottom:2px;}
   .tx-wrap{margin-top:8px;} .tx-sum{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13.5px;line-height:1.6;}
   .tx-sum-i{display:flex;gap:7px;} .tx-sum-i span{flex:none;width:18px;text-align:center;} .tx-no{color:#b91c1c;font-weight:600;} .tx-yes{color:#15803d;font-weight:600;}
   .tx-full summary{cursor:pointer;color:#2563eb;font-size:13px;font-weight:600;margin-top:7px;list-style:none;} .tx-full summary::-webkit-details-marker{display:none;}
@@ -13179,7 +13180,7 @@ function txSumHtml(sum){
 function txView(r){
   const t=String(r.transcript||'');
   if(!/^(Staff|Customer):/m.test(t)) return `<div style="margin-top:8px;background:var(--line2);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink-2);line-height:1.55;">${esc(t)}</div>`;
-  const bubbles=t.split(/\r?\n/).map(l=>{ const m=l.match(/^(Staff|Customer):\s*(.*)$/); return m&&m[2]?`<div class="tx-b ${m[1]==='Staff'?'tx-s':'tx-c'}">${esc(m[2])}</div>`:''; }).join('');
+  const bubbles=t.split(/\r?\n/).map(l=>{ const m=l.match(/^(Staff|Customer):\s*(.*)$/); if(!m||!m[2]) return ''; const tm=m[2].match(/^\[(\d+:\d\d)\]\s*/); const txt=tm?m[2].slice(tm[0].length):m[2]; return `<div class="tx-b ${m[1]==='Staff'?'tx-s':'tx-c'}">${tm?`<span class="tx-t">${tm[1]}</span>`:''}${esc(txt)}</div>`; }).join('');
   const sum=r.transcript_summary
     ? `<div class="tx-sum">${txSumHtml(r.transcript_summary)}</div>`
     : `<div class="tx-sum" data-txsum="${esc(r.id)}"><div class="tx-sum-i" style="color:var(--mute);">✨ Summarizing the call…</div></div>`;

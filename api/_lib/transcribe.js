@@ -82,9 +82,11 @@ export async function finishTranscript(db, transcriptSid) {
     const text = String(s.transcript || '').trim();
     if (!text) continue;
     const last = turns[turns.length - 1];
-    if (last && last.who === who) last.text += ' ' + text; else turns.push({ who, text });
+    if (last && last.who === who) last.text += ' ' + text; else turns.push({ who, text, at: Number(s.start_time) || 0 });
   }
-  const body = turns.map(x => `${x.who}: ${x.text}`).join('\n') || '(no speech)';
+  // Each turn starts with its time in the call, e.g. "Staff: [1:05] ..." (owner, 2026-09-25).
+  const stamp = sec => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  const body = turns.map(x => `${x.who}: [${stamp(x.at)}] ${x.text}`).join('\n') || '(no speech)';
   await db.from('calls').update({ transcript: body, transcript_status: 'done' }).eq('id', callId).eq('transcript_sid', transcriptSid);
   try { await (await import('./call-summary.js')).callSummary(db, callId); } catch (e) { console.error('[call-summary]', e.message); }
   return true;
