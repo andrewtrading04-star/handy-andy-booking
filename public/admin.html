@@ -13572,10 +13572,6 @@ function paintCalls(){
   const listScroll=view.querySelector('.ci-list')?.scrollTop||0;
   const detailScroll=view.querySelector('.ci-detail')?.scrollTop||0;
   view.innerHTML=`<div class="wrap ci-wrap">
-    <div class="rc-head"><div>
-      <h2 class="rc-title">Calls</h2>
-      <div class="rc-sub">Select a call to read its message, listen to a recording, or follow up.${_callsView==='callback'?' This queue includes older calls outside the selected period.':''}</div>
-    </div></div>
     <div class="call-filter-bar">
       <div class="call-status-tabs" role="group" aria-label="Call status">${viewSeg}</div>
       <div class="call-filter-fields">${_callsView==='callback'?'':periodSeg}${whoSeg}</div>
