@@ -17,8 +17,9 @@ const MODEL = 'claude-opus-5-5';
 const clean = (v, n = 4000) => String(v == null ? '' : v).trim().slice(0, n);
 
 const SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['known', 'answer', 'draft_estimate'],
+  type: 'object', additionalProperties: false, required: ['known', 'ask_back', 'answer', 'draft_estimate'],
   properties: {
+    ask_back: { type: 'boolean', description: 'true when the request is doable from the data but details are missing; answer = the short list of what to ask the customer. Not an "I do not know".' },
     known: { type: 'boolean', description: 'true ONLY if the answer is fully backed by KNOWLEDGE or LIVE CRM DATA below' },
     answer: { type: 'string', description: 'As few words as possible. If known=false: exactly "I don\'t know. Ask Andrew." plus at most one short sentence on what is missing.' },
     draft_estimate: {
@@ -41,7 +42,9 @@ Accuracy is everything:
 - Answer ONLY from KNOWLEDGE and LIVE CRM DATA in the message. Never use outside knowledge about how other companies work.
 - If the answer is not clearly there, set known=false and answer "I don't know. Ask Andrew." Do NOT guess, estimate, or fill gaps. A wrong answer is far worse than "I don't know".
 - Prices: only numbers that appear in the data. Say "before tax".
-- draft_estimate only when asked for a quote and every line price is in LIVE CRM DATA; otherwise null.`;
+- If the request is doable but details are missing (wall type, wires, bracket...), set ask_back=true and answer with just the missing questions. That is not "I don't know".
+- Business: use CURRENT BUSINESS unless the user names another.
+- draft_estimate only when asked for a quote/estimate and every line price is in LIVE CRM DATA; otherwise null. Line items: one line per chosen option ("Group: Option"), Travel line if the zip has a travel fee, "Service minimum" top-up if needed. Prices before tax.`;
 
 let _client;
 function staffOnly(auth) { return auth && auth.role === 'owner'; }   // owner-only while being taught
@@ -54,25 +57,25 @@ async function liveData(db, question) {
   if (!ids.length) return out;
   const [{ data: svcs }, { data: opts }, { data: areas }, { data: coupons }] = await Promise.all([
     db.from('services').select('id, business_id, name, base_price, duration_minutes, category').in('business_id', ids).eq('active', true).order('sort_order').limit(200),
-    db.from('service_options').select('business_id, group_id, label, price').in('business_id', ids).eq('active', true).order('sort_order').limit(600),
+    db.from('service_options').select('business_id, label, price, group:service_option_groups ( label, sort_order )').in('business_id', ids).eq('active', true).order('sort_order').limit(600),
     db.from('service_areas').select('id, business_id, name, state, unstaffed').in('business_id', ids).eq('active', true).limit(100),
     db.from('coupons').select('business_id, code, amount, expires_on').in('business_id', ids).eq('active', true).limit(100),
   ]);
   for (const b of biz || []) {
     out[b.name] = {
       services: (svcs || []).filter(s => s.business_id === b.id).map(s => ({ name: s.name, base_price: Number(s.base_price), minutes: s.duration_minutes, category: s.category })),
-      options: (opts || []).filter(o => o.business_id === b.id && Number(o.price)).map(o => ({ label: o.label, price: Number(o.price) })),
+      tv_mounting_options_by_group: (opts || []).filter(o => o.business_id === b.id).reduce((m, o) => { const g = (o.group && o.group.label) || 'Other'; (m[g] ||= []).push(`${o.label} = $${Number(o.price)}`); return m; }, {}),
       service_areas: (areas || []).filter(a => a.business_id === b.id).map(a => `${a.name}${a.state ? ', ' + a.state : ''}${a.unstaffed ? ' (unstaffed)' : ''}`),
       active_coupons: (coupons || []).filter(c => c.business_id === b.id).map(c => ({ code: c.code, amount: Number(c.amount), expires: c.expires_on })),
     };
   }
   const zips = [...new Set(String(question).match(/\b\d{5}\b/g) || [])].slice(0, 3);
   if (zips.length) {
-    const { data: z } = await db.from('service_area_zips').select('business_id, postal_code, travel_fee, surcharge, service_area_id').in('postal_code', zips).in('business_id', ids);
+    const { data: z } = await db.from('service_area_zips').select('business_id, postal_code, surcharge, service_area_id').in('postal_code', zips).in('business_id', ids);
     const areaName = Object.fromEntries((areas || []).map(a => [a.id, a.name]));
     out.zip_lookup = zips.map(zip => {
       const rows = (z || []).filter(r => r.postal_code === zip);
-      return rows.length ? rows.map(r => ({ zip, business: byId[r.business_id]?.name, area: areaName[r.service_area_id] || null, travel_fee: Number(r.travel_fee) || 0, surcharge: Number(r.surcharge) || 0 }))
+      return rows.length ? rows.map(r => ({ zip, business: byId[r.business_id]?.name, area: areaName[r.service_area_id] || null, travel_fee_charged_to_customer: Number(r.surcharge) || 0 }))
         : [{ zip, served: false, note: 'zip not in any service area' }];
     }).flat();
   }
@@ -90,7 +93,10 @@ async function ask(req, res, db, auth, body) {
     liveData(db, question + ' ' + history.map(h => h.q).join(' ')),
   ]);
   const knowledge = (know || []).map(k => `- ${k.topic ? k.topic + ': ' : ''}${k.body}`).join('\n');
-  const prompt = `KNOWLEDGE (the owner's rules):\n${knowledge || '(none yet)'}\n\nLIVE CRM DATA:\n${JSON.stringify(live)}\n\n` +
+  const curBiz = { 'handy-andy': 'Handy Andy', doms: "Dom's TV Mounting" }[body.business] || null;
+  const prompt = `CURRENT BUSINESS: ${curBiz || 'not set'}
+
+KNOWLEDGE (the owner's rules):\n${knowledge || '(none yet)'}\n\nLIVE CRM DATA:\n${JSON.stringify(live)}\n\n` +
     (history.length ? `EARLIER IN THIS CHAT:\n${history.map(h => `Q: ${h.q}\nA: ${h.a}`).join('\n')}\n\n` : '') +
     `QUESTION: ${question}`;
   _client ||= new Anthropic();
@@ -109,14 +115,15 @@ async function ask(req, res, db, auth, body) {
   let out;
   try { out = JSON.parse((msg.content || []).find(b => b.type === 'text')?.text || ''); }
   catch { return res.status(502).json({ error: 'The AI answer could not be read. Try again.' }); }
-  const known = !!out.known;
+  const askBack = !!out.ask_back;
+  const known = askBack || !!out.known;
   const answer = clean(out.answer, 2000) || "I don't know. Ask Andrew.";
   const draft = known && out.draft_estimate && Array.isArray(out.draft_estimate.line_items) && out.draft_estimate.line_items.length ? out.draft_estimate : null;
   const { data: row } = await db.from('ask_questions').insert({
     asked_by: auth.name || (auth.role === 'owner' ? 'Andrew' : null), role: auth.role, business_slug: body.business || null,
     question, answer, known, draft,
   }).select('id').single();
-  return res.status(200).json({ id: row && row.id, answer, known, draft });
+  return res.status(200).json({ id: row && row.id, answer, known, ask_back: askBack, draft });
 }
 
 async function log(req, res, db) {
