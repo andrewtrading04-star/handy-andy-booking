@@ -24,13 +24,16 @@ const SCHEMA = {
     answer: { type: 'string', description: 'As few words as possible. If known=false: exactly "I don\'t know. Ask Andrew." plus at most one short sentence on what is missing.' },
     draft_estimate: {
       type: ['object', 'null'], additionalProperties: false,
-      required: ['service_label', 'line_items', 'note'],
+      required: ['service_label', 'line_items', 'note', 'customer'],
       description: 'Only when the user asks for an estimate/quote AND every price comes from LIVE CRM DATA. Otherwise null.',
       properties: {
         service_label: { type: 'string' },
         line_items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['description', 'qty', 'unit_price'],
           properties: { description: { type: 'string' }, qty: { type: 'number' }, unit_price: { type: 'number' } } } },
         note: { type: ['string', 'null'] },
+        customer: { type: 'object', additionalProperties: false, required: ['name', 'phone', 'email', 'address', 'city', 'state', 'zip'],
+          description: 'Only what the user actually gave; null for anything not given.',
+          properties: { name: { type: ['string', 'null'] }, phone: { type: ['string', 'null'] }, email: { type: ['string', 'null'] }, address: { type: ['string', 'null'] }, city: { type: ['string', 'null'] }, state: { type: ['string', 'null'] }, zip: { type: ['string', 'null'] } } },
       },
     },
   },

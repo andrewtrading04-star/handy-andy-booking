@@ -11977,11 +11977,37 @@ async function askRefreshBadge(){
     return d;
   }catch(_){ return null; }
 }
+// Draft card right in the chat (owner, 2026-09-25: "present this draft inside
+// the Ask Andrew screen -- users can use Ask Andrew to book appointments").
+// Book / Save as estimate open the normal New Booking form prefilled, so a
+// person still picks the time, takes the card and confirms -- nothing is sent
+// or booked by the AI itself.
+function askDraftCard(d,i){
+  const lines=(d.line_items||[]).filter(li=>Number(li.unit_price)*(Number(li.qty)||1)!==0);
+  const sub=Math.round(lines.reduce((t,li)=>t+Number(li.unit_price)*(Number(li.qty)||1),0)*100)/100;
+  const tax=Math.round(sub*0.0825*100)/100;
+  const c=d.customer||{};
+  const who=[c.name,c.phone,[c.address,c.city,c.state,c.zip].filter(Boolean).join(', ')].filter(Boolean).map(esc).join(' · ');
+  return `<div class="ask-draft">
+    <div style="font-weight:800;margin-bottom:4px;">📝 ${esc(d.service_label||'Job')}</div>
+    ${who?`<div style="color:var(--mute);margin-bottom:6px;">${who}</div>`:''}
+    ${lines.map(li=>`<div>${li.qty>1?'×'+li.qty+' ':''}${esc(li.description)} <span>$${(Number(li.unit_price)*(Number(li.qty)||1)).toFixed(2)}</span></div>`).join('')}
+    <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px;">Subtotal <span>$${sub.toFixed(2)}</span></div>
+    <div>Tax <span>$${tax.toFixed(2)}</span></div>
+    <div style="font-weight:800;">Total <span>$${(sub+tax).toFixed(2)}</span></div>
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;"><button class="btn sm" data-askbook="${i}">📅 Book appointment</button><button class="btn ghost sm" data-askdraft="${i}">Save as estimate</button></div>
+  </div>`;
+}
+function askOpenDraft(d,estimateOnly){
+  const c=d.customer||{};
+  openNewBooking({ _estimateOnly:!!estimateOnly, name:c.name||'', phone:c.phone||'', email:c.email||'', address_line1:c.address||'', city:c.city||'', state:c.state||'', postal_code:c.zip||'',
+    line_items:(d.line_items||[]).filter(li=>Number(li.unit_price)*(Number(li.qty)||1)!==0).map(li=>({ description:li.description, qty:li.qty, unit_price:li.unit_price })) });
+}
 function renderAskAndrew(){
   const view=document.getElementById('view');
   const $=id=>document.getElementById(id);
   const bubbles=_askChat.map((m,i)=>`<div class="ask-q">${esc(m.q)}</div>`+(m.a==null?'<div class="ask-a ask-wait">Thinking…</div>':
-    `<div class="ask-a${m.known?'':' ask-unk'}">${esc(m.a)}${m.draft?`<div class="ask-draft"><b>Draft estimate · ${esc(m.draft.service_label||'')}</b>${(m.draft.line_items||[]).map(li=>`<div>${li.qty>1?'×'+li.qty+' ':''}${esc(li.description)} <span>$${(Number(li.unit_price)*(Number(li.qty)||1)).toFixed(2)}</span></div>`).join('')}<button class="btn sm" data-askdraft="${i}">Open as estimate</button></div>`:''}</div>`)).join('');
+    `<div class="ask-a${m.known?'':' ask-unk'}">${esc(m.a)}${m.draft?askDraftCard(m.draft,i):''}</div>`)).join('');
   view.innerHTML=`<div class="wrap ask-wrap">
     <h2 style="margin:0 0 2px;">Ask Andrew</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:12px;">Ask anything about the business. Short answers. It says “I don’t know” when it doesn’t.</div>
@@ -12002,10 +12028,8 @@ function renderAskAndrew(){
     catch(err){ m.a='Error: '+(err.message||'try again'); m.known=true; }
     _askBusy=false; if(onScreen('askandrew')) renderAskAndrew(); askRefreshBadge();
   };
-  view.querySelectorAll('[data-askdraft]').forEach(b=>b.onclick=()=>{
-    const d=_askChat[Number(b.dataset.askdraft)].draft;
-    openNewBooking({ _estimateOnly:true, line_items:(d.line_items||[]).map(li=>({ description:li.description, qty:li.qty, unit_price:li.unit_price })) });
-  });
+  view.querySelectorAll('[data-askdraft]').forEach(b=>b.onclick=()=>askOpenDraft(_askChat[Number(b.dataset.askdraft)].draft,true));
+  view.querySelectorAll('[data-askbook]').forEach(b=>b.onclick=()=>askOpenDraft(_askChat[Number(b.dataset.askbook)].draft,false));
   setTimeout(()=>inp.focus(),0);
 }
 async function renderAskLog(){
