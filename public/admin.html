@@ -469,7 +469,7 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
-  .ask-wrap{max-width:760px;} .ask-chat{display:flex;flex-direction:column;gap:6px;max-height:calc(100dvh - 300px);overflow-y:auto;padding:4px 0 10px;}
+  .ask-wrap{max-width:760px;} .ask-can{font-size:13px;color:var(--ink-2);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:8px 0;} .ask-can summary{font-weight:700;cursor:pointer;} .ask-can ol{margin:6px 0 4px 18px;padding:0;} .ask-can li{margin:2px 0;} .ask-cant{color:var(--mute);} .ask-chat{display:flex;flex-direction:column;gap:6px;max-height:calc(100dvh - 300px);overflow-y:auto;padding:4px 0 10px;}
   .ask-q{align-self:flex-end;background:#2563eb;color:#fff;padding:9px 13px;border-radius:16px 16px 4px 16px;max-width:80%;white-space:pre-wrap;}
   .ask-a{align-self:flex-start;background:var(--panel);border:1px solid var(--line);padding:9px 13px;border-radius:16px 16px 16px 4px;max-width:85%;white-space:pre-wrap;}
   .ask-a.ask-unk{border-color:#fca5a5;background:#fef2f2;} .ask-wait{color:var(--mute);}
@@ -12012,6 +12012,7 @@ function renderAskAndrew(){
     <h2 style="margin:0 0 2px;">${role==='owner'?'Ask Andrew':'Ask the Owner'}</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:12px;">Ask anything about the business. Short answers. It says “I don’t know” when it doesn’t.</div>
     <div class="ask-chat" id="askChat">${bubbles||'<div class="empty" style="padding:24px 0;">Try: “Price for a 75 inch over a fireplace in 80219?”</div>'}</div>
+    <details class="ask-can" open><summary>What I can do</summary><ol><li>Prices for TV mounting: size, bracket, wall, fireplace, wires, add-ons.</li><li>Travel fee for a zip, or tell you we don’t serve it.</li><li>Build a quote and total with tax.</li><li>Draft an appointment or estimate you can open with one tap.</li><li>What to ask the customer on a call.</li><li>What to say when a customer says “too expensive” (discount steps).</li><li>Handyman pricing ($85/hr, 2-hour minimum).</li><li>Time windows and the after-hours fee.</li><li>Rules: card on file, texts, estimate follow-up.</li><li>Says “I don’t know” when it isn’t sure, and sends the question to the owner.</li></ol><div class="ask-cant">Can’t: send texts or emails, or book on its own. You confirm every booking.</div></details>
     <form id="askForm" class="ask-form" autocomplete="off">
       <textarea id="askInput" rows="2" maxlength="2000" placeholder="Ask a question…"></textarea>
       <div class="ask-row">${(window.SpeechRecognition||window.webkitSpeechRecognition)?'<button type="button" id="askMic" class="md-mic" aria-label="Speak">🎙</button>':''}<button type="submit" class="btn" id="askGo" ${_askBusy?'disabled':''}>Ask</button></div>
