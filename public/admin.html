@@ -3099,7 +3099,7 @@ function enterApp(){
   if(navMyDay) navMyDay.style.display = role==='owner' ? '' : 'none';
   // Ask Andrew (owner, 2026-09-24): owner-only while he teaches it.
   const navAsk=document.getElementById('navAskAndrew');
-  if(navAsk) navAsk.style.display = role==='owner' ? '' : 'none';
+  if(navAsk){ navAsk.style.display = (role==='owner'||role==='secretary') ? '' : 'none'; navAsk.innerHTML='<span class="ic" data-ico="other">🤖</span> '+(role==='owner'?'Ask Andrew':'Ask the Owner'); }
   if(role==='owner') askRefreshBadge();
   if(role==='owner') startMyDayNudge();
   // Pipeline: owner and both secretaries (they call back from it on their
@@ -3468,7 +3468,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline',askandrew:'Ask Andrew'})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -12009,7 +12009,7 @@ function renderAskAndrew(){
   const bubbles=_askChat.map((m,i)=>`<div class="ask-q">${esc(m.q)}</div>`+(m.a==null?'<div class="ask-a ask-wait">Thinking…</div>':
     `<div class="ask-a${m.known?'':' ask-unk'}">${esc(m.a)}${m.draft?askDraftCard(m.draft,i):''}</div>`)).join('');
   view.innerHTML=`<div class="wrap ask-wrap">
-    <h2 style="margin:0 0 2px;">Ask Andrew</h2>
+    <h2 style="margin:0 0 2px;">${role==='owner'?'Ask Andrew':'Ask the Owner'}</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:12px;">Ask anything about the business. Short answers. It says “I don’t know” when it doesn’t.</div>
     <div class="ask-chat" id="askChat">${bubbles||'<div class="empty" style="padding:24px 0;">Try: “Price for a 75 inch over a fireplace in 80219?”</div>'}</div>
     <form id="askForm" class="ask-form" autocomplete="off">

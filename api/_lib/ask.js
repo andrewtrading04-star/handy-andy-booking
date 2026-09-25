@@ -141,10 +141,12 @@ async function log(req, res, db) {
 }
 
 export async function askHandler(req, res, db, auth, body) {
-  if (!staffOnly(auth)) return res.status(403).json({ error: 'Owner only for now' });
-  if (req.method === 'GET') return log(req, res, db);
+  // Owner, 2026-09-25: secretaries may ASK ("Ask the Owner"); only the owner
+  // sees the log and teaches it. Never the auditor.
   const op = String(body.op || 'ask');
-  if (op === 'ask') return ask(req, res, db, auth, body);
+  if (req.method === 'POST' && op === 'ask' && auth && ['owner', 'secretary'].includes(auth.role)) return ask(req, res, db, auth, body);
+  if (!staffOnly(auth)) return res.status(403).json({ error: 'Owner only' });
+  if (req.method === 'GET') return log(req, res, db);
   if (op === 'seen') {
     await db.from('ask_questions').update({ seen_at: new Date().toISOString() }).is('seen_at', null);
     return res.status(200).json({ ok: true });
