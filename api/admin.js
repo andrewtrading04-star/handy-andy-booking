@@ -9019,7 +9019,11 @@ async function calls(req, res, db, auth) {
     text_in: (textInfo.get(callerDigits(r.caller_phone)) || {}).inbound || 0,
     text_last_at: (textInfo.get(callerDigits(r.caller_phone)) || {}).last || null,
   }));
-  const open = mapped.filter(r => CALL_OPEN_STATUSES.includes(r.status));
+  // Owner, 2026-09-25: Handy Andy's Los Angeles lines stay out of Heather's
+  // and Joey's Calls until he says otherwise. Owner still sees them.
+  const HIDE_FROM_STAFF = ['2135793329', '3235701778'];
+  const shown = auth.role === 'owner' ? mapped : mapped.filter(r => !HIDE_FROM_STAFF.includes(String(r.grasshopper_number || '').replace(/\D/g, '').slice(-10)));
+  const open = shown.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
   // before anything about the customer is known, on purpose, so an abandoned
   // call still shows up here instead of vanishing. But if the secretary never
@@ -9058,7 +9062,7 @@ async function calls(req, res, db, auth) {
   const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r));
   return res.status(200).json({
     open,
-    handled: mapped.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
+    handled: shown.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
     // The sidebar badge and the banner both count only what is genuinely
     // waiting on THIS person: not the ones someone is already ringing, not the
     // ones that already turned into a booking, not an abandoned live-call

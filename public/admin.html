@@ -13132,7 +13132,7 @@ function callCard(r,handled,g){
     <dt>Line they called</dt><dd>${esc(r._calledLine || '—')}</dd>
     <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
     <dt>Call outcome</dt><dd>${esc(callOutcome(r))}</dd>
-    <dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>
+    ${callFollowUp(r)?`<dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>`:''}
     <dt>Location</dt><dd>${esc(r.market || 'Unrouted')}</dd>
   </dl>`;
 
@@ -13364,7 +13364,7 @@ function callOutcome(r){
   return r.answered===false ? 'Missed' : 'Outcome unavailable';
 }
 function callFollowUp(r){
-  if(r.status==='resolved') return r.booking ? 'Resolved · Booked' : 'Resolved';
+  if(r.status==='resolved') return r.booking ? 'Booked' : '';   // owner, 2026-09-25: "Resolved" means nothing here
   if(r.status==='ignored') return 'Ignored';
   if(r.claim_active) return r.claimed_by_me ? 'You are handling this' : `Being handled by ${r.claimed_by || 'a teammate'}`;
   if(r.status==='called_back') return 'Called back · Follow-up open';
@@ -13391,7 +13391,7 @@ let _callsMobOpen=null;
 function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
     const missed=r.answered===false;
-    const sub=[r.market||'Unrouted', g.blocked?'Blocked':callFollowUp(r)].join(' · ');
+    const sub=[r.market||'Unrouted', g.blocked?'Blocked':callFollowUp(r)].filter(Boolean).join(' · ');
     const later=g.rows.filter(x=>x!==g.latest);
     return `<div class="cm-row${on?' open':''}" id="cm-${esc(g.key)}">
       <button type="button" class="cm-head" data-callmob="${esc(g.key)}" aria-expanded="${on}">
