@@ -1423,6 +1423,17 @@
   #bkModal .bk-dact a{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);
     border-radius:7px;padding:6px 11px;font-size:12px;font-weight:700;color:#eef2f7;text-decoration:none;}
   #bkModal .bk-dact a:hover{background:rgba(255,255,255,.12);}
+  #bkModal .bk-dact button{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);cursor:pointer;
+    border-radius:7px;padding:6px 11px;font:inherit;font-size:12px;font-weight:700;color:#eef2f7;}
+  #bkModal .bk-dact button:hover{background:rgba(255,255,255,.12);} #bkModal .bk-dact button:disabled{opacity:.6;cursor:default;}
+  .ctp-send{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line);align-items:flex-end;}
+  .ctp-send textarea{flex:1;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;resize:none;}
+  .ctp-send button{border:none;background:#0B84FF;color:#fff;font-weight:700;border-radius:10px;padding:9px 14px;cursor:pointer;}
+  .ctp-send button:disabled{opacity:.6;}
+  .ctp-mail{display:grid;gap:8px;padding:12px 14px;}
+  .ctp-mail input,.ctp-mail textarea{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%;box-sizing:border-box;}
+  .ctp-mail .row{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .ctp-mail button{border:none;background:#0B84FF;color:#fff;font-weight:700;border-radius:10px;padding:9px 16px;cursor:pointer;}
 
   /* Delivery receipts, demoted from the top of the sheet to a collapsed line. */
   #bkModal .bk-receipts{border-top:1px solid rgba(255,255,255,.07);margin-top:2px;}
@@ -4531,8 +4542,8 @@ function openBooking(b){
         : '<strong style="color:#f87171;">NO PHONE NUMBER</strong>'}
         ${b.customer?.email?`<br><span class="dim">${esc(b.customer.email)}</span>`:''}</div>
       ${(b.customer?.phone||b.customer?.email)?`<div class="bk-dact">
-        ${b.customer?.phone?`<a href="tel:${esc(b.customer.phone)}">Call</a><a href="sms:${esc(b.customer.phone)}">Text</a>`:''}
-        ${b.customer?.email?`<a href="mailto:${esc(b.customer.email)}">Email</a>`:''}
+        ${b.customer?.phone?`<button type="button" data-bkc="call" data-bkid="${esc(b.id)}" data-phone="${esc(b.customer.phone)}" data-biz="${esc(b.business?.slug||'')}">Call</button><button type="button" data-bkc="text" data-bkid="${esc(b.id)}">Text</button>`:''}
+        ${b.customer?.email?`<button type="button" data-bkc="email" data-bkid="${esc(b.id)}" data-to="${esc(b.customer.email)}" data-who="${esc(b.customer.name||'')}">Email</button>`:''}
       </div>`:''}
     </div></div>
     <div class="bk-d"><div class="bk-dtile">${bkIcon('user')}</div><div>
@@ -13582,10 +13593,10 @@ function callInbox(groups){
 // The Text box on a call card: pops that ONE customer's texts over the Calls
 // screen (owner, 2026-09-24: "not leave the screen, it just pops up with the
 // customer's texts"). Read-only; close with the X, the backdrop or Esc.
-async function openCallTexts(our,customer){
+async function openCallTexts(our,customer,opts){
   document.getElementById('callTextsPop')?.remove();
   const pop=document.createElement('div'); pop.id='callTextsPop'; pop.className='ctp-back';
-  pop.innerHTML=`<div class="ctp" role="dialog" aria-label="Texts"><div class="ctp-h"><b>Texts</b><span class="ctp-who">${esc(fmtPhone(customer))}</span><button type="button" class="ctp-x" aria-label="Close">✕</button></div><div class="ctp-body"><div class="empty">Loading…</div></div></div>`;
+  pop.innerHTML=`<div class="ctp" role="dialog" aria-label="Texts"><div class="ctp-h"><b>Texts</b><span class="ctp-who">${esc(fmtPhone(customer))}</span><button type="button" class="ctp-x" aria-label="Close">✕</button></div><div class="ctp-body"><div class="empty">Loading…</div></div>${opts&&opts.send?'<div class="ctp-send"><textarea rows="2" maxlength="1500" placeholder="Type a text…"></textarea><button type="button">Send</button></div>':''}</div>`;
   document.body.appendChild(pop);
   const close=()=>{ pop.remove(); document.removeEventListener('keydown',esc_); };
   const esc_=e=>{ if(e.key==='Escape') close(); };
@@ -13602,7 +13613,58 @@ async function openCallTexts(our,customer){
       return `<div class="ctp-m${mine?' us':''}${bad?' bad':''}"><div class="ctp-b">${esc(m.body||'')}</div><div class="ctp-t">${esc(meta)}</div></div>`; }).join('') : '<div class="empty">No texts with this customer.</div>';
     body.scrollTop=body.scrollHeight;
   }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message||'Could not load the texts')}</div>`; }
+  // Booking card Text button (owner, 2026-09-26): send right here.
+  const box=pop.querySelector('.ctp-send');
+  if(box){
+    const ta=box.querySelector('textarea'), go=box.querySelector('button');
+    setTimeout(()=>ta.focus(),0);
+    ta.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); go.click(); } };
+    go.onclick=async()=>{
+      const text=ta.value.trim(); if(!text) return;
+      go.disabled=true; go.textContent='Sending…';
+      try{ await api('messages_send',{ method:'POST', body:{ our, customer, text }}); toast('Text sent'); openCallTexts(our,customer,opts); }
+      catch(e){ toast(e.message||'Could not send'); go.disabled=false; go.textContent='Send'; }
+    };
+  }
 }
+// Booking card Email button: write and send from the booking's own brand address.
+function openBookingEmail(bookingId,to,who){
+  document.getElementById('callTextsPop')?.remove();
+  const pop=document.createElement('div'); pop.id='callTextsPop'; pop.className='ctp-back';
+  pop.innerHTML=`<div class="ctp" role="dialog" aria-label="Email"><div class="ctp-h"><b>Email</b><span class="ctp-who">${esc((who?who+' · ':'')+to)}</span><button type="button" class="ctp-x" aria-label="Close">✕</button></div>
+    <div class="ctp-mail"><input maxlength="200" placeholder="Subject"><textarea rows="7" maxlength="5000" placeholder="Message"></textarea>
+    <div class="row"><span style="font-size:12px;color:var(--mute);">Sends from this job's business email.</span><button type="button">Send</button></div></div></div>`;
+  document.body.appendChild(pop);
+  const close=()=>{ pop.remove(); document.removeEventListener('keydown',esc_); };
+  const esc_=e=>{ if(e.key==='Escape') close(); };
+  document.addEventListener('keydown',esc_);
+  pop.addEventListener('click',e=>{ if(e.target===pop) close(); });
+  pop.querySelector('.ctp-x').onclick=close;
+  const subj=pop.querySelector('input'), msg=pop.querySelector('textarea'), go=pop.querySelector('.ctp-mail button');
+  setTimeout(()=>subj.focus(),0);
+  go.onclick=async()=>{
+    if(!subj.value.trim()||!msg.value.trim()){ toast('Write a subject and a message'); return; }
+    go.disabled=true; go.textContent='Sending…';
+    try{ const r=await api('booking_contact',{ method:'POST', body:{ op:'email', booking_id:bookingId, subject:subj.value, message:msg.value }}); toast('Email sent from '+(r.from||'the business')); close(); }
+    catch(e){ toast(e.message||'Could not send'); go.disabled=false; go.textContent='Send'; }
+  };
+}
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-bkc]'); if(!b||b.disabled) return;
+  const id=b.dataset.bkid, act=b.dataset.bkc;
+  if(act==='email'){ openBookingEmail(id,b.dataset.to,b.dataset.who); return; }
+  b.disabled=true;
+  try{
+    if(act==='call'){
+      await api('call_start',{ method:'POST', body:{ source:'pipeline', phone:b.dataset.phone, business:b.dataset.biz||(current&&current.slug) }});
+      toast('Ringing your phone… pick up to be connected');
+    } else if(act==='text'){
+      const r=await api('booking_contact',{ method:'POST', body:{ op:'line', booking_id:id }});
+      openCallTexts(r.our,r.customer,{ send:true });
+    }
+  }catch(err){ toast(err.message||'Could not do that'); }
+  finally{ setTimeout(()=>{ b.disabled=false; },act==='call'?4000:0); }
+});
 function paintCalls(){
   const view=document.getElementById('view'); if(!view) return;
   if(!_callsData) return;

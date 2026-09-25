@@ -524,6 +524,7 @@ export default async function handler(req, res) {
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'call_start':        return await callStart(req, res, db, auth, body);
+      case 'booking_contact':   return await bookingContact(req, res, db, auth, body);
       case 'call_block':        return await callBlock(req, res, db, auth, body);
       case 'call_unblock':      return await callUnblock(req, res, db, auth, body);
       case 'call_delete':       return await callDelete(req, res, db, auth, body);
@@ -9503,6 +9504,44 @@ async function transcribeRecent(req, res, db, auth) {
     } catch (e) { out.failed++; if (out.errors.length < 3) out.errors.push(e.message); }
   }
   return res.status(200).json(out);
+}
+
+// Booking card Text / Email buttons (owner, 2026-09-26: "all without leaving
+// the screen"). op 'line': which of our numbers to text this customer from
+// (their latest thread, else the toll-free every automated text uses).
+// op 'email': send a plain message from the booking's own brand address.
+async function bookingContact(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(body.booking_id || '');
+  if (!id) return res.status(400).json({ error: 'booking_id required' });
+  const { data: b, error } = await db.from('bookings')
+    .select('id, business:businesses ( slug, name ), customer:customers ( name, phone, email )').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!b) return res.status(404).json({ error: 'Booking not found' });
+  const slug = b.business && b.business.slug;
+  if (!mayUseBusiness(auth, slug)) return res.status(403).json({ error: 'Forbidden for this business' });
+  if (body.op === 'line') {
+    const phone = digitsOf(b.customer && b.customer.phone).slice(-10);
+    if (!phone) return res.status(400).json({ error: 'No phone number on this job' });
+    const { data: last } = await db.from('messages').select('our_phone').eq('customer_phone', phone)
+      .order('created_at', { ascending: false }).limit(1);
+    const our = (last && last[0] && last[0].our_phone) || digitsOf(process.env.TWILIO_PHONE_NUMBER || '').slice(-10);
+    return res.status(200).json({ our, customer: phone });
+  }
+  if (body.op === 'email') {
+    const to = String((b.customer && b.customer.email) || '').trim();
+    if (!to) return res.status(400).json({ error: 'No email on this job' });
+    const subject = String(body.subject || '').trim().slice(0, 200);
+    const message = String(body.message || '').trim().slice(0, 5000);
+    if (!subject || !message) return res.status(400).json({ error: 'Write a subject and a message' });
+    const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const brand = brandFor(slug);
+    const html = `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#111;max-width:560px;">${e(message).replace(/\n/g, '<br>')}<br><br>— ${e((brand && brand.name) || (b.business && b.business.name) || '')}</div>`;
+    const r = await sendEmail({ slug, to, subject, html });
+    if (!r || !r.sent) return res.status(502).json({ error: 'The email did not send' + (r && r.skipped ? ` (${r.skipped})` : '') });
+    return res.status(200).json({ ok: true, from: emailConfig(slug).from, to });
+  }
+  return res.status(400).json({ error: 'Unknown op' });
 }
 
 async function callStart(req, res, db, auth, body) {
