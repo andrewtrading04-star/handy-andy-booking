@@ -3736,13 +3736,19 @@ async function bookingCreate(req, res, db, auth, body) {
   let matchedExisting = !!c.id;
   let matchedPostalCode = null;
   if (!customer_id && c.phone) {
-    const { data, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('phone', c.phone).maybeSingle();
+    // Duplicate customer rows exist (old imports), so take the newest match
+    // instead of .maybeSingle(), which errors when there are several (2026-09-25).
+    const { data: rows, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('phone', c.phone).order('created_at', { ascending: false }).limit(1);
     if (error) throw error;
+    const data = rows && rows[0];
     if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
   if (!customer_id && c.email) {
-    const { data, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('email', c.email).maybeSingle();
+    // Duplicate customer rows exist (old imports), so take the newest match
+    // instead of .maybeSingle(), which errors when there are several (2026-09-25).
+    const { data: rows, error } = await db.from('customers').select('id, postal_code').eq('business_id', biz.id).eq('email', c.email).order('created_at', { ascending: false }).limit(1);
     if (error) throw error;
+    const data = rows && rows[0];
     if (data?.id) { customer_id = data.id; matchedExisting = true; matchedPostalCode = data.postal_code || null; }
   }
   const effectivePostalCode = (c.postal_code || '').toString().trim() || matchedPostalCode || null;
