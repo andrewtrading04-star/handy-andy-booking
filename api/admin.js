@@ -7672,7 +7672,10 @@ async function techInviteCreate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can invite technicians' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
-  if (isLeadGenSlug(biz.slug)) {
+  // Refuse only brands that BORROW a roster (they have a PARTNER_SLUG). A
+  // lead-gen slug with no partner — a1tvmounting, a real acquired DFW crew —
+  // staffs itself, so it must be able to invite.
+  if (isLeadGenSlug(biz.slug) && PARTNER_SLUG[biz.slug]) {
     return res.status(400).json({ error: `${biz.name} uses Handy Andy's technicians. Switch to Handy Andy or Dom's to invite someone.` });
   }
   const areaId = String(body.service_area_id || '');

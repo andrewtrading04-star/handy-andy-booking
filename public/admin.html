@@ -9371,7 +9371,10 @@ async function sendReviewInvite(id, card, btn){
 // giving jobs to (and texts the owner). Lead-gen brands are skipped: their
 // jobs come from Handy Andy's roster by metro. The list under the button shows
 // every live invite plus the last 30 days of finished ones.
-const TECH_INVITE_SLUGS=['handy-andy','doms'];
+// a1tvmounting (A1 TV Mounting, DFW) is a real acquired crew with its own
+// technicians, so it invites too — api/admin.js techInviteCreate allows any
+// business without a PARTNER_SLUG.
+const TECH_INVITE_SLUGS=['handy-andy','doms','a1tvmounting'];
 let techInviteData=null;
 function tinvPhone(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d.length===10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:String(p||''); }
 function tinvCopy(text,msg){
