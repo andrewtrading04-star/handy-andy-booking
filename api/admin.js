@@ -3735,6 +3735,17 @@ async function bookingCreate(req, res, db, auth, body) {
   let customer_id = c.id || null;
   let matchedExisting = !!c.id;
   let matchedPostalCode = null;
+  // A form opened before the 2026-09-26 duplicate-customer merge can still hold
+  // the id of a copy that was removed: follow it to the record that was kept,
+  // or fall through to the phone/email lookup below.
+  if (customer_id) {
+    const { data: live } = await db.from('customers').select('id').eq('id', customer_id).eq('business_id', biz.id).maybeSingle();
+    if (!live) {
+      const { data: moved } = await db.from('customer_merge_20260926_map').select('keeper_id').eq('loser_id', customer_id).maybeSingle();
+      customer_id = moved?.keeper_id || null;
+      matchedExisting = !!customer_id;
+    }
+  }
   if (!customer_id && c.phone) {
     // Duplicate customer rows exist (old imports), so take the newest match
     // instead of .maybeSingle(), which errors when there are several (2026-09-25).
@@ -6791,9 +6802,16 @@ async function customers(req, res, db, auth) {
 // every estimate ever sent to them (matched by email or phone, since an
 // estimate is created before a customers row may even exist), and rollup
 // stats — the actual point of a CRM's customer tab.
+// The 2026-09-26 duplicate-customer merge removed extra copies. A screen still
+// holding a removed copy's id is sent to the customer that was kept.
+async function mergedCustomerId(db, id) {
+  if (!id) return id;
+  const { data } = await db.from('customer_merge_20260926_map').select('keeper_id').eq('loser_id', id).maybeSingle();
+  return data?.keeper_id || id;
+}
 async function customerDetail(req, res, db, auth) {
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
-  const id = (req.query.id || '').toString();
+  const id = await mergedCustomerId(db, (req.query.id || '').toString());
   if (!id) return res.status(400).json({ error: 'id required' });
 
   const { data: customer, error: custErr } = await db.from('customers')
@@ -6892,7 +6910,7 @@ async function customerDetail(req, res, db, auth) {
 async function customerUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
-  const id = body.id;
+  const id = await mergedCustomerId(db, body.id);
   if (!id) return res.status(400).json({ error: 'id required' });
 
   const { data: existing } = await db.from('customers').select('id').eq('id', id).eq('business_id', biz.id).single();
