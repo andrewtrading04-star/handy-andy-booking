@@ -16,7 +16,7 @@
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-  .wrap{max-width:920px;margin:0 auto;padding:20px 16px 80px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 80px;}
   h1{font-size:19px;font-weight:800;margin:0;}
   h2{font-size:15px;font-weight:800;margin:0;}
   .sub{font-size:13px;color:var(--mute);}
@@ -74,6 +74,21 @@
     text-align:left;padding:7px 8px;background:var(--line2);}
   .logs td{padding:8px;border-top:1px solid var(--line2);vertical-align:middle;}
   .logs td.num{font-variant-numeric:tabular-nums;white-space:nowrap;}
+  /* Owner, 2026-09-25: Caller was squeezed into 3 lines; keep it on one. On
+     phones the table becomes stacked rows so nothing scrolls sideways. */
+  .logs td:nth-child(3){white-space:nowrap;}
+  @media (max-width:720px){
+    table.logs{min-width:0;}
+    .logs thead{display:none;}
+    .logs tr{display:grid;grid-template-columns:1fr auto;column-gap:8px;border-top:1px solid var(--line2);padding:8px 0;}
+    .logs td{border:none;padding:1px 2px;}
+    .logs td:nth-child(1){grid-column:1;font-weight:700;}
+    .logs td:nth-child(2){grid-column:2;grid-row:1;color:var(--mute);}
+    .logs td:nth-child(3){grid-column:1 / -1;white-space:normal;}
+    .logs td:nth-child(4),.logs td:nth-child(6){display:none;}
+    .logs td:nth-child(5){grid-column:1;color:var(--mute);font-size:12.5px;}
+    .logs td:nth-child(7){grid-column:2;grid-row:3;}
+  }
   .flagpill{background:var(--bad-bg);color:var(--bad);font-size:11px;font-weight:800;padding:2px 7px;border-radius:6px;white-space:nowrap;}
   .actbtn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px;
     font-size:12px;font-weight:700;cursor:pointer;color:var(--ink-2);}
