@@ -86,5 +86,6 @@ export async function finishTranscript(db, transcriptSid) {
   }
   const body = turns.map(x => `${x.who}: ${x.text}`).join('\n') || '(no speech)';
   await db.from('calls').update({ transcript: body, transcript_status: 'done' }).eq('id', callId).eq('transcript_sid', transcriptSid);
+  try { await (await import('./call-summary.js')).callSummary(db, callId); } catch (e) { console.error('[call-summary]', e.message); }
   return true;
 }

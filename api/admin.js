@@ -27,6 +27,7 @@ import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { myDay } from './_lib/my-day.js';
 import { askHandler } from './_lib/ask.js';
 import { startTranscript, finishTranscript } from './_lib/transcribe.js';
+import { callSummary } from './_lib/call-summary.js';
 import { pipelineHandler, pipelineCallTarget, inboundForLiveStart } from './_lib/pipeline.js';
 import { sendOwnerBookingAlert, maybeSendBigBracketAlert, maybeSendZeroOrLowProfitAlert, gdsUpsellUrlFor, rescheduleUrlFor, sendReviewCallComplaintAlert, isLeadGenSlug } from './_lib/owner-notify.js';
 import { INVITE_TTL_DAYS, newInviteCode, inviteLink, inviteState, inviteBrand, inviteSmsText, fmtExpiry, digits10, sendTechSms, smsFailReason } from './_lib/tech-invite.js';
@@ -519,6 +520,7 @@ export default async function handler(req, res) {
       case 'invoice_send':      return await invoiceSend(req, res, db, auth, body);
       case 'calls':             return await calls(req, res, db, auth);
       case 'call_recording':    return await callRecording(req, res, db, auth);
+      case 'call_summary':      return res.status(200).json({ summary: await callSummary(db, String((req.query.id || body.id || '')).slice(0, 64)) });
       case 'call_update':       return await callUpdate(req, res, db, auth, body);
       case 'call_claim':        return await callClaim(req, res, db, auth, body);
       case 'call_start':        return await callStart(req, res, db, auth, body);
@@ -8775,7 +8777,7 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo',
+const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo',
   // Read-only text threads (owner rule 2026-09-23: "add the messages tab to
   // jiyahs portal"). Deliberately NOT messages_send/messages_block/
   // messages_read -- she reads what was said, the office still owns replying
@@ -8804,7 +8806,7 @@ async function calls(req, res, db, auth) {
   const to = (req.query.to || '').toString().trim();
   let q = db.from('calls')
     .select(`id, kind, caller_phone, grasshopper_number, extension, extension_no, service, market,
-             occurred_at, transcript, has_recording, status, handled_by, handled_at, notes, warnings,
+             occurred_at, transcript, transcript_summary, has_recording, status, handled_by, handled_at, notes, warnings,
              claimed_by, claimed_at,
              source, tracking_label, answered, duration_sec, recording_url, forwarded_to, called_back_at,
              customer_id, booking_id,
