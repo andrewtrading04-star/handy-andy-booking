@@ -1950,7 +1950,7 @@ function renderCalls(){
       callFacts(r)+callExtras(r)+callClaimLine(r)+
       '<div class="call-body">'+rec+
         (r.transcript?'<button type="button" class="btn ghost sm" data-tx>Transcript</button>':'')+
-        '<button type="button" class="btn sm" data-grade>'+(graded?'Grade again':'Grade this call')+'</button>'+
+
       '</div>'+
       (r.transcript?'<div class="call-tx" hidden>'+esc(r.transcript)+'</div>':'')+
       callJobBanner(r)+
@@ -2136,6 +2136,7 @@ function qShow(){
   $('qSkip').onclick=()=>{ qSkipped.add(r.id); qIdx++; qShow(); };
   $('qSave').onclick=qSave;
   $('qVm').onclick=async()=>{
+    if(!confirm('Only for a voicemail or a call with no real conversation. Remove this call from the list for good?')) return;
     const b=$('qVm'); b.disabled=true; b.textContent='Removing…';
     try{ await api('audit_skip',{method:'POST',body:{call_id:r.id, reason:'voicemail'}}); qList.splice(qIdx,1); qShow(); }
     catch(e){ b.disabled=false; b.textContent='🔇 Voicemail'; $('qErr').textContent=e.message||'Could not remove it'; }
