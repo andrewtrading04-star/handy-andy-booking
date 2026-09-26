@@ -3067,11 +3067,14 @@ const VIEW_AS_PEOPLE = {
   admin:       { name:'Andrew', av:'A', bg:'#111111', sub:'Admin — full access' },
   'handy-andy':{ name:'Heather', av:'H', bg:'#f59e0b', sub:'Handy Andy secretary' },
   doms:        { name:'Joey',   av:'J', bg:'#2563eb', sub:"Dom's secretary" },
+  // Own logins (STAFF_LOGINS), same access as Joey (owner, 2026-09-26).
+  'staff:Alex':{ name:'Alex',   av:'Al', bg:'#0891b2', sub:"Dom's · replacing Joey" },
+  'staff:Joe': { name:'Joe',    av:'Jo', bg:'#16a34a', sub:"Dom's · replacing Joey" },
   // Jiyah's app is a separate page (audit.html), not a mode of this one --
   // picking her opens the Call Audit Portal in a new tab, already signed in.
   auditor:     { name:'Jiyah',  av:'Ji', bg:'#7c3aed', sub:'Call auditor · opens her portal' },
 };
-function currentPersonKey(){ return role==='owner' ? 'admin' : scope; }
+function currentPersonKey(){ return role==='owner' ? 'admin' : (VIEW_AS_PEOPLE['staff:'+userName] ? 'staff:'+userName : scope); }
 function updateWhoAvatar(){
   const key = currentPersonKey();
   const p = VIEW_AS_PEOPLE[key] || VIEW_AS_PEOPLE.admin;
@@ -3091,7 +3094,7 @@ function renderViewAsPopoverList(){
   const canSwitch = role==='owner' || !!owned;
   if(!canSwitch){ list.innerHTML=''; return; }
   const activeKey = currentPersonKey();
-  list.innerHTML = ['admin','handy-andy','doms','auditor'].map(key=>{
+  list.innerHTML = ['admin','handy-andy','doms','staff:Alex','staff:Joe','auditor'].map(key=>{
     const p = VIEW_AS_PEOPLE[key];
     const active = key===activeKey;
     return `<div class="viewas-item" data-key="${key}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;${active?'background:#eaf1ff;':''}">

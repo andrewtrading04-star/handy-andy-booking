@@ -636,6 +636,17 @@ export default async function handler(req, res) {
 // ── Auth ────────────────────────────────────────────────────────────────────
 // Friendly first name shown in the dashboard greeting. Configurable per role via
 // env vars; sensible defaults match the people running each business today.
+// Per-person secretary logins (owner, 2026-09-26: Alex and Joe replace Joey).
+// STAFF_LOGINS env = JSON [{ "name": "Alex", "scope": "doms", "password": "..." }].
+// Same access as the shared business password for that scope, but the
+// person's OWN name rides on the token, so calls, bookings, performance and
+// audits are theirs.
+function staffLogins() {
+  try {
+    const list = JSON.parse(process.env.STAFF_LOGINS || '[]');
+    return (Array.isArray(list) ? list : []).filter((x) => x && x.name && x.password && ['handy-andy', 'doms'].includes(x.scope));
+  } catch { return []; }
+}
 function displayNameFor(scope) {
   if (scope === 'handy-andy') return process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather';
   if (scope === 'doms')       return process.env.DOMS_SECRETARY_NAME || 'Joey';
@@ -683,7 +694,7 @@ async function login(req, res, body) {
   const bypass = noPasswords || forceBypass;
 
   // Resolve which role/scope this password unlocks.
-  let role = null, scope = null;
+  let role = null, scope = null, personName = null;
   if (bypass) {
     role = 'owner'; scope = 'all';
   } else if (!password) {
@@ -694,6 +705,9 @@ async function login(req, res, body) {
     role = 'secretary'; scope = 'handy-andy';
   } else if (process.env.DOMS_PASSWORD && safeEqual(password, process.env.DOMS_PASSWORD)) {
     role = 'secretary'; scope = 'doms';
+  } else {
+    const person = staffLogins().find((x) => safeEqual(password, String(x.password)));
+    if (person) { role = 'secretary'; scope = person.scope; personName = String(person.name); }
   }
   if (!role) return res.status(401).json({ error: 'Incorrect password' });
 
@@ -716,7 +730,7 @@ async function login(req, res, body) {
   // silently failing to save the card (booking still succeeded either way).
   for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
-  let name = displayNameFor(scope);
+  let name = personName || displayNameFor(scope);
   // Demo: source the owner's greeting name from the DB (seeded) so it's driven by
   // data, not an env var. Production keeps the env-configured name.
   if (scope === 'all' && demoMode()) {
@@ -768,20 +782,26 @@ async function viewAs(req, res, db, auth) {
     const name = (process.env.AUDITOR_NAME || 'Jiyah').toString();
     return res.status(200).json({ audit_token: signToken({ kind: 'auditor', name }), name, url: '/audit.html' });
   }
-  if (!['handy-andy', 'doms'].includes(slug)) return res.status(400).json({ error: 'business must be handy-andy, doms or auditor' });
+  let staffName = null, viewSlug = slug;
+  if (slug.startsWith('staff:')) {
+    const person = staffLogins().find((x) => x.name === slug.slice(6));
+    if (!person) return res.status(400).json({ error: 'Unknown staff login' });
+    staffName = person.name; viewSlug = person.scope;
+  }
+  if (!['handy-andy', 'doms'].includes(viewSlug)) return res.status(400).json({ error: 'business must be handy-andy, doms or auditor' });
 
   // Mirror the real login exactly, extra brands included — the whole point of
   // View As is showing the owner what that secretary actually sees, and Joey's
   // login now carries the Austin/Houston lead-gen brands.
-  const viewAsExtra = SECRETARY_EXTRA_BUSINESSES[slug] || [];
+  const viewAsExtra = SECRETARY_EXTRA_BUSINESSES[viewSlug] || [];
   const { data: businesses, error } = await db.from('businesses')
     .select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true)
-    .in('slug', [slug, ...viewAsExtra]).order('name');
+    .in('slug', [viewSlug, ...viewAsExtra]).order('name');
   if (error) throw error;
   for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
-  const name = displayNameFor(slug);
-  const token = signToken({ kind: 'admin', role: 'secretary', scope: slug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}), sess: 1 });
+  const name = staffName || displayNameFor(viewSlug);
+  const token = signToken({ kind: 'admin', role: 'secretary', scope: viewSlug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}), sess: 1 });
   const config = {
     email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
@@ -789,7 +809,7 @@ async function viewAs(req, res, db, auth) {
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,
     maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
-  return res.status(200).json({ token, role: 'secretary', scope: slug, name, config, businesses: businesses || [] });
+  return res.status(200).json({ token, role: 'secretary', scope: viewSlug, name, config, businesses: businesses || [] });
 }
 
 // Validate the current session token and return user data. Called by tryAutoLogin()
@@ -10222,7 +10242,7 @@ async function reviewCallLog(req, res, db, auth, body) {
   const patch = {
     review_call_status: status || null,
     review_call_at: status ? new Date().toISOString() : null,
-    review_call_by: status ? displayNameFor(auth.scope) : null,
+    review_call_by: status ? (auth.name || displayNameFor(auth.scope)) : null,
   };
   if (typeof body.notes === 'string') patch.review_call_notes = body.notes.trim().slice(0, 500) || null;
   // What the customer actually said, as countable tags. Free text cannot be
@@ -12451,7 +12471,7 @@ async function estimateExcuseAction(req, res, db, auth, body) {
   try {
     const out = await setExcuse(db, {
       kind: String(body.kind || ''), id: String(body.id || ''), reason: body.reason ? String(body.reason) : '',
-      note: body.note, bizId, who: auth.role === 'owner' ? null : displayNameFor(slug),
+      note: body.note, bizId, who: auth.role === 'owner' ? null : (auth.name || displayNameFor(slug)),
     });
     return res.status(200).json(out);
   } catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
@@ -12475,7 +12495,7 @@ async function myCallPerformance(req, res, db, auth) {
   if (auth.role !== 'secretary' || !['handy-andy', 'doms'].includes(auth.scope)) {
     return res.status(403).json({ error: 'Not available for this login' });
   }
-  const name = displayNameFor(auth.scope);
+  const name = auth.name || displayNameFor(auth.scope);
 
   const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
   const offset = Math.max(-365, Math.min(0, parseInt(req.query.offset, 10) || 0));
@@ -12641,7 +12661,7 @@ async function callDayDetail(req, res, db, auth) {
     if (!bizRows || !bizRows[0]) return res.status(200).json({ date: dateStr, calls: [] });
     bizId = bizRows[0].id;
     tz = bizRows[0].timezone || 'America/Denver';
-    person = displayNameFor(auth.scope);
+    person = auth.name || displayNameFor(auth.scope);
   } else if (auth.role === 'owner' || auth.auditor) {   // the call auditor reads any business, like the owner
     let biz; try { biz = await resolveBusiness(db, auth, req.query.business || (req.body && req.body.business)); } catch (e) { return bail(res, e); }
     bizId = biz.id;
