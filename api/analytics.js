@@ -2005,7 +2005,7 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
   // One "Thanks for your text!" per conversation, not one per text: skip it
   // when this thread already had a text either way in the last 12 hours, and
   // for anyone who opted out ("Stop." isn't blocked by Twilio, so we check).
-  if (!(await shouldAutoAck(from, to))) return xml(res, '<Response/>');
+  if (!(await shouldAutoAck(from, to, body))) return xml(res, '<Response/>');
   const ackText = `Thanks for your text! A team member will reply shortly.`;
   await logAutomatedMessage(db, { businessId: business_id, customerPhone: from, body: ackText, result: { ok: true } });
   return xml(res, `<Response><Message>${xmlEsc(ackText)}</Message></Response>`);
@@ -2013,10 +2013,21 @@ async function finishSmsInbound(res, line, from, body, blocked, business_name, t
 
 // Whether the auto-ack above goes out. Any failed lookup means no ack: a
 // missing "thanks" costs nothing, an unwanted text does.
-async function shouldAutoAck(from, to) {
+// Never to our own techs/staff (a tech's reply to a job reminder got a
+// "Thanks for your text!" and his phone's AI assistant answered it -- owner,
+// 2026-09-26), and never to an iPhone reaction ("Emphasized “...”").
+const TAPBACK_RE = /^(Liked|Loved|Disliked|Laughed at|Emphasized|Questioned|Reacted [^ ]+ to)\s+[“"']/i;
+async function shouldAutoAck(from, to, body) {
   if (!from || !to) return false;
+  if (TAPBACK_RE.test(String(body || '').trim())) return false;
   try {
     const db = serviceClient();
+    const last10 = String(from).replace(/\D/g, '').slice(-10);
+    const [techs, staff] = await Promise.all([
+      db.from('technicians').select('id').or(`phone.eq.${last10},phone.eq.+1${last10},phone.eq.1${last10}`).limit(1),
+      db.from('staff_users').select('id').or(`phone.eq.${last10},phone.eq.+1${last10},phone.eq.1${last10}`).limit(1),
+    ]);
+    if ((techs.data || []).length || (staff.data || []).length) return false;
     if ((await smsOptOutState(db, from)) !== false) return false;
     const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
     const { data, error } = await db.from('messages').select('id')
