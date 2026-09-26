@@ -13585,6 +13585,10 @@ function callCard(r,handled,g,v2){
     if(g.texts) pills.push(g.latest.text_our&&g.latest.caller_phone
       ? `<button type="button" class="cv-pill purple" data-calltexts="1" data-msgour="${esc(g.latest.text_our)}" data-msgcust="${esc(g.latest.caller_phone)}" title="Open the texts">💬 ${g.texts} ${g.texts>1?'texts':'text'} ›</button>`
       : `<span class="cv-pill purple">💬 ${g.texts} ${g.texts>1?'texts':'text'}</span>`);
+    // Quote sent / opened / approved (owner, 2026-09-26).
+    const qe=r.history&&r.history.last_estimate;
+    if(qe){ const amt=qe.total?' $'+Math.round(qe.total).toLocaleString():'';
+      pills.push(`<span class="cv-pill" title="${esc(qe.sent_at?'Sent '+fmtDateTime(qe.sent_at):'')}">📄 ${qe.approved_at?'Quote approved'+amt:qe.sent_at?'Quote sent'+amt+(qe.opened?' · opened':''):'Quote not sent yet'+amt}</span>`); }
     if(g.rows.length>1) pills.push(`<span class="cv-pill">${g.rows.length} calls</span>`);
     const headBtns = blockedNow ? '' : `${claimBtn.replace('class="rc-call','class="rc-call cv-callbtn')}${msgBtn.replace('rc-btn ghost','rc-btn ghost cv-textbtn').replace('💬 Send a message','💬 Send text')}`;
     const footActions = blockedActions || actions.replace(claimBtn+msgBtn,'');
@@ -13712,7 +13716,7 @@ function callInbox(groups){
   const later=selected.rows.filter(x=>x!==selected.latest);
   return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
     ${groups.map(g=>{ const r=g.latest; const missed=r.answered===false&&r.kind!=='live';
-      const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); if(g.rows.length>1) bits.push(g.rows.length+' calls');
+      const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); { const qe=r.history&&r.history.last_estimate; if(qe) bits.push(qe.approved_at?'quote approved':qe.sent_at?'quote sent':'quote not sent'); } if(g.rows.length>1) bits.push(g.rows.length+' calls');
       return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       ${cvAvatar(g,42)}
       <span class="cv-mid">

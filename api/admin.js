@@ -8993,14 +8993,20 @@ async function calls(req, res, db, auth) {
           else if (!x.last_job) x.last_job = j;   // rows arrive newest first
         }
       }
-      let eq = db.from('estimates').select('customer_phone, created_at, status, approved_at, service_label').in('customer_phone', forms)
+      let eq = db.from('estimates').select('customer_phone, created_at, status, approved_at, service_label, texted_at, emailed_at, text_opened_at, email_opened_at, line_items').in('customer_phone', forms)
         .order('created_at', { ascending: false }).limit(2000);
       if (vids) eq = eq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
       const { data: ests } = await eq;
       for (const e of (ests || [])) {
         const x = h(callerDigits(e.customer_phone));
         x.estimates++;
-        if (!x.last_estimate) x.last_estimate = { at: e.created_at, status: e.approved_at ? 'approved' : e.status, service: e.service_label || null };
+        if (!x.last_estimate) {
+          // Quote sent / opened / approved for the call card (owner, 2026-09-26).
+          const total = (Array.isArray(e.line_items) ? e.line_items : []).reduce((t, li) => t + (Number(li && li.unit_price) || 0) * (Number(li && li.qty) || 1), 0);
+          x.last_estimate = { at: e.created_at, status: e.approved_at ? 'approved' : e.status, service: e.service_label || null,
+            sent_at: e.texted_at || e.emailed_at || null, total: Math.round(total * 100) / 100,
+            opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null };
+        }
       }
       for (const x of historyBy.values()) x.spent = Math.round(x.spent * 100) / 100;
     } catch (e) { /* history is a nicety; never fail the call list over it */ }
