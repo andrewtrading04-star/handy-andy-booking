@@ -10655,8 +10655,7 @@ function plClick(e){
     case 'text':
       // Same hand-off as the Calls tab's "Send a message": open that exact
       // thread (our line + their number) on the Messages screen.
-      _msgOpen={ our:c.our_phone, customer:c.phone }; _msgThread=null; _msgThreadError=null;
-      navTo('messages'); return;
+      openCallTexts(c.our_phone, c.phone, { send:true }); return;   // stays on the Pipeline (owner, 2026-09-26)
     case 'script': {
       const slug=plBizSlug(c);
       if(!slug){ toast(`This login can't take calls for ${(c.business&&c.business.name)||'that brand'}.`); return; }
