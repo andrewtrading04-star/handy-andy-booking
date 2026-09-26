@@ -537,7 +537,9 @@
   .ask-log-h{font-size:12.5px;color:var(--mute);} .ask-log-q{font-weight:700;margin:4px 0;} .ask-log-a{font-size:14px;color:var(--ink-2);white-space:pre-wrap;}
   .ask-teach{display:flex;flex-direction:column;gap:6px;margin-top:8px;} .ask-teach .btn{align-self:flex-end;width:auto;}
   .plv{max-width:none!important;}
-  .plv .st-new{--st:#f87171;} .plv .st-talked{--st:#fbbf24;} .plv .st-quoted{--st:#a3d65c;} .plv .st-booked{--st:#22d3ee;}
+  .plv .st-new{--st:#93c5fd;}   /* not red: red means very bad (owner, 2026-09-26) */
+  .plv-vm{float:right;font-style:normal;font-size:10.5px;font-weight:700;background:rgba(255,255,255,.75);border-radius:999px;padding:1px 7px;margin-left:4px;}
+  .plv-vm2{display:inline!important;font-size:12px!important;color:#1d4ed8;} .plv .st-talked{--st:#fbbf24;} .plv .st-quoted{--st:#a3d65c;} .plv .st-booked{--st:#22d3ee;}
   .plv .st-done{--st:#38bdf8;} .plv .st-paid{--st:#a78bfa;} .plv .st-lost{--st:#94a3b8;}
   .plv-total{text-align:center;font-size:26px;font-weight:800;margin:6px 0 10px;} .plv-total span{font-size:15px;font-weight:600;color:var(--mute);}
   .plv-chev{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;}
@@ -10447,7 +10449,7 @@ function paintPipeline(){
   const openC=_plOpen&&plCard(_plOpen);
   const modal=openC?`<div class="plv-pop" data-plkey="${esc(openC.key)}"><div class="plv-pop-bg" data-pl="toggle"></div>
       <div class="plv-pop-card" role="dialog" aria-label="${esc(plTitle(openC))}">
-        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b><small>${esc(plStageLabel(openC.stage))}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
+        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b><small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
@@ -10477,7 +10479,7 @@ function plTileHtml(c){
   const sub=[c.source, businesses.length>1&&c.business&&c.business.name?c.business.name:'', c.opened_at?plAgo(c.opened_at):''].filter(Boolean).join(' · ');
   const ic=c.leak||tone==='danger'?PL_ALERT:'<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>';
   return `<button type="button" class="plv-tile${c.leak?' leak':''}" data-plkey="${esc(c.key)}" data-pl="toggle" title="${esc(next.text||'')}">
-    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}</b></span>
+    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
     <span class="plv-tile-b"><span><small>VALUE</small><b>${plMoney(c.amount)||'$0'}</b>${sub?`<i>${esc(sub)}</i>`:''}</span><span class="plv-ic ${c.leak?'danger':tone}">${ic}</span></span>
     ${next.text?`<span class="plv-tile-n ${c.leak?'danger':tone}">${esc(next.text)}</span>`:''}
   </button>`;
@@ -10526,10 +10528,10 @@ function plDetailHtml(c){
   const a=[], b=[];
   if(phone) a.push('<button type="button" class="pl-btn pri" data-pl="call">Call</button>');
   if(phone && c.our_phone) a.push('<button type="button" class="pl-btn" data-pl="text">Text</button>');
-  if(!closed && !lost) a.push('<button type="button" class="pl-btn" data-pl="script">Call script</button>');
+  if(!closed && !lost && st!=='new') a.push('<button type="button" class="pl-btn" data-pl="script">Call script</button>');   // not on New lead (owner, 2026-09-26)
   if(!closed && !lost && !liveJob){
     a.push('<button type="button" class="pl-btn" data-pl="estimate">Send estimate</button>');
-    a.push('<button type="button" class="pl-btn" data-pl="book">Book</button>');
+    if(st!=='new') a.push('<button type="button" class="pl-btn" data-pl="book">Book</button>');
   }
   if(c.booking && c.booking.id) a.push('<button type="button" class="pl-btn" data-pl="job">Open job</button>');
   if(c.estimate && c.estimate.id) a.push('<button type="button" class="pl-btn" data-pl="est">Open estimate</button>');

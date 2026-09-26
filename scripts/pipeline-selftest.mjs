@@ -88,7 +88,7 @@ await check('missed call, no answer for 48 h -> Lost "Never reached"; fresh miss
   assert.equal(one(raw({ calls: [missed({ occurred_at: ago(49 * H) })] })).lost.reason, 'Never reached');
   const fresh = one(raw({ calls: [missed({ occurred_at: ago(30 * M) })] }));
   assert.equal(fresh.stage, 'new');
-  assert.deepEqual(fresh.next, { text: 'Call back — missed 30m ago', tone: 'danger' });
+  assert.deepEqual(fresh.next, { text: 'Call back — missed 30m ago', tone: 'ok' });
   assert.equal(fresh.source, 'Phone call · HA Greenway');
   assert.equal(fresh.secretary, 'Heather');
 });
@@ -192,12 +192,9 @@ await check('manual Lost, then a new call -> new card', () => {
 });
 
 // ── Amendments ──────────────────────────────────────────────────────────────
-await check('answered under 20 s = missed (voicemail pickup)', () => {
-  const card = one(raw({ calls: [inbound({ duration_sec: 12, occurred_at: ago(20 * M) })] }));
-  assert.equal(card.stage, 'new');
-  assert.equal(card.next.text, 'Call back — missed 20m ago');
-  assert.equal(card.answered_call.state, 'short');
-  assert.match(card.timeline[0].text, /too short, likely voicemail/);
+await check('answered under 20 s and nothing else = kept off the board (owner 2026-09-26)', () => {
+  const b = board(raw({ calls: [inbound({ duration_sec: 12, occurred_at: ago(20 * M) })] }));
+  assert.equal(b.cards.length, 0);
 });
 
 await check('answered 20-119 s with no script = unconfirmed talk (Talked / Voicemail)', () => {
@@ -266,7 +263,7 @@ await check("brand family split: a Dom's shopper who also calls HA gets two card
   // website_form estimates are filed under Dom's on purpose and stay there.
   assert.equal(familyOf('doms'), 'doms'); assert.equal(familyOf('tvmountingdenver'), 'doms'); assert.equal(familyOf('houstonmounting'), 'handy-andy');
   const wf = one(raw({ estimates: [estimate({ business_id: 'b-doms', source: 'website_form', status: 'new', texted_at: null, contacted_at: null, created_at: ago(3 * H) })] }));
-  assert.deepEqual([wf.family, wf.stage, wf.source, wf.next.text, wf.next.tone], ['doms', 'new', 'Website estimate', 'Needs a response', 'danger']);
+  assert.deepEqual([wf.family, wf.stage, wf.source, wf.next.text, wf.next.tone], ['doms', 'new', 'Website estimate', 'Needs a response — over 30 min', 'warn']);
 });
 
 await check('$0 completed job = Paid; future $0 job is not; priced completed unpaid = Done', () => {

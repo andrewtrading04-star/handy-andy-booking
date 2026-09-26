@@ -52,6 +52,7 @@ const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const LEAK_AFTER_MS = HOUR;
 const QUOTE_LOST_MS = 7 * DAY;
 const NEVER_REACHED_MS = 48 * HOUR;
+const NEW_CALLBACK_MS = 30 * 60 * 1000;   // new leads get a call back within 30 minutes
 const NEVER_REACHED_TRIES = 2;
 const SOFT_REVIVE_MS = 14 * DAY;
 const NEW_CARD_GAP_MS = 30 * DAY;
@@ -298,7 +299,10 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
     else { talk = 'unconfirmed'; why = 'unconfirmed'; }
     touches.push({ type: 'call_in', id: x.id, atMs: x.atMs, phone: x.phone, slug: x.slug, family: x.family, canOpen: true,
       staff: ctx.handsetName.get(x.fwd) || null, talk, why, dur, answered: c.answered, line: x.line, lineName: x.lineName,
-      endMs: x.atMs + (dur || 0) * 1000, wizard: wizardLinked.has(x.id) });
+      endMs: x.atMs + (dur || 0) * 1000, wizard: wizardLinked.has(x.id),
+      // Left a voicemail (owner, 2026-09-26): a missed call we recorded, or an
+      // answered call the office/auditor marked as voicemail.
+      vm: (c.answered === false && !!c.recording_url) || why === 'marked_voicemail' || why === 'audit_voicemail' });
   }
 
   for (const m of raw.messages || []) {
@@ -650,7 +654,10 @@ export function computeCards(raw, now = Date.now()) {
   const nowMs = msOf(now);
   const ctx = makeContext(raw);
   const { touches, noPhone } = buildTouches(raw, ctx, nowMs);
-  const cards = groupCards(touches, raw.marks || [], nowMs, noPhone);
+  // Calls answered for under 20 s with nothing else from that caller stay off
+  // the board (owner, 2026-09-26).
+  const cards = groupCards(touches, raw.marks || [], nowMs, noPhone)
+    .filter((c) => !c.touches.every((t) => t.type === 'call_in' && t.why === 'short'));
   for (const c of cards) {
     const deal = c.touches.filter((t) => !t.timelineOnly && (t.type === 'booking' || t.type === 'estimate') && t.slug);
     c.openSlug = c.opener.slug || null;
@@ -778,11 +785,14 @@ function nextFor(st, card, nowMs) {
       return { text, tone: st.leak ? 'danger' : 'warn' };
     }
     case 'new': {
-      if (st.webRequest) return { text: 'Needs a response', tone: nowMs - st.webRequest.atMs > HOUR ? 'danger' : 'warn' };
+      // Owner, 2026-09-26: call new leads back within 30 minutes; orange once
+      // that's passed. Red is kept for real problems, not every new lead.
+      const late = (ms) => nowMs - ms > NEW_CALLBACK_MS;
+      if (st.webRequest) return { text: late(st.webRequest.atMs) ? 'Needs a response — over 30 min' : 'Needs a response', tone: late(st.webRequest.atMs) ? 'warn' : 'ok' };
       if (st.tries >= 1) return { text: 'Call back — 2nd try left', tone: 'warn' };
       const c = st.lastCustomer || card.opener;
-      if (c.type === 'text_in') return { text: `Text back — texted ${fmtAgo(nowMs - c.atMs)} ago`, tone: 'danger' };
-      return { text: `Call back — missed ${fmtAgo(nowMs - c.atMs)} ago`, tone: 'danger' };
+      const what = c.type === 'text_in' ? `Text back — texted ${fmtAgo(nowMs - c.atMs)} ago` : `Call back — ${c.vm ? 'voicemail' : 'missed'} ${fmtAgo(nowMs - c.atMs)} ago`;
+      return { text: what, tone: late(c.atMs) ? 'warn' : 'ok' };
     }
     default: return { text: '', tone: 'mute' };
   }
@@ -923,6 +933,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     key: c.key,
     stage: st.stage,
     leak: st.stage === 'talked' && !!st.leak,
+    voicemail: c.touches.some((t) => t.type === 'call_in' && t.vm),
     phone: c.phone,
     phone_pretty: prettyPhone10(c.phone),
     name,
@@ -1061,7 +1072,7 @@ async function inChunks(values, size, run) {
   return (await Promise.all(chunks.map(run))).flat();
 }
 
-const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_number, forwarded_to, occurred_at, answered, duration_sec, status, handled_by, booking_id, resolution, reached_step, quoted_total, inbound_call_id';
+const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_number, forwarded_to, occurred_at, answered, duration_sec, recording_url, status, handled_by, booking_id, resolution, reached_step, quoted_total, inbound_call_id';
 const MESSAGE_COLS = 'id, business_id, customer_phone, our_phone, direction, body, sent_by, status, created_at';
 const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label';
 const BOOKING_COLS = `id, business_id, customer_id, status, source, scheduled_at, created_at, updated_at, completed_at, paid_at, cancelled_at,
