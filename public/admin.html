@@ -13330,15 +13330,30 @@ function callHaveBoxes(g){
 // summary on top, the full call folded underneath as chat bubbles (customer
 // left, staff right). Voicemails / old plain transcripts show as before.
 const TXSUM_ICON={job:'📺',place:'📍',price:'💲',booked:'✅',not_booked:'❌',other:'•'};
-function txSumHtml(sum){
-  return (sum.items||[]).map(i=>`<div class="tx-sum-i${i.kind==='not_booked'?' tx-no':i.kind==='booked'?' tx-yes':''}"><span>${TXSUM_ICON[i.kind]||'•'}</span>${esc(i.text)}</div>`).join('');
+// The AI summary only hears the call ("quote to be sent"). Check the CRM for
+// what actually happened after it (owner, 2026-09-26).
+const TX_QUOTE_LATER=/\b(quote|estimate)\b[^.]*\b(to be|will|later|send|sent over|text)/i;
+function txSumHtml(sum, r){
+  let items=(sum.items||[]).slice();
+  const qe=r&&r.history&&r.history.last_estimate;
+  const callMs=r&&Date.parse(r.occurred_at||'');
+  const sentAfter=qe&&qe.sent_at&&(!callMs||Date.parse(qe.sent_at)>=callMs-10*60000);
+  const promised=items.some(i=>TX_QUOTE_LATER.test(i.text||''));
+  if(sentAfter){
+    const line={ kind:'quote_ok', text:`Quote sent${qe.total?' $'+Math.round(qe.total).toLocaleString():''} · ${fmtDateTime(qe.sent_at)}${qe.approved_at?' · approved':qe.opened?' · opened':''}` };
+    items=items.map(i=>TX_QUOTE_LATER.test(i.text||'')?{...i,text:String(i.text).replace(/[;,]?\s*[^;,]*\b(quote|estimate)\b[^;,]*/i,'').trim()}:i).filter(i=>i.text);
+    items.push(line);
+  } else if(promised && r){
+    items.push({ kind:'quote_no', text:'No quote sent yet' });
+  }
+  return items.map(i=>`<div class="tx-sum-i${i.kind==='not_booked'||i.kind==='quote_no'?' tx-no':i.kind==='booked'||i.kind==='quote_ok'?' tx-yes':''}"><span>${i.kind==='quote_ok'?'✅':i.kind==='quote_no'?'⚠️':TXSUM_ICON[i.kind]||'•'}</span>${esc(i.text)}</div>`).join('');
 }
 function txView(r){
   const t=String(r.transcript||'');
   if(!/^(Staff|Customer):/m.test(t)) return `<div style="margin-top:8px;background:var(--line2);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--ink-2);line-height:1.55;">${esc(t)}</div>`;
   const bubbles=t.split(/\r?\n/).map(l=>{ const m=l.match(/^(Staff|Customer):\s*(.*)$/); if(!m||!m[2]) return ''; const tm=m[2].match(/^\[(\d+:\d\d)\]\s*/); const txt=tm?m[2].slice(tm[0].length):m[2]; return `<div class="tx-b ${m[1]==='Staff'?'tx-s':'tx-c'}">${tm?`<span class="tx-t">${tm[1]}</span>`:''}${esc(txt)}</div>`; }).join('');
   const sum=r.transcript_summary
-    ? `<div class="tx-sum">${txSumHtml(r.transcript_summary)}</div>`
+    ? `<div class="tx-sum">${txSumHtml(r.transcript_summary, r)}</div>`
     : `<div class="tx-sum" data-txsum="${esc(r.id)}"><div class="tx-sum-i" style="color:var(--mute);">✨ Summarizing the call…</div></div>`;
   if(!r.transcript_summary) setTimeout(txFillSums,0);
   return `<div class="tx-wrap">${sum}<details class="tx-full"><summary>Show full conversation</summary><div class="tx-chat">${bubbles}</div></details></div>`;
@@ -13348,7 +13363,7 @@ function txFillSums(){
   document.querySelectorAll('[data-txsum]').forEach(box=>{
     const id=box.dataset.txsum; if(_txSumTried.has(id)) return; _txSumTried.add(id);
     api('call_summary',{params:{id},timeoutMs:60000}).then(d=>{
-      document.querySelectorAll(`[data-txsum="${CSS.escape(id)}"]`).forEach(b=>{ if(d&&d.summary){ b.innerHTML=txSumHtml(d.summary); b.removeAttribute('data-txsum'); } else b.remove(); });
+      document.querySelectorAll(`[data-txsum="${CSS.escape(id)}"]`).forEach(b=>{ if(d&&d.summary){ b.innerHTML=txSumHtml(d.summary, [...((_callsData&&_callsData.open)||[]),...(_callsPeriodData.open||[]),...(_callsPeriodData.handled||[])].find(x=>x.id===id)||null); b.removeAttribute('data-txsum'); } else b.remove(); });
     }).catch(()=>{ document.querySelectorAll(`[data-txsum="${CSS.escape(id)}"]`).forEach(b=>b.remove()); });
   });
 }
