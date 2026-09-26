@@ -376,7 +376,8 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
       staff: md.booked_by || null,
       bk: { status: b.status || null, source: b.source || null, scheduledMs: msOf(b.scheduled_at), price: num(b.price), amountPaid: num(b.amount_paid),
         paid, paidMs, completedMs, cancelledMs, tech: (b.technician && b.technician.name) || null,
-        estimateId: md.source_estimate_id || null, bookedBy: md.booked_by || null } });
+        estimateId: md.source_estimate_id || null, bookedBy: md.booked_by || null,
+        reviewMs: msOf(b.reviewed_at) ?? msOf(b.review_clicked_at), reviewRating: num(b.review_rating) } });
   }
 
   for (const a of raw.attempts || []) {
@@ -931,7 +932,10 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
 
   const out = {
     key: c.key,
-    stage: st.stage,
+    // Paid shows in Booked on the board (owner, 2026-09-26); 'paid' stays internal
+    // because it closes the card (the next touch opens a new one).
+    stage: st.stage === 'paid' ? 'booked' : st.stage,
+    paid: st.stage === 'paid',
     leak: st.stage === 'talked' && !!st.leak,
     voicemail: c.touches.some((t) => t.type === 'call_in' && t.vm),
     phone: c.phone,
@@ -952,6 +956,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     estimate: est ? { id: est.id, total: est.est.total, sent_at: iso(est.est.sentMs), opened: est.est.openedMs != null, coupon_at: iso(est.est.couponMs),
       approved_at: iso(est.est.approvedMs), status: est.est.status, slug: est.slug || null } : null,
     booking: bk ? { id: bk.id, scheduled_at: iso(bk.bk.scheduledMs), status: bk.bk.status, price: bk.bk.price, tech: bk.bk.tech, paid_at: iso(bk.bk.paidMs),
+      completed_at: iso(bk.bk.completedMs), created_at: iso(bk.atMs), review_at: iso(bk.bk.reviewMs), review_rating: bk.bk.reviewRating,
       slug: bk.slug || null } : null,
     inbound_call_id: lastCall ? lastCall.id : null,
     // The answered inbound call the card is about (see above) and how it was
@@ -1076,7 +1081,7 @@ const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_numb
 const MESSAGE_COLS = 'id, business_id, customer_phone, our_phone, direction, body, sent_by, status, created_at';
 const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label';
 const BOOKING_COLS = `id, business_id, customer_id, status, source, scheduled_at, created_at, updated_at, completed_at, paid_at, cancelled_at,
-  price, amount_paid, payment_status, notes, customer_notes, metadata,
+  price, amount_paid, payment_status, notes, customer_notes, metadata, review_rating, reviewed_at, review_clicked_at,
   customer:customers ( name, phone ), technician:technicians!technician_id ( name )`;
 const AUDIT_COLS = 'id, call_id, caller_phone, occurred_at, handled_by, answers, ratings, flagged, listen_reason, complaint, business_id, direction';
 

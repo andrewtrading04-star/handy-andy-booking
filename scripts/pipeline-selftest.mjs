@@ -144,13 +144,13 @@ await check('Paid, then a new call -> new card (with history)', () => {
     history: [{ id: bk.id, business_id: 'b-ha', price: 289, amount_paid: 289, completed_at: bk.completed_at, customer: { phone: CUST } }] });
   const b = board(r);
   assert.equal(b.cards.length, 2);
-  const paid = b.cards.find((c) => c.stage === 'paid');
-  const fresh = b.cards.find((c) => c.stage !== 'paid');
+  const paid = b.cards.find((c) => c.paid);
+  const fresh = b.cards.find((c) => !c.paid);
   assert.equal(paid.next.text, 'Paid · $289');
   assert.ok(paid.timeline.some((t) => t.text === 'Review request texted'), 'the review ask after Paid stays on the paid card');
   assert.equal(fresh.key, 'c_' + call2.id);
   assert.deepEqual(fresh.history, { prior_cards: 1, prior_jobs: 1, spent: 289, returning: true });
-  assert.equal(b.stages.paid, 1);
+  assert.equal(b.stages.booked, 1);   // Paid shows in Booked (owner 2026-09-26)
 });
 
 await check('online booking with no call -> Booked card', () => {
@@ -267,7 +267,7 @@ await check("brand family split: a Dom's shopper who also calls HA gets two card
 });
 
 await check('$0 completed job = Paid; future $0 job is not; priced completed unpaid = Done', () => {
-  assert.equal(one(raw({ bookings: [booking({ price: 0, status: 'completed', completed_at: ago(H), created_at: ago(3 * H) })] })).stage, 'paid');
+  assert.equal(one(raw({ bookings: [booking({ price: 0, status: 'completed', completed_at: ago(H), created_at: ago(3 * H) })] })).paid, true);
   assert.equal(one(raw({ bookings: [booking({ price: 0, status: 'assigned' })] })).stage, 'booked');
   const done = one(raw({ bookings: [booking({ status: 'completed', completed_at: ago(H), created_at: ago(3 * H) })] }));
   assert.deepEqual([done.stage, done.next.text], ['booked', 'Job done — payment not collected']);

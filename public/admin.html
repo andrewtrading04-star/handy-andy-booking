@@ -581,6 +581,19 @@
   .plv-pop-h{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:6px solid var(--st);border-bottom:1px solid var(--line);}
   .plv-pop-h b{font-size:18px;display:block;} .plv-pop-h small{color:var(--mute);}
   .plv-x{border:none;background:var(--line2);width:32px;height:32px;border-radius:50%;cursor:pointer;}
+  .plt-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 -14px 12px;padding:0 10px;}
+  .plt-tabs button{border:none;background:none;font:inherit;font-size:13.5px;font-weight:700;color:var(--mute);padding:9px 10px;cursor:pointer;border-bottom:2px solid transparent;}
+  .plt-tabs button.on{color:var(--ink);border-bottom-color:var(--ink);}
+  .plt-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px;}
+  .plt-info div{background:var(--line2);border-radius:9px;padding:7px 10px;} .plt-info span{display:block;font-size:11px;color:var(--mute);} .plt-info b{font-size:13.5px;}
+  .plt-steps{display:flex;flex-direction:column;gap:2px;margin-bottom:12px;}
+  .plt-step{display:flex;align-items:flex-start;gap:9px;padding:5px 0;font-size:13.5px;color:var(--mute);}
+  .plt-step.on{color:var(--ink);}
+  .plt-dot{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid #cbd5e1;display:flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px;}
+  .plt-step.on .plt-dot{background:#16a34a;border-color:#16a34a;color:#fff;}
+  .plt-lab{flex:1;} .plt-lab small{display:block;font-size:12px;color:var(--mute);}
+  .plt-at{font-size:12px;color:var(--mute);white-space:nowrap;}
+  .plt-main{border-top:1px solid var(--line);padding-top:12px;}
   .plv-pop .pl-card.plv-in{border:none;border-radius:0;box-shadow:none;}
   .plv-pop .pl-card.plv-in>.pl-row{display:none;} .plv-pop .pl-card.plv-in .pl-detail{border-top:none;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
@@ -10239,7 +10252,7 @@ function startMyDayNudge(){
 // card) re-runs navTo('pipeline'), and renderPipeline() repaints the cached
 // board straight back with the same stage, open card, pending "Did you talk
 // to them?" and half-picked Lost reason.
-const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['paid','Paid'],['lost','Lost']];
+const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['lost','Lost']];
 // Exact list, owner rule -- do not change. The server sends its own copy
 // (lost_reasons); this is only the fallback if a payload ever lacks it.
 const PL_LOST_REASONS=['Too expensive','Went with someone else','Just shopping','Out of area',"We don't do that",'No reply after estimate','Spam'];
@@ -10253,7 +10266,8 @@ const PL_ALERT='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="tru
 let _pl=null, _plErr=null, _plLoading=false, _plReq=0, _plDirty=false;
 let _plRange='7', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
-let _plScrollTo=null;   // board column to bring into view after a stage tap
+let _plScrollTo=null;
+let _plTab='ov';   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10414,8 +10428,8 @@ function paintPipeline(){
   const openKeys=PL_STAGES.map(x=>x[0]).filter(k=>k!=='lost');
   const liveCards=cards.filter(c=>c.stage!=='lost');
   const liveVal=liveCards.reduce((t,c)=>t+(Number(c.amount)||0),0);
-  const wonVal=val('done')+val('paid'), wonN=count('done')+count('paid');
-  const bookedPlus=count('booked')+wonN, lostN=count('lost');
+  const paidCards=cards.filter(c=>c.paid), wonVal=paidCards.reduce((t,c)=>t+(Number(c.amount)||0),0), wonN=paidCards.length;
+  const bookedPlus=count('booked'), lostN=count('lost');
   const winRatio=(bookedPlus+lostN)?Math.round(100*bookedPlus/(bookedPlus+lostN)):0;
   const avg=wonN?Math.round(wonVal/wonN):0;
   const usd=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
@@ -10505,7 +10519,7 @@ function plCardHtml(c){
 
 function plDetailHtml(c){
   const st=c.stage, phone=plHasPhone(c);
-  const closed=st==='done'||st==='paid', lost=st==='lost';
+  const closed=st==='done'||st==='paid'||!!c.paid, lost=st==='lost';
   // The server still sends the card's last booking when every job on it was
   // cancelled (then called again, or Reopened after "Job cancelled"): that
   // card is a live lead again and needs Book / Send estimate / Mark lost.
@@ -10555,11 +10569,43 @@ function plDetailHtml(c){
     f.push(`Job${bk.scheduled_at?' '+esc(plWhen(bk.scheduled_at,c.tz)):''}${bk.status?' · '+esc(String(bk.status).replace(/_/g,' ')):''}${bk.tech?' · '+esc(bk.tech):''}${plMoney(bk.price)?' · '+plMoney(bk.price):''}${bk.paid_at?' · paid':''}`); }
   const h=c.history||{}, pj=Number(h.prior_jobs)||0, pc=Number(h.prior_cards)||0;
   if(pj||pc) f.push(`${pj?`<b>Returning customer</b> · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent)+' spent':''}`:'Asked before'}${pc?` · ${pc} earlier inquir${pc===1?'y':'ies'}`:''}`);
-  return `<div class="pl-detail">${top.join('')}
-    ${a.length?`<div class="pl-acts">${a.join('')}</div>`:''}${b.length?`<div class="pl-acts">${b.join('')}</div>`:''}
-    <div class="pl-facts">${f.join('<br>')}</div>
-    ${role==='owner'&&c.audit?plAuditHtml(c.audit):''}
-    ${plTimelineHtml(c)}
+  // Card pop-up, option B (owner, 2026-09-26): Overview / History / More tabs.
+  // Overview = every step of the customer's journey + the main buttons.
+  const MAIN=['call','text','job','est'];
+  const mainBtns=a.filter(x=>MAIN.some(k=>x.includes(`data-pl="${k}"`)));
+  const moreBtns=[...a.filter(x=>!mainBtns.includes(x)), ...b];
+  const tz=c.tz, W=iso=>iso?esc(plWhen(iso,tz)):'';
+  const e=c.estimate||{}, bk=c.booking||{};
+  const tlFirst=(Array.isArray(c.timeline)&&c.timeline[0])||null;
+  const steps=[
+    ['Customer reached out', c.opened_at, tlFirst?esc(tlFirst.text):esc(c.source||'')],
+    ['Quoted'+(plMoney(e.total)?' '+plMoney(e.total):''), e.sent_at||null, e.id&&!e.sent_at?'<span class="danger">not sent yet</span>':''],
+    ['Customer opened the estimate', e.opened?(e.sent_at||true):null, ''],
+    ['Customer approved', e.approved_at||null, ''],
+    ['Appointment booked', bk.created_at||bk.scheduled_at||null, bk.scheduled_at?'for '+W(bk.scheduled_at)+(bk.tech?' · '+esc(bk.tech):''):''],
+    ['Job complete', bk.completed_at||null, ''],
+    ['Paid'+(plMoney(bk.price)?' '+plMoney(bk.price):''), bk.paid_at||null, ''],
+    ['Review given', bk.review_at||null, bk.review_rating?'★'.repeat(Math.max(0,Math.min(5,Math.round(bk.review_rating)))):''],
+  ];
+  if(c.lost) steps.push(['Lost · '+esc(c.lost.reason||''), c.lost.at||true, c.lost.note?'“'+esc(c.lost.note)+'”':'']);
+  const stepHtml=steps.map(([label,at,extra])=>`<div class="plt-step${at?' on':''}"><span class="plt-dot">${at?'✓':''}</span><span class="plt-lab">${label}${extra?`<small>${extra}</small>`:''}</span><span class="plt-at">${at&&at!==true?W(at):at?'':'—'}</span></div>`).join('');
+  const info=[
+    ['Brand', c.business&&c.business.name?esc(c.business.name):'—'],
+    ['Phone', phone?esc(c.phone_pretty||fmtPhone(c.phone)):'No number saved'],
+    ['Handled by', c.secretary?esc(c.secretary):'—'],
+  ];
+  if(Number(c.tries)>0) info.push(['Callback tries', `${Number(c.tries)} with no answer`]);
+  if(pj||pc) info.push(['History', `${pj?`Returning · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent):''}`:'Asked before'}`]);
+  const tab=_plTab||'ov', nHist=Array.isArray(c.timeline)?c.timeline.length:0;
+  const tabs=`<div class="plt-tabs" role="tablist">${[['ov','Overview'],['hist',`History (${nHist})`],['more','More']].map(([k,l])=>`<button type="button" role="tab" class="${tab===k?'on':''}" data-pl="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join('')}</div>`;
+  const body=tab==='hist'
+    ? `${role==='owner'&&c.audit?plAuditHtml(c.audit):''}${plTimelineHtml(c)||'<div class="plv-none">No history yet.</div>'}`
+    : tab==='more'
+    ? `${moreBtns.length?`<div class="pl-acts">${moreBtns.join('')}</div>`:'<div class="plv-none">Nothing else to do here.</div>'}`
+    : `<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+       <div class="plt-steps">${stepHtml}</div>
+       ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
+  return `<div class="pl-detail">${top.join('')}${tabs}<div class="plt-body">${body}</div>
   </div>`;
 }
 // Owner only (the server also leaves `audit` out for secretaries). Score is
@@ -10635,6 +10681,7 @@ function plClick(e){
   const b=e.target.closest('[data-pl]'); if(!b || b.disabled) return;
   const act=b.dataset.pl;
   if(act==='stage'){ _plStage=b.dataset.stage; _plScrollTo=_plStage; paintPipeline(); return; }
+  if(act==='tab'){ _plTab=b.dataset.tab||'ov'; paintPipeline(); return; }
   if(act==='leaks'){
     const cards=(_pl&&Array.isArray(_pl.cards))?_pl.cards:[];
     const s=PL_STAGES.map(x=>x[0]).find(k=>cards.some(c=>c&&c.stage===k&&c.leak));
@@ -10645,7 +10692,7 @@ function plClick(e){
   if(!c) return;
   switch(act){
     case 'toggle':
-      _plOpen=_plOpen===c.key?null:c.key;
+      _plOpen=_plOpen===c.key?null:c.key; _plTab='ov';
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
     case 'call': plCall(c,b); return;
