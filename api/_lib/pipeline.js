@@ -42,7 +42,7 @@ import { localDayStartUTC } from './time.js';
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
 // Exact list and order are the owner's (2026-09-24) -- do not reword.
 export const LOST_REASONS = ['Too expensive', 'Went with someone else', 'Just shopping', 'Out of area', "We don't do that", 'No reply after estimate', 'Spam'];
-export const STAGES = ['new', 'talked', 'quoted', 'booked', 'done', 'paid', 'lost'];
+export const STAGES = ['new', 'talked', 'quoted', 'booked', 'paid', 'lost'];   // 'done' folded into Booked (owner, 2026-09-26)
 
 const TOLL_FREE = '8889159967';          // the notification sender: every brand's automated texts
 // Heather's own phone until 2026-09-18 (she changed numbers). Forwarded calls
@@ -497,7 +497,7 @@ export function evalStage(card, at, mark) {
     if (standing.length) {
       const b = standing[standing.length - 1];
       if (b.bk.paidMs != null && b.bk.paidMs <= atMs) return { stage: 'paid', stageMs: b.bk.paidMs, booking: b };
-      if (b.bk.completedMs != null && b.bk.completedMs <= atMs) return { stage: 'done', stageMs: b.bk.completedMs, booking: b, callback: openCallback(T, b.bk.completedMs) };
+      if (b.bk.completedMs != null && b.bk.completedMs <= atMs) return { stage: 'booked', doneUnpaid: true, stageMs: b.bk.completedMs, booking: b, callback: openCallback(T, b.bk.completedMs) };
       return { stage: 'booked', stageMs: b.atMs, booking: b, callback: openCallback(T, b.atMs) };
     }
     // Every booking cancelled. Unless the customer came back after (a new
@@ -763,9 +763,9 @@ function nextFor(st, card, nowMs) {
       const b = st.booking.bk; const amt = b.amountPaid ?? b.price;
       return { text: amt ? `Paid · ${dollars(amt)}` : 'Paid', tone: 'ok' };
     }
-    case 'done': return callbackNext || { text: 'Job done — payment not collected', tone: 'warn' };
     case 'booked': {
       if (callbackNext) return callbackNext;
+      if (st.doneUnpaid) return { text: 'Job done — payment not collected', tone: 'warn' };
       if (st.approvedNoJob) return { text: 'Approved — put it on the schedule', tone: 'warn' };
       const b = st.booking.bk;
       if (b.scheduledMs != null && b.scheduledMs + 6 * HOUR < nowMs) return { text: 'Job time passed — not marked done', tone: 'warn' };

@@ -10239,7 +10239,7 @@ function startMyDayNudge(){
 // card) re-runs navTo('pipeline'), and renderPipeline() repaints the cached
 // board straight back with the same stage, open card, pending "Did you talk
 // to them?" and half-picked Lost reason.
-const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['done','Done'],['paid','Paid'],['lost','Lost']];
+const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['paid','Paid'],['lost','Lost']];
 // Exact list, owner rule -- do not change. The server sends its own copy
 // (lost_reasons); this is only the fallback if a payload ever lacks it.
 const PL_LOST_REASONS=['Too expensive','Went with someone else','Just shopping','Out of area',"We don't do that",'No reply after estimate','Spam'];
@@ -10429,7 +10429,7 @@ function paintPipeline(){
     ${leakN>0?`<button type="button" class="plv-kpi bad" data-pl="leaks"><span>Leaks</span><b>${leakN}</b><small>tap to see</small></button>`:kpi('Leaks','0','none right now')}
     ${kpi('Won',usd(wonVal),wonN+' job'+(wonN===1?'':'s'))}
     ${kpi('Win ratio',winRatio+'%','booked vs lost')}
-    ${kpi('Avg job',avg?usd(avg):'—','done + paid')}
+    ${kpi('Avg job',avg?usd(avg):'—','paid jobs')}
   </div>`;
   // Funnel: how many reached each stage or further (lost leads count once, as leads).
   const idx=k=>openKeys.indexOf(k);

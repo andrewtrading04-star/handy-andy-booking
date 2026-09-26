@@ -270,7 +270,7 @@ await check('$0 completed job = Paid; future $0 job is not; priced completed unp
   assert.equal(one(raw({ bookings: [booking({ price: 0, status: 'completed', completed_at: ago(H), created_at: ago(3 * H) })] })).stage, 'paid');
   assert.equal(one(raw({ bookings: [booking({ price: 0, status: 'assigned' })] })).stage, 'booked');
   const done = one(raw({ bookings: [booking({ status: 'completed', completed_at: ago(H), created_at: ago(3 * H) })] }));
-  assert.deepEqual([done.stage, done.next.text], ['done', 'Job done — payment not collected']);
+  assert.deepEqual([done.stage, done.next.text], ['booked', 'Job done — payment not collected']);
 });
 
 await check('Talked / Voicemail marks and audit skips override the length rule', () => {
