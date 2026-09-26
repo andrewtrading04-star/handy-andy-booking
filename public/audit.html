@@ -395,6 +395,7 @@
   .call-more a.danger:hover{color:var(--bad);}
   .tkt-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line2);font-size:13.5px;}
   .tkt-row:first-of-type{border-top:none;}
+.old-audit{display:none!important;} [data-edit]{display:none!important;}
 </style>
 </head>
 <body>
@@ -574,7 +575,8 @@
       </div>
     </div>
 
-    <div class="card">
+    <!-- Old manual grading (Step 1 / Step 2 / form) retired 2026-09-26 (owner): the guided queue replaces it. -->
+    <div class="card old-audit">
       <div class="spread" style="margin-bottom:4px;">
         <h2>Step 1. Count the calls</h2>
       </div>
@@ -588,7 +590,7 @@
       <div class="err" id="dayErr"></div>
     </div>
 
-    <div class="card">
+    <div class="card old-audit">
       <div class="spread" style="margin-bottom:10px;">
         <h2>Step 2. Grade the calls</h2>
         <button class="btn ghost" id="newAudit">Add a call</button>
@@ -596,7 +598,7 @@
       <div id="auditList"></div>
     </div>
 
-    <div id="formCard" class="card hidden">
+    <div id="formCard" class="card hidden old-audit">
       <div class="spread" style="margin-bottom:12px;">
         <h2 id="formTitle">New call</h2>
         <button class="btn ghost" id="cancelBtn">Cancel</button>
