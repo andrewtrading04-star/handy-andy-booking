@@ -110,6 +110,9 @@ export default async function handler(req, res) {
 const SECRETARIES = [
   { slug: 'handy-andy', business: 'Handy Andy', name: process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather' },
   { slug: 'doms',       business: "Dom's",      name: process.env.DOMS_SECRETARY_NAME || 'Joey' },
+  // Own logins replacing Joey (owner, 2026-09-26).
+  { slug: 'doms',       business: "Dom's",      name: 'Alex' },
+  { slug: 'doms',       business: "Dom's",      name: 'Joe' },
 ];
 async function conversion(req, res, db) {
   const people = [];

@@ -13828,7 +13828,7 @@ function paintCalls(){
     ...(_callsPeriodData.handled||[]).map(r=>({ ...r, _handled:true })),
   ].filter(r=> r.source==='twilio')
    .sort((a,b)=> a.occurred_at<b.occurred_at?1:-1);
-  const whoNames=role==='owner' ? [...new Set(['Andrew','Heather','Joey',...[...periodRows,...open].map(r=>r.routed_to_name).filter(Boolean)])].sort() : [];
+  const whoNames=role==='owner' ? [...new Set(['Andrew','Heather','Joey','Alex','Joe',...[...periodRows,...open].map(r=>r.routed_to_name).filter(Boolean)])].sort() : [];
   if(whoNames.length>1){
     if(_callsWho!=='all' && !whoNames.includes(_callsWho)) _callsWho='all';
     if(_callsWho!=='all'){

@@ -538,6 +538,8 @@
           <button type="button" data-f="flagged">Flagged</button>
           <button type="button" data-f="Heather">Heather</button>
           <button type="button" data-f="Joey">Joey</button>
+          <button type="button" data-f="Alex">Alex</button>
+          <button type="button" data-f="Joe">Joe</button>
         </div>
       </div>
     </div>
@@ -2238,7 +2240,7 @@ async function qSave(){
     date:ctDateStr(r.occurred_at),
     grasshopper_number:String(r.grasshopper_number||'').replace(/\D/g,'').slice(-10),
     call_id:r.id, time_local:ctTimeHM(r.occurred_at), direction:'incoming',
-    handled_by:['Heather','Joey'].includes(who)?who:(who||''),
+    handled_by:['Heather','Joey','Alex','Joe'].includes(who)?who:(who||''),
     service:qState.svc,
     caller_phone:String(r.caller_phone||'').replace(/\D/g,'').slice(-10),
     caller_name:(r.customer&&r.customer.name)||'', caller_zip:'',
