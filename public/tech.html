@@ -1323,7 +1323,7 @@ async function showDetail(id){
 
     // Payment handlers
     const jc=document.getElementById('jobCharge'); if(jc) jc.onclick=()=>openChargeFlow(j);
-    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid'); } };
+    const jm=document.getElementById('jobMarkPaid'); if(jm) jm.onclick=async()=>{ if(confirm('Mark this job as paid (cash)?')){ await paymentAction(j.id,'mark_paid',{cash:true}); } };   // cash: tax off, payroll takes the cash back (owner, 2026-09-26)
     // Refunds are office-only — techs have no refund control (removed by owner request).
 
     // Change / add card on file (customer wants to pay with a different card).
@@ -1650,9 +1650,9 @@ function openLightbox(url){
   const lb=document.getElementById('lightbox'); document.getElementById('lightboxImg').src=url; lb.classList.remove('hidden');
 }
 
-async function paymentAction(jobId,action){
+async function paymentAction(jobId,action,extra){
   try{
-    const r=await api('job_payment',{method:'POST',body:{id:jobId,action}});
+    const r=await api('job_payment',{method:'POST',body:{id:jobId,action,...(extra||{})}});
     // A `warning` means money needs the tech's attention (e.g. "the earlier
     // charge actually went through — do NOT take cash") — a 2.6s toast is far
     // too easy to miss for that, so use a blocking alert.
