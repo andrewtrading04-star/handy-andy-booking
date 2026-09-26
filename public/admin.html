@@ -536,6 +536,51 @@
   .ask-log{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;} .ask-log-open{border:2px solid #fca5a5;}
   .ask-log-h{font-size:12.5px;color:var(--mute);} .ask-log-q{font-weight:700;margin:4px 0;} .ask-log-a{font-size:14px;color:var(--ink-2);white-space:pre-wrap;}
   .ask-teach{display:flex;flex-direction:column;gap:6px;margin-top:8px;} .ask-teach .btn{align-self:flex-end;width:auto;}
+  .plv{max-width:none!important;}
+  .plv .st-new{--st:#f87171;} .plv .st-talked{--st:#fbbf24;} .plv .st-quoted{--st:#a3d65c;} .plv .st-booked{--st:#22d3ee;}
+  .plv .st-done{--st:#38bdf8;} .plv .st-paid{--st:#a78bfa;} .plv .st-lost{--st:#94a3b8;}
+  .plv-total{text-align:center;font-size:26px;font-weight:800;margin:6px 0 10px;} .plv-total span{font-size:15px;font-weight:600;color:var(--mute);}
+  .plv-chev{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;}
+  .plv-chev-i{flex:1 0 120px;display:flex;flex-direction:column;align-items:center;gap:2px;border:none;cursor:pointer;font:inherit;color:#0f172a;
+    background:color-mix(in srgb,var(--st) 22%,#fff);padding:12px 18px 12px 26px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%,14px 50%);}
+  .plv-chev-i:first-child{clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);padding-left:16px;}
+  .plv-chev-i.on{background:var(--st);} .plv-chev-i b{font-size:12.5px;} .plv-chev-v{font-size:17px;font-weight:800;} .plv-chev-n{font-size:11.5px;color:#334155;} .plv-chev-n em{color:#b91c1c;font-style:normal;font-weight:700;}
+  .plv-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;}
+  .plv-kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;text-align:left;font:inherit;color:var(--ink);}
+  .plv-kpi span{font-size:12px;color:var(--mute);} .plv-kpi b{font-size:22px;font-weight:800;} .plv-kpi small{font-size:11.5px;color:var(--mute);}
+  .plv-kpi.bad{border-color:#fca5a5;background:#fef2f2;cursor:pointer;} .plv-kpi.bad b{color:#b91c1c;}
+  .plv-mid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:16px;}
+  .plv-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;} .plv-panel .pl-sec{margin:0;}
+  .plv-panel-h{font-weight:800;margin-bottom:10px;}
+  .plv-funnel{display:flex;flex-direction:column;align-items:center;}
+  .plv-fun-row{width:100%;display:flex;align-items:center;justify-content:center;position:relative;}
+  .plv-fun-bar{background:var(--st);color:#fff;font-weight:800;text-align:center;border-radius:999px;padding:4px 0;font-size:13px;text-shadow:0 1px 1px rgba(0,0,0,.25);}
+  .plv-fun-l{position:absolute;right:0;font-size:11.5px;color:var(--mute);}
+  .plv-fun-p{font-size:12px;color:var(--mute);margin:2px 0;}
+  .plv-board{display:flex;gap:12px;overflow-x:auto;padding-bottom:10px;align-items:flex-start;}
+  .plv-col{flex:0 0 230px;background:#f8fafc;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .plv-col.on{outline:2px solid #2563eb;}
+  .plv-col-h{border-top:4px solid var(--st);padding:8px 10px;background:#fff;display:flex;flex-direction:column;}
+  .plv-col-h b{font-size:13.5px;} .plv-col-h span{font-size:12.5px;color:var(--mute);font-weight:700;}
+  .plv-col-b{padding:8px;display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow-y:auto;}
+  .plv-none{font-size:12px;color:var(--mute);text-align:center;padding:10px 0;}
+  .plv-tile{flex:none;display:block;width:100%;text-align:left;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;}
+  .plv-tile:hover{box-shadow:0 4px 12px rgba(15,23,42,.1);} .plv-tile.leak{border-color:#f87171;}
+  .plv-tile-h{display:block;background:var(--st);color:#0f172a;padding:6px 9px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .plv-tile-b{display:flex;justify-content:space-between;align-items:center;padding:7px 9px 4px;gap:6px;}
+  .plv-tile-b small{display:block;font-size:9.5px;color:var(--mute);letter-spacing:.4px;} .plv-tile-b b{font-size:17px;}
+  .plv-tile-b i{display:block;font-style:normal;font-size:11px;color:var(--mute);max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .plv-ic{flex:none;width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;background:#94a3b8;}
+  .plv-ic.ok{background:#16a34a;} .plv-ic.warn{background:#f59e0b;} .plv-ic.danger{background:#dc2626;} .plv-ic.mute{background:#3b82f6;}
+  .plv-tile-n{display:block;font-size:11.5px;padding:0 9px 7px;color:var(--mute);} .plv-tile-n.danger{color:#b91c1c;font-weight:700;} .plv-tile-n.warn{color:#b45309;}
+  .plv-pop{position:fixed;inset:0;z-index:250;display:flex;align-items:flex-start;justify-content:center;padding:40px 14px;overflow:auto;}
+  .plv-pop-bg{position:fixed;inset:0;background:rgba(15,23,42,.45);}
+  .plv-pop-card{position:relative;background:var(--panel);border-radius:16px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;}
+  .plv-pop-h{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:6px solid var(--st);border-bottom:1px solid var(--line);}
+  .plv-pop-h b{font-size:18px;display:block;} .plv-pop-h small{color:var(--mute);}
+  .plv-x{border:none;background:var(--line2);width:32px;height:32px;border-radius:50%;cursor:pointer;}
+  .plv-pop .pl-card.plv-in{border:none;border-radius:0;box-shadow:none;}
+  .plv-pop .pl-card.plv-in>.pl-row{display:none;} .plv-pop .pl-card.plv-in .pl-detail{border-top:none;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
   .pl-card.leak{border:2px solid #dc2626;}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
@@ -10206,6 +10251,7 @@ const PL_ALERT='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="tru
 let _pl=null, _plErr=null, _plLoading=false, _plReq=0, _plDirty=false;
 let _plRange='7', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
+let _plScrollTo=null;   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10353,20 +10399,8 @@ function paintPipeline(){
   // brands on the server). Families = Dom's + its lead-gen sites, and Handy
   // Andy + everything else, the same split the cards are grouped by.
   const bizSel=isOwner?`<select id="plBiz" aria-label="Brand">${opt('all','All brands',_plBiz)}<optgroup label="Families">${opt('family:handy-andy','Handy Andy family',_plBiz)}${opt('family:doms',"Dom's family",_plBiz)}</optgroup><optgroup label="One brand">${businesses.map(b=>opt(b.slug,b.name,_plBiz)).join('')}</optgroup></select>`:'';
-  const tiles=`<div class="pl-tiles">
-      <div class="pl-tile"><span class="pl-tile-l">Calls</span><span class="pl-tile-n">${calls}</span><span class="pl-tile-s">${esc(rangeName)}</span></div>
-      <div class="pl-tile good"><span class="pl-tile-l">Booked or estimate</span><span class="pl-tile-n">${conv} of ${calls}<span class="pl-pct"><i> · </i>${pct}%</span></span></div>
-      ${leakN>0
-        ? `<button type="button" class="pl-tile bad" data-pl="leaks" title="Show the leaks"><span class="pl-tile-l">Leaks</span><span class="pl-tile-n">${leakN}</span><span class="pl-tile-s">no booking or estimate</span></button>`
-        : `<div class="pl-tile"><span class="pl-tile-l">Leaks</span><span class="pl-tile-n">0</span><span class="pl-tile-s">none right now</span></div>`}
-    </div>`;
-  const leakTag=k=>leaks[k]?`${leaks[k]} leak${leaks[k]===1?'':'s'}`:'';
-  const strip=`<div class="pl-stages" role="group" aria-label="Stages">${PL_STAGES.map(([k,l])=>
-      `<button type="button" class="pl-stage${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}" aria-pressed="${_plStage===k}"><span class="pl-stage-n">${count(k)}</span><span class="pl-stage-l">${l}</span>${leaks[k]?`<span class="pl-stage-dot" title="${leakTag(k)}">${leaks[k]}</span>`:''}</button>`).join('')}</div>
-    <select class="pl-stagesel" id="plStageSel" aria-label="Stage">${PL_STAGES.map(([k,l])=>
-      `<option value="${k}"${_plStage===k?' selected':''}>${esc(l)} · ${count(k)}${leaks[k]?' · '+leakTag(k):''}</option>`).join('')}</select>`;
-  // One bar per secretary: talked-to calls that ended in a booking or an
-  // estimate. The server sends a secretary only her own row.
+  // Redesign (owner, 2026-09-26): stage arrows with count + $, a stats row,
+  // a funnel, then one board column per stage. A card opens in a pop-up.
   const board=Array.isArray(d.scoreboard)?d.scoreboard:[];
   const bars=board.length?`<div class="pl-sec"><div class="pl-sec-h">Talked to → booked or estimate</div>${board.map(r=>{
       const t=Number(r.talked)||0, cv=Number(r.converted)||0;
@@ -10374,18 +10408,62 @@ function paintPipeline(){
       const cls=p>=75?'':p>=50?' warn':' bad';
       return `<div class="pl-bar"><div class="pl-bar-name">${esc(r.name||'—')}</div><div class="pl-bar-track"><div class="pl-bar-fill${cls}" style="width:${Math.max(0,Math.min(100,p))}%"></div></div><div class="pl-bar-num">${cv} of ${t} · ${p}%</div></div>`;
     }).join('')}</div>`:'';
-  const list=cards.filter(c=>c.stage===_plStage);
-  view.innerHTML=`<div class="wrap pl-wrap" id="plRoot">
-    <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
-    ${tiles}${strip}${bars}
-    ${list.length?`<div class="pl-list">${list.map(plCardHtml).join('')}</div>`:'<div class="pl-empty">Nothing here right now.</div>'}
+  const val=k=>cards.filter(c=>c.stage===k).reduce((t,c)=>t+(Number(c.amount)||0),0);
+  const openKeys=PL_STAGES.map(x=>x[0]).filter(k=>k!=='lost');
+  const liveCards=cards.filter(c=>c.stage!=='lost');
+  const liveVal=liveCards.reduce((t,c)=>t+(Number(c.amount)||0),0);
+  const wonVal=val('done')+val('paid'), wonN=count('done')+count('paid');
+  const bookedPlus=count('booked')+wonN, lostN=count('lost');
+  const winRatio=(bookedPlus+lostN)?Math.round(100*bookedPlus/(bookedPlus+lostN)):0;
+  const avg=wonN?Math.round(wonVal/wonN):0;
+  const usd=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
+  const chev=`<div class="plv-total">${usd(liveVal)} <span>· ${liveCards.length} open deal${liveCards.length===1?'':'s'}</span></div>
+    <div class="plv-chev" role="group" aria-label="Stages">${PL_STAGES.map(([k,l])=>
+      `<button type="button" class="plv-chev-i st-${k}${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}"><b>${esc(l)}</b><span class="plv-chev-v">${usd(val(k))}</span><span class="plv-chev-n">${count(k)} deal${count(k)===1?'':'s'}${leaks[k]?` · <em>${leaks[k]} leak${leaks[k]===1?'':'s'}</em>`:''}</span></button>`).join('')}</div>`;
+  const kpi=(l,v,sub,cls)=>`<div class="plv-kpi${cls?' '+cls:''}"><span>${l}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+  const kpis=`<div class="plv-kpis">
+    ${kpi('Calls',calls,esc(rangeName))}
+    ${kpi('Booked or estimate',pct+'%',conv+' of '+calls)}
+    ${leakN>0?`<button type="button" class="plv-kpi bad" data-pl="leaks"><span>Leaks</span><b>${leakN}</b><small>tap to see</small></button>`:kpi('Leaks','0','none right now')}
+    ${kpi('Won',usd(wonVal),wonN+' job'+(wonN===1?'':'s'))}
+    ${kpi('Win ratio',winRatio+'%','booked vs lost')}
+    ${kpi('Avg job',avg?usd(avg):'—','done + paid')}
   </div>`;
+  // Funnel: how many reached each stage or further (lost leads count once, as leads).
+  const idx=k=>openKeys.indexOf(k);
+  const reached=openKeys.map((k,i)=>cards.filter(c=>c.stage==='lost'?i===0:idx(c.stage)>=i).length);
+  const funTop=reached[0]||1;
+  const funnel=`<div class="plv-funnel">${openKeys.map((k,i)=>{
+      const w=Math.max(18,Math.round(100*reached[i]/funTop));
+      const step=i>0&&reached[i-1]?`<div class="plv-fun-p">${Math.round(100*reached[i]/reached[i-1])}%</div>`:'';
+      return `${step}<div class="plv-fun-row"><div class="plv-fun-bar st-${k}" style="width:${w}%">${reached[i]}</div><span class="plv-fun-l">${esc(plStageLabel(k))}</span></div>`;
+    }).join('')}</div>`;
+  const colHtml=([k,l])=>{
+    const list=cards.filter(c=>c.stage===k);
+    return `<div class="plv-col${_plStage===k?' on':''}" id="plcol-${k}">
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span></div>
+      <div class="plv-col-b">${list.length?list.map(plTileHtml).join(''):'<div class="plv-none">Empty</div>'}</div></div>`;
+  };
+  const openC=_plOpen&&plCard(_plOpen);
+  const modal=openC?`<div class="plv-pop" data-plkey="${esc(openC.key)}"><div class="plv-pop-bg" data-pl="toggle"></div>
+      <div class="plv-pop-card" role="dialog" aria-label="${esc(plTitle(openC))}">
+        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b><small>${esc(plStageLabel(openC.stage))}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
+        ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
+      </div></div>`:'';
+  view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
+    <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
+    ${chev}${kpis}
+    <div class="plv-mid"><div class="plv-panel"><div class="plv-panel-h">Sales funnel</div>${funnel}</div>${bars?`<div class="plv-panel">${bars}</div>`:''}</div>
+    <div class="plv-board">${PL_STAGES.map(colHtml).join('')}</div>
+    ${modal}
+  </div>`;
+  if(_plScrollTo){ const col=document.getElementById('plcol-'+_plScrollTo); _plScrollTo=null; if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }
   const root=document.getElementById('plRoot');
   root.addEventListener('click', plClick);
   document.getElementById('plRange').addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
   const bs=document.getElementById('plBiz');
   if(bs) bs.addEventListener('change',e=>{ _plBiz=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
-  document.getElementById('plStageSel').addEventListener('change',e=>{ _plStage=e.target.value; e.target.blur(); paintPipeline(); });
+  const ss=document.getElementById('plStageSel'); if(ss) ss.addEventListener('change',e=>{ _plStage=e.target.value; e.target.blur(); paintPipeline(); });
   const note=document.getElementById('plLostNote');
   if(note){
     note.addEventListener('input',()=>{ if(_plLost) _plLost.note=note.value; });
@@ -10393,6 +10471,17 @@ function paintPipeline(){
   }
 }
 
+// Board tile: name, where it came from, value, and a colored next-step icon.
+function plTileHtml(c){
+  const next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
+  const sub=[c.source, businesses.length>1&&c.business&&c.business.name?c.business.name:'', c.opened_at?plAgo(c.opened_at):''].filter(Boolean).join(' · ');
+  const ic=c.leak||tone==='danger'?PL_ALERT:'<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>';
+  return `<button type="button" class="plv-tile${c.leak?' leak':''}" data-plkey="${esc(c.key)}" data-pl="toggle" title="${esc(next.text||'')}">
+    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}</b></span>
+    <span class="plv-tile-b"><span><small>VALUE</small><b>${plMoney(c.amount)||'$0'}</b>${sub?`<i>${esc(sub)}</i>`:''}</span><span class="plv-ic ${c.leak?'danger':tone}">${ic}</span></span>
+    ${next.text?`<span class="plv-tile-n ${c.leak?'danger':tone}">${esc(next.text)}</span>`:''}
+  </button>`;
+}
 function plCardHtml(c){
   const open=_plOpen===c.key, next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
   const returning=!!(c.history && Number(c.history.prior_jobs)>0);
@@ -10543,11 +10632,11 @@ function plSaveLost(c){
 function plClick(e){
   const b=e.target.closest('[data-pl]'); if(!b || b.disabled) return;
   const act=b.dataset.pl;
-  if(act==='stage'){ _plStage=b.dataset.stage; paintPipeline(); return; }
+  if(act==='stage'){ _plStage=b.dataset.stage; _plScrollTo=_plStage; paintPipeline(); return; }
   if(act==='leaks'){
     const cards=(_pl&&Array.isArray(_pl.cards))?_pl.cards:[];
     const s=PL_STAGES.map(x=>x[0]).find(k=>cards.some(c=>c&&c.stage===k&&c.leak));
-    if(s){ _plStage=s; paintPipeline(); }
+    if(s){ _plStage=s; _plScrollTo=s; paintPipeline(); }
     return;
   }
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
