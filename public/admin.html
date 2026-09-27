@@ -10777,7 +10777,9 @@ function plClick(e){
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
-    case 'est': {
+    // Open estimate shows it right in the card (owner 2026-09-27).
+    case 'est': { _plEstOpen=true; _plTab='ov'; paintPipeline(); return; }
+    case 'est_full': {
       const slug=plOwnSlug(c.estimate.slug) || plOwnSlug(c.estimate.business_slug) || plBizSlug(c);
       if(!slug){ toast(`This login can't open ${(c.business&&c.business.name)||'that brand'}'s estimates.`); return; }
       pendingEstimateId=c.estimate.id; estFilter='all';
