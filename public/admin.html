@@ -10261,7 +10261,7 @@ function startMyDayNudge(){
 // board straight back with the same stage, open card, pending "Did you talk
 // to them?" and half-picked Lost reason.
 // Lost replaced by Completed = done jobs waiting on a review (owner 2026-09-27).
-const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['completed','Completed']];
+const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['completed','Needs review collection']];
 // Exact list, owner rule -- do not change. The server sends its own copy
 // (lost_reasons); this is only the fallback if a payload ever lacks it.
 const PL_LOST_REASONS=['Too expensive','Went with someone else','Just shopping','Out of area',"We don't do that",'No reply after estimate','Spam'];
