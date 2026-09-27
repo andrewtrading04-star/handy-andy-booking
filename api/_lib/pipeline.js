@@ -380,6 +380,7 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
         estimateId: md.source_estimate_id || null, bookedBy: md.booked_by || null,
         reviewMs: msOf(b.reviewed_at) ?? msOf(b.review_clicked_at), reviewRating: num(b.review_rating),
         gotReview: !!(b.reviewed_at || num(b.review_rating)),
+        offerSent: !!(md.loyalty_offer && md.loyalty_offer.sent_at),
         rv: { sms_sent: b.review_sms_sent_at || null, sms_delivered: b.review_sms_delivered_at || null, sms_status: b.review_sms_status || null, sms_clicked: b.review_sms_clicked_at || null,
           email_sent: b.review_email_sent_at || null, email_count: b.review_email_count || 0, email_delivered: b.review_email_delivered_at || null, email_status: b.review_email_status || null, email_clicked: b.review_email_clicked_at || null,
           page_opened: b.review_clicked_at || null, call_status: b.review_call_status || null, call_at: b.review_call_at || null, call_by: b.review_call_by || null } } });
@@ -1041,7 +1042,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     const doneJob = !opts.legacyBoard && (c.st.stage === 'paid' || (c.st.stage === 'booked' && c.st.doneUnpaid));
     if (doneJob) {
       const b = c.st.booking && c.st.booking.bk;
-      if (!b || b.gotReview) continue;
+      if (!b || b.gotReview || b.offerSent) continue;   // discount text sent = handled (owner 2026-09-27)
       // Any phone contact after the appointment (review call logged, or a
       // connected call either way) takes it off Completed (owner 2026-09-27).
       const after = Math.min(b.scheduledMs ?? Infinity, b.completedMs ?? Infinity);
