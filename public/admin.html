@@ -12489,6 +12489,31 @@ async function renderCallAudit(){
   const offColor = offPct<=10 ? 'var(--ch-accent)' : offPct<=30 ? 'var(--ink-2)' : 'var(--ch-danger)';
 
   const top=Math.max(1,...(d.daily||[]).map(x=>Math.max(x.counted||0,x.scripted||0)));
+  // Owner 2026-09-27: the two-bar daily chart was unreadable. One row per
+  // week instead: calls Jiyah counted, how many used the script, and the %.
+  const wk={};
+  (d.daily||[]).forEach(x=>{
+    if(x.counted==null) return;              // day not counted -> left out
+    const dt=new Date(x.date+'T12:00:00'); dt.setDate(dt.getDate()-dt.getDay());
+    const k=dt.toISOString().slice(0,10);
+    const w=wk[k]||(wk[k]={start:k,calls:0,scripted:0,days:0});
+    w.calls+=x.counted||0; w.scripted+=x.scripted||0; w.days++;
+  });
+  const weekRows=Object.values(wk).sort((a,b)=>b.start.localeCompare(a.start)).map(w=>{
+    const used=Math.min(w.scripted,w.calls);
+    const pct=w.calls?Math.round(100*used/w.calls):null;
+    const col=pct==null?'var(--mute)':pct>=85?'var(--ch-accent)':pct>=60?'var(--ink-2)':'var(--ch-danger)';
+    const label=new Date(w.start+'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric'});
+    return `<tr style="border-top:1px solid var(--line2);">
+      <td style="padding:9px 6px;">Week of ${esc(label)}${w.days<7?` <span style="color:var(--mute);font-size:12px;">(${w.days} day${w.days===1?'':'s'})</span>`:''}</td>
+      <td style="padding:9px 6px;text-align:right;font-variant-numeric:tabular-nums;">${w.calls}</td>
+      <td style="padding:9px 6px;text-align:right;font-variant-numeric:tabular-nums;">${used}</td>
+      <td style="padding:9px 6px;text-align:right;font-weight:800;color:${col};">${pct==null?'&mdash;':pct+'%'}</td>
+    </tr>`;
+  }).join('');
+  const weekTable=weekRows?`<table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+      <thead><tr style="color:var(--mute);font-size:12px;text-align:right;"><th style="text-align:left;padding:4px 6px;font-weight:600;"></th><th style="padding:4px 6px;font-weight:600;">Calls</th><th style="padding:4px 6px;font-weight:600;">Used the script</th><th style="padding:4px 6px;font-weight:600;">%</th></tr></thead>
+      <tbody>${weekRows}</tbody></table>`:'<div class="empty">No counts yet.</div>';
   const dailyRows=(d.daily||[]).filter(x=>x.counted!=null||x.scripted).map(x=>{
     const label=x.date.slice(5).replace('-','/');
     const cw=Math.round(((x.counted||0)/top)*100), sw=Math.round(((x.scripted||0)/top)*100);
@@ -12630,12 +12655,9 @@ async function renderCallAudit(){
 
     ${trendChart}
 
-    <div class="rc-count">Day by day <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(came in vs went through the script)</span></div>
-    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;">${dailyRows}</div>
-    <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">
-      <span style="display:inline-block;width:10px;height:10px;background:var(--ch-chart-secondary);border-radius:2px;"></span> calls that came in
-      &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:var(--ch-accent);border-radius:2px;"></span> went through the script
-    </div>
+    <div class="rc-count">Did they use the script? <span style="font-weight:400;color:var(--mute);text-transform:none;letter-spacing:0;">(by week)</span></div>
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:6px;">${weekTable}</div>
+    <div style="font-size:12px;color:var(--mute);margin-bottom:22px;">Calls = what Jiyah counted. Green 85%+ is good. Red under 60% means most calls skipped the script.</div>
 
     <div class="rc-count">Where the calls came from</div>
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${lineRows}</div>
