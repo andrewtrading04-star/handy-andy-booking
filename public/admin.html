@@ -10378,6 +10378,9 @@ async function plLoad(force){
 // the lost note, a dropdown open on a phone). It repaints once that's over.
 function plHold(){
   if(_plLost && document.querySelector('#plRoot .pl-lost')) return true;
+  // Don't rebuild the card while a recording is loaded/playing -- that killed
+  // playback and made seeking "restart" (owner 2026-09-27).
+  if([...document.querySelectorAll('#view audio')].some(x=>x.getAttribute('src')||x._recLoading)) return true;
   const a=document.activeElement, v=document.getElementById('view');
   return !!(a && v && v.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
 }
