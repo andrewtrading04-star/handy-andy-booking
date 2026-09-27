@@ -12594,6 +12594,10 @@ async function renderCallAudit(){
       </div>`:`<div style="font-size:12.5px;margin-top:6px;color:var(--mute);">no caller number saved</div>`}
       ${f.notes?`<div style="font-size:13px;color:var(--ink-2);margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
       ${audio}
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end;">
+        <textarea data-onote="${esc(f.id)}" rows="1" maxlength="2000" placeholder="Note to Jiyah..." style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;">${esc(f.owner_note||'')}</textarea>
+        <button type="button" class="rc-btn ghost" data-onote-send="${esc(f.id)}">Send</button>
+      </div>
     </div>`;
   }).join('') || '<div class="empty">Nothing to listen to. All caught up.</div>';
 
@@ -12641,6 +12645,13 @@ async function renderCallAudit(){
     b.disabled=true;
     try{ await api('audit_heard',{ method:'POST', body:{ id:b.dataset.heard }}); b.closest('.au-listen').remove(); toast('Marked as heard'); }
     catch(e){ toast(e.message||'Could not save'); b.disabled=false; }
+  }));
+  view.querySelectorAll('[data-onote-send]').forEach(b=>b.addEventListener('click',async()=>{
+    const ta=view.querySelector(`[data-onote="${b.dataset.onoteSend}"]`);
+    b.disabled=true;
+    try{ await api('audit_owner_note',{ method:'POST', body:{ id:b.dataset.onoteSend, note:ta.value }}); toast(ta.value.trim()?'Note sent to Jiyah':'Note cleared'); }
+    catch(e){ toast(e.message||'Could not save'); }
+    finally{ b.disabled=false; }
   }));
 }
 

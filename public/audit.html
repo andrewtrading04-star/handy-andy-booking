@@ -1355,7 +1355,7 @@ function renderLogTable(){
       '<td>'+caller+'</td>'+
       '<td class="num">'+esc(a.caller_zip||'')+'</td>'+
       '<td>'+esc(svc)+'</td>'+
-      '<td>'+(a.flagged?'<span class="flagpill">&#9888; YES</span>':'<span class="sub">no</span>')+'</td>'+
+      '<td>'+(a.flagged?'<span class="flagpill">&#9888; YES</span>'+(a.owner_note?' <span class="sub" title="'+esc(a.owner_note)+'">&#128172; Andrew replied</span>':''):'<span class="sub">no</span>')+'</td>'+
       '<td style="white-space:nowrap;">'+
         '<button type="button" class="actbtn" data-view="'+a.id+'">View</button> '+
         '<button type="button" class="actbtn" data-edit="'+a.id+'">Edit</button>'+
@@ -1386,6 +1386,7 @@ function openView(id){
       (s!=null?' &middot; score '+scoreHtml(a):'')+
     '</div>'+
     (a.flagged?'<div class="recon gap" style="margin-bottom:10px;">&#9888; Flagged for Andrew to listen to.'+(a.listen_reason?' <b>Why:</b> '+esc(a.listen_reason):'')+'</div>':'')+
+    (a.owner_note?'<div class="recon clear" style="margin-bottom:10px;"><b>&#128172; Andrew replied:</b> '+esc(a.owner_note)+'</div>':'')+
     (a.ratings&&Object.keys(a.ratings).length?'<div style="margin-bottom:10px;">'+Q_RATINGS.filter(([k])=>a.ratings[k]).map(([k,t])=>'<div class="va"><b style="color:#f59e0b;min-width:70px;">'+'★'.repeat(a.ratings[k])+'</b><span>'+esc(t)+'</span></div>').join('')+'</div>':'')+
     (a.complaint?'<div class="recon gap" style="margin-bottom:10px;"><b>Complaint:</b> '+esc(a.complaint)+'</div>':'')+
     ansRows+

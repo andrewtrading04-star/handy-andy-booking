@@ -244,7 +244,7 @@ async function day(req, res, db, auth) {
   }));
 
   const { data: audits } = await db.from('call_audits')
-    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason')
+    .select('id, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at')
     .eq('audit_date', date)
     .order('occurred_at', { ascending: true });
 
@@ -279,7 +279,7 @@ async function week(req, res, db, auth) {
     .gte('audit_date', monday).lte('audit_date', sunday);
 
   const { data: auditRows } = await db.from('call_audits')
-    .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason')
+    .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at')
     .gte('audit_date', monday).lte('audit_date', sunday)
     .order('occurred_at', { ascending: false });
 

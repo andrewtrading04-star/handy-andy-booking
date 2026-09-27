@@ -565,6 +565,7 @@ export default async function handler(req, res) {
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'audit_heard':       return await auditHeard(req, res, db, auth);
+      case 'audit_owner_note':  return await auditOwnerNote(req, res, db, auth);
       case 'call_numbers':      return await callNumbers(req, res, db, auth);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
@@ -9160,6 +9161,18 @@ async function callRecording(req, res, db, auth) {
   const buf = Buffer.from(await upstream.arrayBuffer());
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'private, max-age=3600');
+  // Range support so the player can seek/drag (owner, 2026-09-27).
+  res.setHeader('Accept-Ranges', 'bytes');
+  const m = /^bytes=([0-9]*)-([0-9]*)$/.exec((req.headers.range || '').toString());
+  if (m && buf.length) {
+    let start = m[1] === '' ? Math.max(0, buf.length - Number(m[2])) : Number(m[1]);
+    let end = m[1] !== '' && m[2] !== '' ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
+    if (start > end || start >= buf.length) { res.setHeader('Content-Range', `bytes */${buf.length}`); return res.status(416).end(); }
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${buf.length}`);
+    res.setHeader('Content-Length', String(end - start + 1));
+    return res.status(206).send(buf.subarray(start, end + 1));
+  }
+  res.setHeader('Content-Length', String(buf.length));
   return res.status(200).send(buf);
 }
 
@@ -12114,6 +12127,20 @@ async function auditHeard(req, res, db, auth) {
   return res.status(200).json({ ok: true });
 }
 
+// POST {id, note} -- owner's note back to Jiyah on a flagged call. Shows on
+// her audit log. Empty note clears it.
+async function auditOwnerNote(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const b = req.body || {};
+  const id = (b.id || '').toString();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Bad id' });
+  const note = (b.note || '').toString().trim().slice(0, 2000) || null;
+  const { error } = await db.from('call_audits').update({ owner_note: note, owner_note_at: note ? new Date().toISOString() : null }).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
+}
+
 async function auditReport(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
@@ -12133,7 +12160,7 @@ async function auditReport(req, res, db, auth) {
     db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
       .gte('audit_date', from).lte('audit_date', to),
     db.from('call_audits')
-      .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes, listen_reason, heard_at')
+      .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes, listen_reason, heard_at, owner_note')
       .gte('audit_date', from).lte('audit_date', to)
       .order('occurred_at', { ascending: false }),
   ]);
@@ -12257,7 +12284,7 @@ async function auditReport(req, res, db, auth) {
     for (const r of (recs || [])) if (r.recording_url) withRec.add(r.id);
   }
   const flagged = listenRows.map(a => ({
-    listen_reason: a.listen_reason,
+    listen_reason: a.listen_reason, owner_note: a.owner_note || null,
     call_id: a.call_id || null,
     has_recording: !!(a.call_id && withRec.has(a.call_id)),
     id: a.id,
