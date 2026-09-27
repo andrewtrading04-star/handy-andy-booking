@@ -7051,6 +7051,8 @@ function anaRender(d){
     ['Bounced', t.bounces, 'left on first step'],
     ['ZIP Checks', (t.zipServed+t.zipUnserved), `<span class="bad">${t.zipUnserved} outside area</span>`],
   ];
+  // Owner 2026-09-27: daily sessions + bookings line chart at the very top.
+  html+=`<div class="card section" style="margin-bottom:14px;"><div class="chartbox" style="height:260px;"><canvas id="ana-ch-timeline"></canvas></div></div>`;
   html+=`<div class="grid kpis">`+kpis.map(k=>
     `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
   ).join('')+`</div>`;
@@ -7072,7 +7074,6 @@ function anaRender(d){
   html+=anaDeviceTypeCard(d,brand);
 
   html+=`<div class="grid two section">
-    <div class="card"><h2>Sessions & Bookings by Day</h2><div class="chartbox"><canvas id="ana-ch-timeline"></canvas></div></div>
     <div class="card"><h2>Activity by Hour of Day</h2><div class="chartbox"><canvas id="ana-ch-hour"></canvas></div></div>
   </div>
   <div class="grid two section">
@@ -7248,10 +7249,12 @@ function anaDrawCharts(d){
     type:'line',
     data:{ labels:d.timeline.map(x=>x.date.slice(5)),
       datasets:[
-        { label:'Sessions', data:d.timeline.map(x=>x.sessions), borderColor:brand, backgroundColor:'transparent', tension:0.3 },
-        { label:'Bookings', data:d.timeline.map(x=>x.bookings), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.12)', fill:true, tension:0.3 },
+        { label:'Sessions', data:d.timeline.map(x=>x.sessions), borderColor:brand, backgroundColor:brand, pointRadius:3, tension:0.3, yAxisID:'y' },
+        { label:'Bookings', data:d.timeline.map(x=>x.bookings), borderColor:'#10b981', backgroundColor:'#10b981', pointRadius:3, tension:0.3, yAxisID:'y1' },
       ]},
-    options:{ maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+    options:{ maintainAspectRatio:false, interaction:{ mode:'index', intersect:false },
+      scales:{ y:{ beginAtZero:true, ticks:{ precision:0 }, title:{ display:true, text:'Sessions' } },
+               y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false }, ticks:{ precision:0 }, title:{ display:true, text:'Bookings' } } } }
   });
   const hr=document.getElementById('ana-ch-hour');
   if(hr) anaCharts.hr=new Chart(hr,{
