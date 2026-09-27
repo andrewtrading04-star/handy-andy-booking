@@ -401,6 +401,32 @@ async function handleVoiceWhisper(req, res) {
 //
 // A line with no window configured (the default, and every line before this)
 // returns forward_to unchanged, so nothing that was working changes.
+// Secretary time off (owner 2026-09-27): on a day a secretary marked herself
+// off in My Availability, the lines that ring her handset ring the owner
+// instead, all day. The next day they go back to her automatically.
+const SECRETARY_HANDSETS = { '7207223653': 'handy-andy', '3032190118': 'doms' };
+async function applyTimeOff(db, line) {
+  if (!line) return line;
+  const slug = SECRETARY_HANDSETS[tenDigits(line.forward_to)];
+  const ownerDigits = tenDigits(process.env.OWNER_PHONE_NUMBER || '');
+  const ownerTo = line.after_hours_forward_to || (ownerDigits.length === 10 ? '+1' + ownerDigits : null);
+  if (!slug || !ownerTo) return line;
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: line.hours_timezone || 'America/Chicago' });
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', slug).maybeSingle();
+    if (!biz) return line;
+    const { data: ex } = await db.from('secretary_availability_exceptions')
+      .select('is_available').eq('business_id', biz.id).eq('exception_date', today).maybeSingle();
+    if (ex && ex.is_available === false) {
+      console.log(`[time_off] ${line.phone}: ${slug} secretary off ${today}, ringing owner`);
+      return { ...line, forward_to: ownerTo };
+    }
+  } catch (e) {
+    console.error('[time_off] check failed (keeps normal routing):', e.message);
+  }
+  return line;
+}
+
 function destinationFor(line) {
   if (!line) return null;
   const primary = line.forward_to || null;
@@ -557,7 +583,7 @@ async function handleVoiceInbound(req, res) {
     const { data } = await db.from('tracking_numbers')
       .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled')
       .eq('phone', to).maybeSingle();
-    line = data && data.active ? data : null;
+    line = await applyTimeOff(db, data && data.active ? data : null);
 
     if (from) {
       const { data: b } = await db.from('blocked_numbers').select('id').eq('phone', from).maybeSingle();
@@ -626,7 +652,7 @@ async function handleVoiceGather(req, res) {
     const { data } = await db.from('tracking_numbers')
       .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
       .eq('phone', to).maybeSingle();
-    line = data && data.active ? data : null;
+    line = await applyTimeOff(db, data && data.active ? data : null);
   } catch (e) {
     console.error('[voice_gather] line lookup failed:', e.message);
   }
