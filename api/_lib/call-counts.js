@@ -20,14 +20,23 @@ export async function callDayRows(db, from, to) {
   if (to >= AUTO_COUNT_FROM) {
     const start = from > AUTO_COUNT_FROM ? from : AUTO_COUNT_FROM;
     const { data } = await db.from('calls')
-      .select('occurred_at, grasshopper_number')
+      .select('id, occurred_at, grasshopper_number')
       .eq('kind', 'inbound')
+      // Only calls a person answered: no voicemails, no missed calls (owner 2026-09-27).
+      .eq('answered', true)
       .gte('occurred_at', localDateStartUTC(TZ, start).toISOString())
       .lt('occurred_at', localDateStartUTC(TZ, addDaysStr(to, 1)).toISOString())
       .limit(20000);
+    // ...and not the ones the auditor skipped (voicemail / not a call).
+    const ids = (data || []).map((c) => c.id);
+    const skipped = new Set();
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data: sk } = await db.from('audit_skips').select('call_id').in('call_id', ids.slice(i, i + 150));
+      for (const r of (sk || [])) skipped.add(r.call_id);
+    }
     const agg = {};
     for (const c of (data || [])) {
-      if (!c.grasshopper_number) continue;
+      if (!c.grasshopper_number || skipped.has(c.id)) continue;
       const d = new Date(c.occurred_at).toLocaleDateString('en-CA', { timeZone: TZ });
       const k = d + '|' + c.grasshopper_number;
       agg[k] = (agg[k] || 0) + 1;
