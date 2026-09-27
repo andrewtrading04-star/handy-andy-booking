@@ -42,7 +42,7 @@ import { localDayStartUTC } from './time.js';
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
 // Exact list and order are the owner's (2026-09-24) -- do not reword.
 export const LOST_REASONS = ['Too expensive', 'Went with someone else', 'Just shopping', 'Out of area', "We don't do that", 'No reply after estimate', 'Spam'];
-export const STAGES = ['new', 'talked', 'quoted', 'booked', 'paid', 'lost'];   // 'done' folded into Booked (owner, 2026-09-26)
+export const STAGES = ['new', 'talked', 'quoted', 'booked', 'completed', 'paid', 'lost'];   // 'done' folded into Booked (owner, 2026-09-26)
 
 const TOLL_FREE = '8889159967';          // the notification sender: every brand's automated texts
 // Heather's own phone until 2026-09-18 (she changed numbers). Forwarded calls
@@ -378,7 +378,11 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
       bk: { status: b.status || null, source: b.source || null, scheduledMs: msOf(b.scheduled_at), price: num(b.price), amountPaid: num(b.amount_paid),
         paid, paidMs, completedMs, cancelledMs, tech: (b.technician && b.technician.name) || null,
         estimateId: md.source_estimate_id || null, bookedBy: md.booked_by || null,
-        reviewMs: msOf(b.reviewed_at) ?? msOf(b.review_clicked_at), reviewRating: num(b.review_rating) } });
+        reviewMs: msOf(b.reviewed_at) ?? msOf(b.review_clicked_at), reviewRating: num(b.review_rating),
+        gotReview: !!(b.reviewed_at || num(b.review_rating)),
+        rv: { sms_sent: b.review_sms_sent_at || null, sms_delivered: b.review_sms_delivered_at || null, sms_status: b.review_sms_status || null, sms_clicked: b.review_sms_clicked_at || null,
+          email_sent: b.review_email_sent_at || null, email_count: b.review_email_count || 0, email_delivered: b.review_email_delivered_at || null, email_status: b.review_email_status || null, email_clicked: b.review_email_clicked_at || null,
+          page_opened: b.review_clicked_at || null, call_status: b.review_call_status || null, call_at: b.review_call_at || null, call_by: b.review_call_by || null } } });
   }
 
   for (const a of raw.attempts || []) {
@@ -948,10 +952,11 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     key: c.key,
     // Paid shows in Booked on the board (owner, 2026-09-26); 'paid' stays internal
     // because it closes the card (the next touch opens a new one).
-    stage: st.stage === 'paid' ? 'booked' : st.stage,
+    stage: st.stage === 'paid' || (st.stage === 'booked' && st.doneUnpaid) ? 'completed' : st.stage,
     paid: st.stage === 'paid',
     leak: st.stage === 'talked' && !!st.leak,
     voicemail: c.touches.some((t) => t.type === 'call_in' && t.vm),
+    review: st.booking && st.booking.bk ? { ...st.booking.bk.rv, booking_id: st.booking.id, completed_at: iso(st.booking.bk.completedMs) } : null,
     // Customer reached out and nobody replied (owner 2026-09-27): drives the red banner.
     unanswered: st.callback && nowMs - st.callback.atMs > 30 * MIN
       ? { at: iso(st.callback.atMs), kind: st.callback.type === 'text_in' ? 'text' : st.callback.vm ? 'voicemail' : 'missed', hours: Math.floor((nowMs - st.callback.atMs) / HOUR), mins: Math.floor((nowMs - st.callback.atMs) / MIN) }
@@ -1030,6 +1035,18 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     // Not a lead: this caller already has an active appointment (and this card isn't that booking).
     if (c.phone && activePhones.has(c.phone) && !c.touches.some((t) => t.type === 'booking')) continue;
     if (c.st.stage === 'hidden') continue;
+    // Owner 2026-09-27: Lost is off the board; Completed (done, no review yet)
+    // replaces it for review tracking. Any review removes the card.
+    if (!opts.legacyBoard && c.st.stage === 'lost') continue;
+    const doneJob = !opts.legacyBoard && (c.st.stage === 'paid' || (c.st.stage === 'booked' && c.st.doneUnpaid));
+    if (doneJob) {
+      const b = c.st.booking && c.st.booking.bk;
+      if (!b || b.gotReview) continue;
+      if (nowMs - (b.completedMs ?? b.paidMs ?? 0) > 14 * DAY) continue;
+      if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
+      shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
+      continue;
+    }
     // In range if it started in range OR was booked in range (owner 2026-09-27:
     // a lead from Sep 25 that booked yesterday counts in Yesterday's Booked).
     const inRange = (ms) => ms >= fromMs && ms < toMs;
@@ -1037,6 +1054,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
   }
+  if (opts.legacyBoard) for (const c of shaped) if (c.stage === 'completed') c.stage = 'booked';
   const stages = Object.fromEntries(STAGES.map((s) => [s, 0]));
   const board = new Map();
   let calls = 0, converted = 0, leaks = 0;
@@ -1108,6 +1126,8 @@ const MESSAGE_COLS = 'id, business_id, customer_phone, our_phone, direction, bod
 const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label, email_status';
 const BOOKING_COLS = `id, business_id, customer_id, status, source, scheduled_at, created_at, updated_at, completed_at, paid_at, cancelled_at,
   price, amount_paid, payment_status, notes, customer_notes, metadata, review_rating, reviewed_at, review_clicked_at,
+  review_email_sent_at, review_email_count, review_email_delivered_at, review_email_status, review_email_clicked_at,
+  review_sms_sent_at, review_sms_delivered_at, review_sms_status, review_sms_clicked_at, review_call_status, review_call_at, review_call_by,
   customer:customers ( name, phone ), technician:technicians!technician_id ( name )`;
 const AUDIT_COLS = 'id, call_id, caller_phone, occurred_at, handled_by, answers, ratings, flagged, listen_reason, complaint, business_id, direction';
 
@@ -1171,7 +1191,7 @@ export async function pipelineHandler(req, res, db, auth, body) {
     const raw = await loadPipelineRaw(db, { nowMs, withAudits: isOwner });
     raw.history = await loadHistory(db, phonesSince(raw, rangeStartMs(range, nowMs)));
     return res.status(200).json(buildPipeline(raw, nowMs, {
-      isOwner, allowed: allowedSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(),
+      isOwner, allowed: allowedSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(), legacyBoard: req.query.board === 'legacy',
     }));
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });

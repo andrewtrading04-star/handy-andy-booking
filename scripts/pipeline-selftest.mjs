@@ -58,7 +58,7 @@ const text = (o = {}) => ({ id: uid(), business_id: 'b-ha', customer_phone: CUST
   sent_by: null, status: 'received', created_at: ago(2 * H), ...o });
 
 const OWNER = { isOwner: true, allowed: null, viewerName: 'Andrew', range: '30' };
-const board = (r, opts = {}) => buildPipeline(r, NOW, { ...OWNER, ...opts });
+const board = (r, opts = {}) => buildPipeline(r, NOW, { ...OWNER, legacyBoard: true, ...opts });
 function one(r, opts) {
   const b = board(r, opts);
   assert.equal(b.cards.length, 1, `expected 1 card, got ${b.cards.length}: ${JSON.stringify(b.cards.map((c) => [c.stage, c.opened_at]))}`);
@@ -408,7 +408,7 @@ await check('phone normalising and audit score', () => {
 
 await check('nothing before the floor is shown', () => {
   const r = raw({ calls: [inbound({ occurred_at: '2026-09-22T14:00:00Z' })] });
-  assert.equal(buildPipeline(r, Date.parse('2026-09-23T12:00:00Z'), { ...OWNER, range: '30' }).cards.length, 0);
+  assert.equal(buildPipeline(r, Date.parse('2026-09-23T12:00:00Z'), { ...OWNER, legacyBoard: true, range: '30' }).cards.length, 0);
 });
 
 // ── Review fixes (2026-09-24) ───────────────────────────────────────────────
@@ -592,7 +592,7 @@ function seedDb(missingCols = []) {
   return { db, ha, dom, bk };
 }
 const post = async (db, auth, body) => { const r = res(); await pipelineHandler({ method: 'POST', query: {} }, r, db, auth, body); return r; };
-const get = async (db, auth, query = {}) => { const r = res(); await pipelineHandler({ method: 'GET', query: { range: '7', ...query } }, r, db, auth, {}); return r; };
+const get = async (db, auth, query = {}) => { const r = res(); await pipelineHandler({ method: 'GET', query: { range: '7', board: 'legacy', ...query } }, r, db, auth, {}); return r; };
 
 await check('GET through the handler: scoping by login', async () => {
   const { db, ha } = seedDb();

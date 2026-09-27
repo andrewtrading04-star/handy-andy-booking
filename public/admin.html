@@ -540,7 +540,7 @@
   .plv .st-new{--st:#93c5fd;}   /* not red: red means very bad (owner, 2026-09-26) */
   .plv-vm{float:right;font-style:normal;font-size:10.5px;font-weight:700;background:rgba(255,255,255,.75);border-radius:999px;padding:1px 7px;margin-left:4px;}
   .plv-vm2{display:inline!important;font-size:12px!important;color:#1d4ed8;} .plv .st-talked{--st:#fbbf24;} .plv .st-quoted{--st:#a3d65c;} .plv .st-booked{--st:#22d3ee;}
-  .plv .st-done{--st:#38bdf8;} .plv .st-paid{--st:#a78bfa;} .plv .st-lost{--st:#94a3b8;}
+  .plv .st-done{--st:#38bdf8;} .plv .st-paid{--st:#a78bfa;} .plv .st-lost{--st:#94a3b8;} .plv .st-completed{--st:#a78bfa;}
   .plv-total{text-align:center;font-size:26px;font-weight:800;margin:6px 0 10px;} .plv-total span{font-size:15px;font-weight:600;color:var(--mute);}
   .plv-chev{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;}
   .plv-chev-i{flex:1 0 120px;display:flex;flex-direction:column;align-items:center;gap:2px;border:none;cursor:pointer;font:inherit;color:#0f172a;
@@ -10253,7 +10253,8 @@ function startMyDayNudge(){
 // card) re-runs navTo('pipeline'), and renderPipeline() repaints the cached
 // board straight back with the same stage, open card, pending "Did you talk
 // to them?" and half-picked Lost reason.
-const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['lost','Lost']];
+// Lost replaced by Completed = done jobs waiting on a review (owner 2026-09-27).
+const PL_STAGES=[['new','New lead'],['talked','Talked to'],['quoted','Quoted'],['booked','Booked'],['completed','Completed']];
 // Exact list, owner rule -- do not change. The server sends its own copy
 // (lost_reasons); this is only the fallback if a payload ever lacks it.
 const PL_LOST_REASONS=['Too expensive','Went with someone else','Just shopping','Out of area',"We don't do that",'No reply after estimate','Spam'];
@@ -10432,11 +10433,11 @@ function paintPipeline(){
       return `<div class="pl-bar"><div class="pl-bar-name">${esc(r.name||'—')}</div><div class="pl-bar-track"><div class="pl-bar-fill${cls}" style="width:${Math.max(0,Math.min(100,p))}%"></div></div><div class="pl-bar-num">${cv} of ${t} · ${p}%</div></div>`;
     }).join('')}</div>`:'';
   const val=k=>cards.filter(c=>c.stage===k).reduce((t,c)=>t+(Number(c.amount)||0),0);
-  const openKeys=PL_STAGES.map(x=>x[0]).filter(k=>k!=='lost');
-  const liveCards=cards.filter(c=>c.stage!=='lost');
+  const openKeys=PL_STAGES.map(x=>x[0]).filter(k=>k!=='lost'&&k!=='completed');
+  const liveCards=cards.filter(c=>c.stage!=='lost'&&c.stage!=='completed');
   const liveVal=liveCards.reduce((t,c)=>t+(Number(c.amount)||0),0);
   const paidCards=cards.filter(c=>c.paid), wonVal=paidCards.reduce((t,c)=>t+(Number(c.amount)||0),0), wonN=paidCards.length;
-  const bookedPlus=count('booked'), lostN=count('lost');
+  const bookedPlus=count('booked')+count('completed'), lostN=count('lost');
   const winRatio=(bookedPlus+lostN)?Math.round(100*bookedPlus/(bookedPlus+lostN)):0;
   const avg=wonN?Math.round(wonVal/wonN):0;
   const usd=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
@@ -10636,7 +10637,7 @@ function plDetailHtml(c){
          ${(e.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px solid var(--line2);"><span>${esc(it.name)}${it.qty>1?' × '+it.qty:''}</span><span>${plMoney(it.qty*it.price)||'$0'}</span></div>`).join('')||'<div style="color:var(--mute);">No line items.</div>'}
          ${plMoney(e.total)?`<div style="display:flex;justify-content:space-between;font-weight:800;padding-top:5px;border-top:1px solid var(--line);"><span>Total</span><span>${plMoney(e.total)}</span></div>`:''}
        </div>`:''}
-       <div class="plt-steps">${stepHtml}</div>
+       ${c.stage==='completed'?plReviewHtml(c):`<div class="plt-steps">${stepHtml}</div>`}
        ${plMediaHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
@@ -10684,6 +10685,26 @@ function plAudio(t){
   return t&&t.rec&&t.call_id?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;">&#9654; Play recording</button>`:'';
 }
 // Overview: every voicemail, recorded call and text on this card, newest first.
+// Completed = review tracking (owner 2026-09-27): every review touch, plus buttons.
+function plReviewHtml(c){
+  const r=c.review||{}, W=iso=>iso?esc(plWhen(iso,c.tz)):'';
+  const row=(label,on,detail)=>`<div class="plt-step${on?' on':''}"><span class="plt-dot">${on?'✓':''}</span><span class="plt-lab">${label}${detail?`<small>${detail}</small>`:''}</span></div>`;
+  const st=x=>x?` · ${esc(x)}`:'';
+  return `<div class="plt-steps">
+    ${row('Job completed', !!r.completed_at, W(r.completed_at))}
+    ${row('Review text sent', !!r.sms_sent, r.sms_sent?W(r.sms_sent)+st(r.sms_status):'Not sent')}
+    ${row('Review text delivered', !!r.sms_delivered, r.sms_delivered?W(r.sms_delivered):'')}
+    ${row('Review email sent', !!r.email_sent, r.email_sent?W(r.email_sent)+(r.email_count>1?` · sent ${r.email_count} times`:'')+st(r.email_status):'Not sent')}
+    ${row('Review email delivered', !!r.email_delivered, r.email_delivered?W(r.email_delivered):'')}
+    ${row('Customer opened the review link', !!(r.page_opened||r.sms_clicked||r.email_clicked), W(r.page_opened||r.sms_clicked||r.email_clicked))}
+    ${row('Review call', !!r.call_status, r.call_status?esc(r.call_status)+(r.call_by?' · '+esc(r.call_by):'')+' · '+W(r.call_at):'Not called yet')}
+    ${row('Review left', false, 'Waiting')}
+  </div>
+  <div class="pl-acts" style="margin-bottom:12px;">
+    <button type="button" class="pl-btn" data-pl="rv-email">Send review email</button>
+    <button type="button" class="pl-btn" data-pl="rv-sms">Send review text</button>
+  </div>`;
+}
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
   if(!tl.length) return '';
@@ -10789,6 +10810,16 @@ function plClick(e){
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
+    case 'rv-email': case 'rv-sms': {
+      const r=c.review||{}; if(!r.booking_id) return;
+      const ch=act==='rv-sms'?'sms':'email';
+      if(!confirm(`Send the review ${ch==='sms'?'text':'email'} to this customer now?`)) return;
+      b.disabled=true;
+      api('review_resend',{ method:'POST', body:{ id:r.booking_id, channel:ch, business:(c.business&&c.business.slug)||undefined }})
+        .then(()=>{ toast(ch==='sms'?'Review text sent':'Review email sent'); plLoad(true); })
+        .catch(e=>{ toast(e.message||'Could not send'); b.disabled=false; });
+      return;
+    }
     // Open estimate shows it right in the card (owner 2026-09-27).
     case 'est': { _plEstOpen=true; _plTab='ov'; paintPipeline(); return; }
     case 'est_full': {
