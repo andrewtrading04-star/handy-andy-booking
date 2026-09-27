@@ -10611,8 +10611,8 @@ function plDetailHtml(c){
   ];
   if(e.sent_at){
     const age=Date.now()-new Date(e.sent_at).getTime();
-    info.push(['Estimate age', `<span class="${age>=2*864e5?'danger':''}">${esc(plAgo(e.sent_at))}${e.opened?' · opened':' · not opened'}</span>`]);
-    info.push(['3-hour follow-up email', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:(age>4*36e5?'<span class="danger">Not sent</span>':'Not yet (goes at 3h)')]);
+    info.push(['Estimate age', `${esc(plAgo(e.sent_at))}${e.opened?' · opened':' · not opened'}`]);
+    info.push(['3-hour follow-up email', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:(age>4*36e5?'Not sent':'Not yet (goes at 3h)')]);
   }
   if(Number(c.tries)>0) info.push(['Callback tries', `${Number(c.tries)} with no answer`]);
   if(pj||pc) info.push(['History', `${pj?`Returning · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent):''}`:'Asked before'}`]);

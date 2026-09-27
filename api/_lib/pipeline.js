@@ -784,7 +784,8 @@ function nextFor(st, card, nowMs) {
       // Owner 2026-09-27: age up front, opened or not, and the 3-hour follow-up email.
       const fu = e.couponMs ? 'follow-up email sent' : age > 4 * HOUR ? 'NO follow-up email' : 'follow-up email due at 3h';
       const text = `Sent ${fmtAgo(age)} ago · ${e.openedMs ? 'opened' : 'not opened'} · ${fu}`;
-      const tone = age >= 2 * DAY || (!e.couponMs && age > 4 * HOUR) ? 'danger' : age >= 3 * HOUR ? 'warn' : 'ok';
+      // Red is only for emergencies like a bounced email (owner 2026-09-27).
+      const tone = age >= 3 * HOUR || (!e.couponMs && age > 4 * HOUR) ? 'warn' : 'ok';
       return { text, tone };
     }
     case 'talked': {
