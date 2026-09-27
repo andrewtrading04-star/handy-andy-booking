@@ -12541,7 +12541,7 @@ async function renderCallAudit(){
         <div style="font-weight:800;font-size:24px;color:${c};">${p.pct==null?'&mdash;':p.pct+'%'}</div>
       </div>
       <div style="font-size:12.5px;color:var(--mute);margin:2px 0 10px;">
-        ${p.audited} graded &middot; ${p.no} missed &middot; ${p.flagged||0} flagged</div>
+        ${p.audited} graded &middot; ${p.no} missed</div>
       ${misses||'<div style="font-size:12.5px;color:var(--ch-accent);padding-top:6px;border-top:1px solid var(--line2);">Nothing missed in this range.</div>'}
     </div>`;
   }).join('') || '<div class="empty">No calls graded yet.</div>';
@@ -12579,20 +12579,23 @@ async function renderCallAudit(){
     const dateLabel=new Date(f.audit_date+'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric'});
     const h12=f.time_local?(()=>{const [hh,mm]=f.time_local.split(':').map(Number);return ((hh+11)%12)+1+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM');})():null;
     const t=dateLabel+(h12?', '+h12+' CT':'');
-    return `<div style="border:1px solid #f3c2c2;background:#fdecec;border-radius:9px;padding:10px 12px;margin-bottom:7px;">
+    const audio=f.has_recording?`<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:8px;" src="${API}?action=call_recording&id=${encodeURIComponent(f.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+    return `<div class="au-listen" style="border:1px solid var(--line);background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px;">${esc(f.listen_reason||'')}</div>
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:13px;">
         <b>${esc(f.handled_by||'Unknown')}</b>
         <span style="color:var(--mute);">${esc(t)}</span>
         <span style="font-family:ui-monospace,Menlo,monospace;color:var(--mute);">${esc(prettyNum(f.grasshopper_number))}</span>
-        ${f.pct!=null?`<span style="margin-left:auto;font-weight:800;color:var(--ch-danger);">${f.pct}%</span>`:''}
+        <button type="button" class="rc-btn ghost" data-heard="${esc(f.id)}" style="margin-left:auto;">Heard it</button>
       </div>
       ${(f.caller_name||f.caller_phone)?`<div style="font-size:12.5px;margin-top:6px;">
         ${f.caller_name?`<span style="font-weight:700;">${esc(f.caller_name)}</span> `:''}
         ${f.caller_phone?`<a href="tel:${esc(f.caller_phone)}" style="color:var(--accent);text-decoration:none;font-family:ui-monospace,Menlo,monospace;">📞 ${esc(f.caller_phone)}</a>`:'<span style="color:var(--mute);">no caller number saved</span>'}
       </div>`:`<div style="font-size:12.5px;margin-top:6px;color:var(--mute);">no caller number saved</div>`}
-      ${f.notes?`<div style="font-size:13px;color:#7c2d12;margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
+      ${f.notes?`<div style="font-size:13px;color:var(--ink-2);margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
+      ${audio}
     </div>`;
-  }).join('') || '<div class="empty">Nothing flagged.</div>';
+  }).join('') || '<div class="empty">Nothing to listen to. All caught up.</div>';
 
   const missing=(d.missing_days||[]).length;
   const flaggedN=(d.flagged||[]).length;
@@ -12612,10 +12615,10 @@ async function renderCallAudit(){
       ${tile('Script score', overallPct==null?'n/a':overallPct+'%', 'across '+(d.audited||0)+' graded '+((d.audited||0)===1?'call':'calls'), scoreColor(overallPct))}
       ${tile('Calls came in', String(v.counted||0), missing?missing+' day'+(missing===1?'':'s')+' not audited':'every day audited')}
       ${tile('Off script', String(v.off_script||0), offPct+'% of all calls', offColor)}
-      ${tile('Flagged for you', String(flaggedN), flaggedN?'worth a listen':'nothing waiting', flaggedN?'var(--ch-danger)':'var(--ch-accent)', flaggedN>0)}
+      ${tile('Listen to these', String(flaggedN), flaggedN?'Jiyah asked you to hear':'all caught up', flaggedN?'var(--ink)':'var(--ch-accent)')}
     </div>
 
-    <div class="rc-count">Calls flagged for you to hear</div>
+    <div class="rc-count">Listen to these</div>
     <div style="margin-bottom:22px;">${flagRows}</div>
 
     <div class="rc-count">How each secretary is doing</div>
@@ -12634,6 +12637,11 @@ async function renderCallAudit(){
     <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:22px;">${lineRows}</div>
   </div>`;
   view.querySelectorAll('[data-cau]').forEach(b=>b.addEventListener('click',()=>{ _cauRange=b.dataset.cau; renderCallAudit(); }));
+  view.querySelectorAll('[data-heard]').forEach(b=>b.addEventListener('click',async()=>{
+    b.disabled=true;
+    try{ await api('audit_heard',{ method:'POST', body:{ id:b.dataset.heard }}); b.closest('.au-listen').remove(); toast('Marked as heard'); }
+    catch(e){ toast(e.message||'Could not save'); b.disabled=false; }
+  }));
 }
 
 // Every tracking number across the whole portfolio, which business/website it

@@ -634,6 +634,7 @@
           <input type="checkbox" id="fFlag" style="width:auto;">
           <span style="font-size:13.5px;font-weight:700;">Flag this call for Andrew to listen to</span>
         </label>
+        <input type="text" id="fWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">
         <textarea id="fNotes" rows="2" placeholder="Notes" style="margin-top:9px;"></textarea>
       </div>
 
@@ -1478,7 +1479,7 @@ function openForm(a){
     $('fCall').value=a.call_id||'';
     $('fDir').value=a.direction||'incoming';
     $('fWho').value=a.handled_by||'';
-    $('fFlag').checked=!!a.flagged;
+    $('fFlag').checked=!!a.flagged; $('fWhy').value=a.listen_reason||''; $('fWhy').hidden=!a.flagged;
     $('fSvc').value=a.service||'TV Mounting';
     $('fNotes').value=a.notes||'';
     // time_local is the trustworthy value (see api/_lib/time.js). Rows saved
@@ -1491,7 +1492,7 @@ function openForm(a){
     $('fCallerZip').value=a.caller_zip||'';
   }else{
     $('fCall').value=''; $('fDir').value='incoming'; $('fWho').value=''; $('fSvc').value='TV Mounting';
-    $('fFlag').checked=false; $('fNotes').value=''; $('fTime').value='';
+    $('fFlag').checked=false; $('fWhy').value=''; $('fWhy').hidden=true; $('fNotes').value=''; $('fTime').value='';
     $('fCallerPhone').value=''; $('fCallerName').value=''; $('fCallerZip').value='';
   }
   $('formErr').textContent='';
@@ -1593,8 +1594,10 @@ $('saveDay').onclick=async()=>{
 // INSERT branch of audit_save twice, creating the duplicate row she then
 // has to find and delete. Disabling it removes the ability to double-tap at
 // all, rather than relying on catching the duplicate after the fact.
+$('fFlag').onchange=()=>{ $('fWhy').hidden=!$('fFlag').checked; if($('fFlag').checked) $('fWhy').focus(); };
 $('saveAudit').onclick=async()=>{
   $('formErr').textContent='';
+  if($('fFlag').checked && !$('fWhy').value.trim()){ $('formErr').textContent='Say why Andrew should listen.'; $('fWhy').focus(); return; }
   if($('fFlag').checked && !$('fCallerPhone').value.trim()){
     $('formErr').textContent="Flagging a call needs the caller's phone number, so it can be found in Grasshopper later.";
     return;
@@ -1619,7 +1622,7 @@ $('saveAudit').onclick=async()=>{
     caller_phone:$('fCallerPhone').value.trim(),
     caller_name:$('fCallerName').value.trim(),
     caller_zip:z.value,
-    answers:visibleAnswers(), flagged:$('fFlag').checked, notes:$('fNotes').value,
+    answers:visibleAnswers(), flagged:$('fFlag').checked, listen_reason:$('fWhy').value, notes:$('fNotes').value,
   };
   const btn=$('saveAudit'), prevText=btn.textContent;
   btn.disabled=true; btn.textContent='Saving...';

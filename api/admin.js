@@ -564,6 +564,7 @@ export default async function handler(req, res) {
       case 'call_event':        return await callEvent(req, res, db, auth, body);
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
+      case 'audit_heard':       return await auditHeard(req, res, db, auth);
       case 'call_numbers':      return await callNumbers(req, res, db, auth);
       case 'my_call_performance': return await myCallPerformance(req, res, db, auth);
       case 'call_day_detail':   return await callDayDetail(req, res, db, auth);
@@ -12102,6 +12103,17 @@ async function callEvent(req, res, db, auth, body) {
 // grasshopper_number), so counted-minus-scripted is the number of calls handled
 // without opening the script at all. That is a bigger finding than any single
 // question's score, which is why it leads.
+// POST {id} -- owner marks a flagged call as heard; it leaves his list.
+async function auditHeard(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const id = ((req.body || {}).id || '').toString();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Bad id' });
+  const { error } = await db.from('call_audits').update({ heard_at: new Date().toISOString() }).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
+}
+
 async function auditReport(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
 
@@ -12121,7 +12133,7 @@ async function auditReport(req, res, db, auth) {
     db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
       .gte('audit_date', from).lte('audit_date', to),
     db.from('call_audits')
-      .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes')
+      .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes, listen_reason, heard_at')
       .gte('audit_date', from).lte('audit_date', to)
       .order('occurred_at', { ascending: false }),
   ]);
@@ -12234,7 +12246,20 @@ async function auditReport(req, res, db, auth) {
   // question, since a 50% failure over 20 calls matters more than over 2.
   const questionsOut = rankQuestions(questions);
 
-  const flagged = (audits || []).filter(a => a.flagged).slice(0, 25).map(a => ({
+  // Owner redesign 2026-09-27: only real "listen to this" requests -- flagged
+  // WITH a reason and not yet marked heard. Old reason-less flags (the old
+  // checkbox, used for small misses) stay in the data but off this list.
+  const listenRows = (audits || []).filter(a => a.flagged && a.listen_reason && !a.heard_at).slice(0, 25);
+  const recIds = listenRows.map(a => a.call_id).filter(Boolean);
+  const withRec = new Set();
+  if (recIds.length) {
+    const { data: recs } = await db.from('calls').select('id, recording_url').in('id', recIds);
+    for (const r of (recs || [])) if (r.recording_url) withRec.add(r.id);
+  }
+  const flagged = listenRows.map(a => ({
+    listen_reason: a.listen_reason,
+    call_id: a.call_id || null,
+    has_recording: !!(a.call_id && withRec.has(a.call_id)),
     id: a.id,
     audit_date: a.audit_date,
     occurred_at: a.occurred_at,

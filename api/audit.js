@@ -403,6 +403,10 @@ async function auditSave(req, res, db, auth, body) {
   // Grasshopper. Without the caller's number he has nothing to search on --
   // the whole point of flagging is lost -- so it's required at exactly the
   // moment it's needed, not on every call.
+  // Owner rule 2026-09-27: a flag must say why he should listen.
+  if (flagged && !(body.listen_reason || '').toString().trim()) {
+    return res.status(400).json({ error: 'Say why Andrew should listen to this call.' });
+  }
   if (flagged && !callerPhone) {
     return res.status(400).json({ error: "Flagging a call needs the caller's phone number, so it can be found in Grasshopper later." });
   }
@@ -457,7 +461,9 @@ async function auditSave(req, res, db, auth, body) {
   // address an arbitrary row, since every row in this table belongs to the
   // auditor anyway and the table holds nothing else.
   // The older one-page form doesn't send the queue extras; don't wipe them.
-  if (!('ratings' in body)) { delete row.ratings; delete row.complaint; delete row.listen_reason; }
+  if (!('ratings' in body)) { delete row.ratings; delete row.complaint; }
+  if (!('listen_reason' in body)) delete row.listen_reason;
+  if (!flagged) row.heard_at = null;
   if (body.id) {
     const { error } = await db.from('call_audits').update(row).eq('id', body.id);
     if (error) return res.status(500).json({ error: error.message });
