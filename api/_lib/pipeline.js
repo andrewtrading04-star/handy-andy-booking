@@ -72,7 +72,7 @@ const CARD_CAP = 600;
 const TIMELINE_CAP = 40;
 const AUTO_TEXT_OTHER_CAP = 3;           // on-the-way / review / auto-ack texts shown per card
 const CHICAGO = 'America/Chicago';       // "today" on the board (owner, 2026-09-24)
-const RANGE_DAYS = { today: 0, 7: 6, 30: 29 };
+const RANGE_DAYS = { today: 0, yesterday: 1, 7: 6, 30: 29 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CARD_KEY = /^c_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TEST_NAME = /\(ignore\)|e2e test/i;
@@ -686,6 +686,10 @@ export function rangeStartMs(range, nowMs = Date.now()) {
   const back = RANGE_DAYS[String(range)] ?? RANGE_DAYS[7];
   return Math.max(msOf(PIPELINE_FLOOR), localDayStartUTC(CHICAGO, -back, new Date(nowMs)).getTime());
 }
+// 'yesterday' stops at the start of today; every other range runs to now.
+export function rangeEndMs(range, nowMs = Date.now()) {
+  return String(range) === 'yesterday' ? localDayStartUTC(CHICAGO, 0, new Date(nowMs)).getTime() : Infinity;
+}
 function normRange(r) { const s = String(r == null ? '' : r); return Object.prototype.hasOwnProperty.call(RANGE_DAYS, s) ? s : '7'; }
 
 // The tracking line to call/text from: the latest real line on the card.
@@ -1000,6 +1004,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
   const allowed = opts.allowed === undefined ? null : opts.allowed;
   const range = normRange(opts.range);
   const fromMs = rangeStartMs(range, nowMs);
+  const toMs = rangeEndMs(range, nowMs);
   const brand = String(opts.business || 'all');
   const markBy = new Map((raw.marks || []).map((m) => [m.card_key, m]));
   const hist = historyIndex(raw.history, ctx);
@@ -1007,7 +1012,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
 
   let shaped = [];
   for (const c of cards) {
-    if (c.st.stage === 'hidden' || c.openedMs < fromMs) continue;
+    if (c.st.stage === 'hidden' || c.openedMs < fromMs || c.openedMs >= toMs) continue;
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
   }

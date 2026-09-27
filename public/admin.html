@@ -10267,7 +10267,7 @@ const PL_TONES=['danger','warn','ok','mute'];
 const PL_TL_ICON={phone:'phone',call:'phone',missed:'phone',attempt:'phone',callout:'phone',text:'messages',sms:'messages',auto:'messages',estimate:'estimate',web:'webanalytics',booking:'schedule',done:'schedule',paid:'card',lost:'ban',cancel:'ban',reopen:'pipeline',audit:'star',note:'note',script:'note'};
 const PL_ALERT='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 15h-2v-2h2v2zm0-4h-2V9h2v4z"/></svg>';
 let _pl=null, _plErr=null, _plLoading=false, _plReq=0, _plDirty=false;
-let _plRange='7', _plBiz='all', _plStage=null, _plOpen=null;
+let _plRange='yesterday', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
 let _plScrollTo=null;
 let _plTab='ov';   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
@@ -10410,10 +10410,10 @@ function paintPipeline(){
   const m=d.metrics||{};
   const calls=Number(m.calls)||0, conv=Number(m.converted)||0, leakN=Number(m.leaks)||0;
   const pct=calls?Math.round(100*conv/calls):0;
-  const rangeName=({today:'today','7':'last 7 days','30':'last 30 days'})[_plRange]||'';
+  const rangeName=({today:'today',yesterday:'yesterday','7':'last 7 days'})[_plRange]||'';
   const upd=_plLoading?'Updating…':_plErr?'Could not refresh: '+_plErr:(d.generated_at?'Updated '+(plAgo(d.generated_at)==='0m'?'just now':plAgo(d.generated_at)+' ago'):'');
   const opt=(v,l,cur)=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`;
-  const rangeSel=`<select id="plRange" aria-label="Date range">${[['today','Today'],['7','7 days'],['30','30 days']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
+  const rangeSel=`<select id="plRange" aria-label="Date range">${[['today','Today'],['yesterday','Yesterday'],['7','Last 7 days']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
   // Brand filter: owner only (a secretary's board is already scoped to her
   // brands on the server). Families = Dom's + its lead-gen sites, and Handy
   // Andy + everything else, the same split the cards are grouped by.
