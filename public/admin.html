@@ -21071,9 +21071,8 @@ async function renderCallWiz(){
         <input class="search" id="cwPhone" style="margin:0;" placeholder="Phone" inputmode="tel" value="${esc(draft.estimateContact.phone)}">
         <input class="search" id="cwEmail" style="margin:0;" placeholder="Email" value="${esc(draft.estimateContact.email)}">
       </div>
-      <div style="font-size:12px;color:var(--mute);margin-bottom:10px;"><b>Text is best.</b> Ask every caller for a mobile number to text the estimate to. An email is a nice extra. One is enough to send.</div>
-      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name (optional)" value="${esc(draft.estimateContact.name)}">
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="cwEstSmsConsent"${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'} style="cursor:pointer;width:16px;height:16px;flex-shrink:0;margin-top:1px;"><span>${TEXTS_ON_LABEL}</span></label>
+      <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name" value="${esc(draft.estimateContact.name)}">
+      <input type="checkbox" id="cwEstSmsConsent" hidden${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'}>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
