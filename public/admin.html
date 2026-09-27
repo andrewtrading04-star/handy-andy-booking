@@ -10272,7 +10272,7 @@ let _plRange='yesterday', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
 let _plScrollTo=null;
 let _plTab='ov';
-let _plBookedOpen=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
+let _plBookedOpen=false, _plLeakOnly=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10445,7 +10445,7 @@ function paintPipeline(){
   const kpis=`<div class="plv-kpis">
     ${kpi('Calls',calls,esc(rangeName))}
     ${kpi('Booked or estimate',pct+'%',conv+' of '+calls)}
-    ${leakN>0?`<button type="button" class="plv-kpi bad" data-pl="leaks"><span>Leaks</span><b>${leakN}</b><small>tap to see</small></button>`:kpi('Leaks','0','none right now')}
+    ${leakN>0?`<button type="button" class="plv-kpi bad" data-pl="leaks" style="${_plLeakOnly?'outline:2px solid var(--ch-danger);':''}"><span>Leaks</span><b>${leakN}</b><small>${_plLeakOnly?'showing only leaks · tap to show all':'tap to show only leaks'}</small></button>`:kpi('Leaks','0','none right now')}
     ${kpi('Won',usd(wonVal),wonN+' job'+(wonN===1?'':'s'))}
     ${kpi('Win ratio',winRatio+'%','booked vs lost')}
     ${kpi('Avg job',avg?usd(avg):'—','paid jobs')}
@@ -10460,7 +10460,7 @@ function paintPipeline(){
       return `${step}<div class="plv-fun-row"><div class="plv-fun-bar st-${k}" style="width:${w}%">${reached[i]}</div><span class="plv-fun-l">${esc(plStageLabel(k))}</span></div>`;
     }).join('')}</div>`;
   const colHtml=([k,l])=>{
-    const list=cards.filter(c=>c.stage===k);
+    const list=cards.filter(c=>c.stage===k&&(!_plLeakOnly||c.leak));
     // Booked is the goal -- collapsed to a thin column by default (owner 2026-09-27).
     if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}" id="plcol-${k}">
       <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span></div>
@@ -10716,9 +10716,12 @@ function plClick(e){
   if(act==='bktoggle'){ _plBookedOpen=!_plBookedOpen; paintPipeline(); return; }
   if(act==='tab'){ _plTab=b.dataset.tab||'ov'; paintPipeline(); return; }
   if(act==='leaks'){
+    // Owner 2026-09-27: tapping Leaks filters the board to just the leaks.
+    _plLeakOnly=!_plLeakOnly;
     const cards=(_pl&&Array.isArray(_pl.cards))?_pl.cards:[];
     const s=PL_STAGES.map(x=>x[0]).find(k=>cards.some(c=>c&&c.stage===k&&c.leak));
-    if(s){ _plStage=s; _plScrollTo=s; paintPipeline(); }
+    if(_plLeakOnly&&s){ _plStage=s; _plScrollTo=s; }
+    paintPipeline();
     return;
   }
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
