@@ -10633,8 +10633,19 @@ function plTimelineHtml(c){
   }).join('')}</div>`;
 }
 // Recording / voicemail player for a timeline item (owner, 2026-09-27).
+// Recordings download whole before playing (owner 2026-09-27: streamed
+// playback restarted from 0 when he dragged ahead). First tap loads + plays.
+document.addEventListener('pointerdown',async e=>{
+  const a=e.target&&e.target.closest&&e.target.closest('audio[data-rec-src]');
+  if(!a||a.getAttribute('src')||a._recLoading) return;
+  a._recLoading=true;
+  try{
+    const r=await fetch(a.dataset.recSrc); if(!r.ok) throw new Error('Could not load the recording');
+    a.src=URL.createObjectURL(await r.blob()); a.play().catch(()=>{});
+  }catch(err){ toast(err.message||'Could not load the recording'); a._recLoading=false; }
+},true);
 function plAudio(t){
-  return t&&t.rec&&t.call_id?`<audio controls preload="none" style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;" src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+  return t&&t.rec&&t.call_id?`<audio controls preload="none" style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
 }
 // Overview: every voicemail, recorded call and text on this card, newest first.
 function plMediaHtml(c){
@@ -12616,7 +12627,7 @@ async function renderCallAudit(){
     const dateLabel=new Date(f.audit_date+'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric'});
     const h12=f.time_local?(()=>{const [hh,mm]=f.time_local.split(':').map(Number);return ((hh+11)%12)+1+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM');})():null;
     const t=dateLabel+(h12?', '+h12+' CT':'');
-    const audio=f.has_recording?`<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:8px;" src="${API}?action=call_recording&id=${encodeURIComponent(f.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+    const audio=f.has_recording?`<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:8px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(f.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
     return `<div class="au-listen" style="border:1px solid var(--line);background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:6px;">${esc(f.listen_reason||'')}</div>
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:13px;">
@@ -13425,7 +13436,7 @@ function callEarlierRow(r){
   const tz=r.tracking_label?shortTrackingLabel(r.tracking_label):'';
   const line=[r.business?.name, tz?`${tz} line`:null].filter(Boolean).map(esc).join(' · ');
   const audio=r.recording_url
-    ? `<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+    ? `<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`:'';
   const tx=r.transcript?txView(r):'';
   return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
     <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
@@ -13514,7 +13525,7 @@ function callCard(r,handled,g,v2){
   const audio=r.recording_url
     ? `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;max-width:420px;">
          <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
-         <audio controls preload="none" style="width:100%;height:34px;display:block;" src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>
+         <audio controls preload="none" style="width:100%;height:34px;display:block;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>
        </div>`
     : '';
 

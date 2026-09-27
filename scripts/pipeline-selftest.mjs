@@ -532,6 +532,8 @@ function fakeDb(seed, missingCols = []) {
     select(cols = '*') { if (this.op === 'select') this.cols = cols; return this; }
     eq(c, v) { this.f.push((r) => r[c] === v); return this; }
     neq(c, v) { this.f.push((r) => r[c] !== v); return this; }
+    is(c, v) { this.f.push((r) => (r[c] ?? null) === v); return this; }
+    not(c, op, v) { const vs = String(v).replace(/[()]/g, '').split(','); this.f.push((r) => !vs.includes(r[c])); return this; }
     in(c, vs) { this.f.push((r) => vs.includes(r[c])); return this; }
     gte(c, v) { this.f.push((r) => r[c] != null && cmp(r[c], v) >= 0); return this; }
     order(c, opt = {}) { this.o.push([c, opt.ascending !== false]); return this; }

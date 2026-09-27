@@ -1013,8 +1013,11 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
   const hist = historyIndex(raw.history, ctx);
   const auditsBy = isOwner ? attachAudits(raw.audits, cards) : new Map();
 
+  const activePhones = new Set((raw.activeBookings || []).map((b) => phone10(b.customer && b.customer.phone)).filter(Boolean));
   let shaped = [];
   for (const c of cards) {
+    // Not a lead: this caller already has an active appointment (and this card isn't that booking).
+    if (c.phone && activePhones.has(c.phone) && !c.touches.some((t) => t.type === 'booking')) continue;
     if (c.st.stage === 'hidden' || c.openedMs < fromMs || c.openedMs >= toMs) continue;
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
@@ -1119,7 +1122,12 @@ export async function loadPipelineRaw(db, { nowMs = Date.now(), withAudits = fal
   const liveIds = calls.filter((c) => c.kind === 'live').map((c) => c.id);
   const callEvents = await inChunks(liveIds, 150, (ids) => fetchAll('call_events',
     () => db.from('call_events').select('call_id, event, actor, meta, created_at').in('call_id', ids).in('event', ['started', 'estimate_sent']).order('created_at').order('id')));
-  return { calls, callEvents, messages, estimates, bookings, attempts, marks, auditSkips, staff, silent, blocked, tracking, businesses, audits, history: [] };
+  // Upcoming appointments (any age of booking): a caller who already has one
+  // is not a lead (owner rule 2026-09-27).
+  const activeBookings = await fetchAll('active bookings', () => db.from('bookings').select('id, customer:customers ( phone )')
+    .not('status', 'in', '(completed,cancelled)').is('completed_at', null).is('cancelled_at', null)
+    .gte('scheduled_at', iso(nowMs - DAY)).order('id'));
+  return { calls, callEvents, messages, estimates, bookings, attempts, marks, auditSkips, staff, silent, blocked, tracking, businesses, audits, activeBookings, history: [] };
 }
 
 // Completed bookings (any time, any source) of these phones: one customers
