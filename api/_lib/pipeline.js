@@ -526,12 +526,6 @@ export function evalStage(card, at, mark) {
   }
   // 6. Quoted; 7 days with no approval and no word from them -> Lost.
   let sent = ests.filter((t) => t.est.sentMs != null && t.est.sentMs <= atMs);
-  // Owner 2026-09-27: the call script's "estimate sent" counts as Quoted even
-  // when no estimate record exists (quoted on the call / texted by hand).
-  if (!sent.length) {
-    const sq = S.filter((t) => t.type === 'wizard' && t.live.resolution === 'estimate_sent' && t.atMs <= atMs);
-    if (sq.length) { const w = sq[sq.length - 1]; sent = [{ type: 'estimate', id: null, atMs: w.atMs, est: { source: 'script', status: null, sentMs: w.atMs, total: w.live.quoted, openedMs: null, fromScript: true } }]; }
-  }
   if (sent.length) {
     const e = sent[sent.length - 1];
     const clock = Math.max(e.est.sentMs, reop ?? -Infinity, lastReply(S, e.est.sentMs) ?? -Infinity);
@@ -829,7 +823,8 @@ function timelineFor(card, st, mark, audits) {
         break;
       case 'wizard': {
         const r = t.live.resolution;
-        const how = r === 'booked' ? ' · booked' : r === 'estimate_sent' ? ' · estimate sent' : r === 'refused' ? ' · customer declined'
+        // Only a real sent estimate moves a card to Quoted (owner 2026-09-27).
+        const how = r === 'booked' ? ' · booked' : r === 'estimate_sent' ? (card.touches.some((x) => x.type === 'estimate' && x.est.sentMs != null) ? ' · estimate sent' : ' · marked estimate sent, but none was sent') : r === 'refused' ? ' · customer declined'
           : r === 'other' ? ' · other outcome' : t.live.step ? ` · stopped at ${t.live.step}` : '';
         const q = t.live.quoted ? ` · quoted ${dollars(t.live.quoted)}` : '';
         out.push(item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'));
