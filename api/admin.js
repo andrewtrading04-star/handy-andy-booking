@@ -50,6 +50,7 @@ import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCust
 import { digitsOf, prettyPhone, GRASSHOPPER_LINES } from './_lib/grasshopper.js';
 import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
+import { claimBookingStamp, releaseBookingStamp } from './_lib/booking-stamp.js';
 import { bracketTotal as bracketMoveTotal, debitForJob, reconcileJobEdit, creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, recount as ledgerRecount, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
 
 // Search Console domain per business — the free "what did people search to
@@ -4833,11 +4834,15 @@ async function bookingUpdate(req, res, db, auth, body) {
               .select('bracket_supplied_by').eq('id', id).maybeSingle();
             if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
           } catch (_) { /* column may not exist; fall back to assigned tech */ }
-          if (chargeTech) {
-            await adjustWirePlateInventory(db, biz.id, chargeTech, plateQty, id);
-            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-            const newMeta = { ...(cur?.metadata || existing.metadata || {}), wire_plate_deducted_at: now };
-            await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+          // Claim the stamp BEFORE subtracting so a double-submitted completion
+          // deducts once (migration 0150).
+          if (chargeTech && await claimBookingStamp(db, id, 'wire_plate_deducted_at')) {
+            try {
+              await adjustWirePlateInventory(db, biz.id, chargeTech, plateQty, id);
+            } catch (e) {
+              await releaseBookingStamp(db, id, 'wire_plate_deducted_at');
+              throw e;
+            }
           }
         }
       } catch (e) {
@@ -4912,12 +4917,13 @@ async function bookingUpdate(req, res, db, auth, body) {
               .select('bracket_supplied_by').eq('id', id).maybeSingle();
             if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
           } catch (_) { /* column may not exist; fall back to assigned tech */ }
-          if (chargeTech) {
-            await adjustAppleTvBracketInventory(db, biz.id, chargeTech, qty, id);
-            const { data: cur } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-            await db.from('bookings').update({
-              metadata: { ...(cur?.metadata || existing.metadata || {}), appletv_bracket_deducted_at: now },
-            }).eq('id', id);
+          if (chargeTech && await claimBookingStamp(db, id, 'appletv_bracket_deducted_at')) {
+            try {
+              await adjustAppleTvBracketInventory(db, biz.id, chargeTech, qty, id);
+            } catch (e) {
+              await releaseBookingStamp(db, id, 'appletv_bracket_deducted_at');
+              throw e;
+            }
           }
         }
       } catch (e) {

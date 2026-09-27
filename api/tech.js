@@ -14,6 +14,7 @@ import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, refreshToken, TECH_SESSION_MAX } from './_lib/auth.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
+import { claimBookingStamp, releaseBookingStamp } from './_lib/booking-stamp.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.js';
@@ -985,15 +986,16 @@ async function status(req, res, db, auth, body) {
             .select('bracket_supplied_by').eq('id', id).maybeSingle();
           if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
         } catch (_) { /* column may not exist; fall back to completing tech */ }
-        await adjustWirePlateInventory(db, jobBizId, chargeTech, plateQty, id);
-        // Re-read metadata RIGHT before writing: `existing.metadata` was read
-        // at handler start, several round trips ago — writing that stale copy
-        // back would revert any li_rev bump / li_backups snapshot a concurrent
-        // line-items save landed in the window (same fix the bracket and
-        // Apple-TV stamps below already carry).
-        const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-        const newMeta = { ...(fresh?.metadata || existing.metadata || {}), wire_plate_deducted_at: new Date().toISOString() };
-        await db.from('bookings').update({ metadata: newMeta }).eq('id', id);
+        // Claim the stamp BEFORE subtracting: a double-tapped Complete sends two
+        // requests that both passed the check above, and only one may deduct.
+        if (await claimBookingStamp(db, id, 'wire_plate_deducted_at')) {
+          try {
+            await adjustWirePlateInventory(db, jobBizId, chargeTech, plateQty, id);
+          } catch (e) {
+            await releaseBookingStamp(db, id, 'wire_plate_deducted_at');
+            throw e;
+          }
+        }
       }
     } catch (e) {
       console.error(`[wireplate] decrement failed for booking ${id}:`, e.message);
@@ -1052,13 +1054,15 @@ async function status(req, res, db, auth, body) {
             .select('bracket_supplied_by').eq('id', id).maybeSingle();
           if (sup?.bracket_supplied_by) chargeTech = sup.bracket_supplied_by;
         } catch (_) { /* column may not exist; fall back to completing tech */ }
-        await adjustAppleTvBracketInventory(db, jobBizId, chargeTech, qty, id);
-        // Re-read metadata so this never clobbers the wire-plate/bracket stamps
-        // written just above in this same completion request.
-        const { data: fresh } = await db.from('bookings').select('metadata').eq('id', id).maybeSingle();
-        await db.from('bookings').update({
-          metadata: { ...(fresh?.metadata || existing.metadata || {}), appletv_bracket_deducted_at: new Date().toISOString() },
-        }).eq('id', id);
+        // Claim first so a double-tapped Complete deducts once (see wire plates above).
+        if (await claimBookingStamp(db, id, 'appletv_bracket_deducted_at')) {
+          try {
+            await adjustAppleTvBracketInventory(db, jobBizId, chargeTech, qty, id);
+          } catch (e) {
+            await releaseBookingStamp(db, id, 'appletv_bracket_deducted_at');
+            throw e;
+          }
+        }
       }
     } catch (e) {
       console.error(`[appletv_bracket] decrement failed for booking ${id}:`, e.message);

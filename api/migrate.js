@@ -507,8 +507,12 @@ async function wirePlateSync(req, res) {
   if (assignedRow) {
     const patch = {};
     const wasCredited = !!assignedRow.credited;
-    // Status follows the email while uncredited; locked once counted.
-    if (!wasCredited && assignedRow.status !== status) {
+    // Status follows the email while uncredited; locked once counted. A
+    // canceled order is locked too: the owner's Cancel claws the plates back
+    // and clears `credited`, and the old "Delivered" email still in the inbox
+    // would otherwise flip it back to delivered and re-add the plates on the
+    // next scan. The owner's status dropdown can still un-cancel it.
+    if (!wasCredited && assignedRow.status !== 'canceled' && assignedRow.status !== status) {
       patch.status = status;
       patch.delivered_date = status === 'delivered' ? (delivered_date || null) : null;
     }
