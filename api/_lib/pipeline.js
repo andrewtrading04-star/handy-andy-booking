@@ -466,7 +466,8 @@ function openCallback(S, sinceMs) {
   for (const t of S) {
     if (t.atMs <= sinceMs) continue;
     if ((t.type === 'call_in' && !t.talk) || (t.type === 'text_in' && t.canOpen)) pending = t;
-    else if (pending && (t.type === 'wizard' || (t.type === 'call_in' && t.talk) || (t.type === 'attempt' && t.talk === 'yes') || t.type === 'text_out_staff')) pending = null;
+    // Opening the script ON the voicemail call itself is not a reply (owner 2026-09-27).
+    else if (pending && ((t.type === 'wizard' && t.live.inboundId !== pending.id) || (t.type === 'call_in' && t.talk) || (t.type === 'attempt' && t.talk === 'yes') || t.type === 'text_out_staff')) pending = null;
   }
   return pending;
 }
@@ -762,7 +763,7 @@ function sourceLabel(t, ctx) {
 
 function nextFor(st, card, nowMs) {
   const cb = st.callback;
-  const callbackNext = cb ? { text: `${cb.type === 'text_in' ? 'Text back — texted' : 'Call back — missed'} ${fmtAgo(nowMs - cb.atMs)} ago`, tone: 'danger' } : null;
+  const callbackNext = cb ? { text: `${cb.type === 'text_in' ? 'Text back — texted' : cb.vm ? 'Call back — voicemail' : 'Call back — missed'} ${fmtAgo(nowMs - cb.atMs)} ago`, tone: 'danger' } : null;
   switch (st.stage) {
     case 'lost': return { text: `Lost · ${st.lost.reason}`, tone: 'mute' };
     case 'paid': {
@@ -951,6 +952,10 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     paid: st.stage === 'paid',
     leak: st.stage === 'talked' && !!st.leak,
     voicemail: c.touches.some((t) => t.type === 'call_in' && t.vm),
+    // Customer reached out and nobody replied (owner 2026-09-27): drives the red banner.
+    unanswered: st.callback && nowMs - st.callback.atMs > 30 * MIN
+      ? { at: iso(st.callback.atMs), kind: st.callback.type === 'text_in' ? 'text' : st.callback.vm ? 'voicemail' : 'missed', hours: Math.floor((nowMs - st.callback.atMs) / HOUR), mins: Math.floor((nowMs - st.callback.atMs) / MIN) }
+      : null,
     phone: c.phone,
     phone_pretty: prettyPhone10(c.phone),
     name,
