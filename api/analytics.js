@@ -276,11 +276,14 @@ async function handleResendWebhook(req, res) {
     if (emailId && type) {
       const db = serviceClient();
       if (type === 'email.delivered') {
+        await db.from('estimates').update({ email_status: 'delivered' }).eq('email_id', emailId).neq('email_status', 'bounced');
         await db.from('bookings')
           .update({ review_email_delivered_at: new Date().toISOString(), review_email_status: 'delivered' })
           .eq('review_email_id', emailId).is('review_email_delivered_at', null);
       } else if (type === 'email.bounced') {
         await db.from('bookings').update({ review_email_status: 'bounced' }).eq('review_email_id', emailId);
+        // Estimate emails too (owner 2026-09-27): a bounce means re-check the address on the call.
+        await db.from('estimates').update({ email_status: 'bounced', email_bounced_at: new Date().toISOString() }).eq('email_id', emailId);
       } else if (type === 'email.complained') {
         await db.from('bookings').update({ review_email_status: 'complained' }).eq('review_email_id', emailId);
       }

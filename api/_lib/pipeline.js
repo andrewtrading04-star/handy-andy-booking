@@ -351,7 +351,7 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
         // 'declined' is the office's "Not a fit" -- customers have no decline button.
         declinedMs: e.status === 'declined' ? (msOf(e.updated_at) ?? atMs) : null,
         total: total > 0 ? total : null, openedMs: opened.length ? Math.min(...opened) : null,
-        couponMs: msOf(e.followup_emailed_at), callId: e.call_id || null, label: e.service_label || null,
+        couponMs: msOf(e.followup_emailed_at), callId: e.call_id || null, label: e.service_label || null, bounced: e.email_status === 'bounced',
         items: (Array.isArray(e.line_items) ? e.line_items : []).slice(0, 30).map((it) => ({ name: String((it && (it.name || it.description)) || 'Item').slice(0, 120), qty: Number(it && (it.qty ?? it.quantity)) || 1, price: Number(it && it.unit_price) || 0 })) } });
   }
 
@@ -780,6 +780,7 @@ function nextFor(st, card, nowMs) {
     case 'quoted': {
       if (callbackNext) return callbackNext;
       const e = st.estimate.est; const age = nowMs - e.sentMs;
+      if (e.bounced) return { text: 'Estimate email BOUNCED — listen to the call and check the email address', tone: 'danger' };
       // Owner 2026-09-27: age up front, opened or not, and the 3-hour follow-up email.
       const fu = e.couponMs ? 'follow-up email sent' : age > 4 * HOUR ? 'NO follow-up email' : 'follow-up email due at 3h';
       const text = `Sent ${fmtAgo(age)} ago · ${e.openedMs ? 'opened' : 'not opened'} · ${fu}`;
@@ -859,6 +860,7 @@ function timelineFor(card, st, mark, audits) {
         if (e.webRequest) out.push(item(t.atMs, 'estimate', `Website estimate request${e.label ? ' · ' + e.label : ''}`, null, 'danger'));
         else if (e.sentMs != null) out.push(item(e.sentMs, 'estimate', `Estimate sent${amt}`, null, 'ok'));
         else out.push(item(t.atMs, 'estimate', `Estimate saved, not sent${amt}`, null, 'warn'));
+        if (e.bounced) out.push(item(e.sentMs ?? t.atMs, 'estimate', 'Estimate email bounced — wrong address?', null, 'danger'));
         if (e.openedMs) out.push(item(e.openedMs, 'estimate', 'Customer opened the estimate', null, 'ok'));
         if (e.couponMs) out.push(item(e.couponMs, 'auto', 'Coupon email sent', null, 'mute'));
         if (e.approvedMs) out.push(item(e.approvedMs, 'estimate', `Estimate approved${amt}`, null, 'ok'));
@@ -964,7 +966,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     lost: st.stage === 'lost' ? { reason: st.lost.reason, auto: st.lost.auto, note: st.lost.note || '', by: st.lost.by || null, at: iso(st.lost.atMs) } : null,
     tries: failed,
     estimate: est ? { id: est.id, total: est.est.total, sent_at: iso(est.est.sentMs), opened: est.est.openedMs != null, coupon_at: iso(est.est.couponMs),
-      approved_at: iso(est.est.approvedMs), status: est.est.status, slug: est.slug || null, label: est.est.label || null, items: est.est.items || [] } : null,
+      approved_at: iso(est.est.approvedMs), status: est.est.status, slug: est.slug || null, label: est.est.label || null, bounced: !!est.est.bounced, items: est.est.items || [] } : null,
     booking: bk ? { id: bk.id, scheduled_at: iso(bk.bk.scheduledMs), status: bk.bk.status, price: bk.bk.price, tech: bk.bk.tech, paid_at: iso(bk.bk.paidMs),
       completed_at: iso(bk.bk.completedMs), created_at: iso(bk.atMs), review_at: iso(bk.bk.reviewMs), review_rating: bk.bk.reviewRating,
       slug: bk.slug || null } : null,
@@ -1097,7 +1099,7 @@ async function inChunks(values, size, run) {
 
 const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_number, forwarded_to, occurred_at, answered, duration_sec, recording_url, status, handled_by, booking_id, resolution, reached_step, quoted_total, inbound_call_id';
 const MESSAGE_COLS = 'id, business_id, customer_phone, our_phone, direction, body, sent_by, status, created_at';
-const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label';
+const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label, email_status';
 const BOOKING_COLS = `id, business_id, customer_id, status, source, scheduled_at, created_at, updated_at, completed_at, paid_at, cancelled_at,
   price, amount_paid, payment_status, notes, customer_notes, metadata, review_rating, reviewed_at, review_clicked_at,
   customer:customers ( name, phone ), technician:technicians!technician_id ( name )`;

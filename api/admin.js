@@ -11189,11 +11189,11 @@ function lineItemsTotal(items) {
 // both confirmations on the card instead of the most recent one clobbering
 // the other. Returns the patch actually applied (after any missing-column
 // degrade) so the caller can update the client without a full re-fetch.
-async function markEstimateContacted(db, businessId, id, sentBy, channel) {
+async function markEstimateContacted(db, businessId, id, sentBy, channel, emailId) {
   const now = new Date().toISOString();
   const patch = { status: 'contacted', contacted_at: now, contacted_by: sentBy || null };
   if (channel === 'sms')   { patch.texted_at = now;  patch.texted_by = sentBy || null; }
-  if (channel === 'email') { patch.emailed_at = now; patch.emailed_by = sentBy || null; }
+  if (channel === 'email') { patch.emailed_at = now; patch.emailed_by = sentBy || null; patch.email_id = emailId || null; patch.email_status = 'sent'; patch.email_bounced_at = null; }
   try {
     let { error } = await db.from('estimates').update(patch).eq('id', id).eq('business_id', businessId);
     for (let i = 0; error && i < 4; i++) {
@@ -11337,9 +11337,9 @@ async function estimateCreate(req, res, db, auth, body) {
       brandFor(biz.slug)
     );
     try {
-      await sendEmail({ slug: biz.slug, to: estEmail, subject, html, throwOnError: true });
+      const sentMail = await sendEmail({ slug: biz.slug, to: estEmail, subject, html, throwOnError: true });
       emailed = true;
-      await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth), 'email');
+      await markEstimateContacted(db, biz.id, est.id, auth.name || adminAuthorName(auth), 'email', sentMail && sentMail.id);
     } catch (e) {
       console.warn('[estimate_create] email send failed, but estimate created:', e.message);
       emailWarning = `email failed: ${e.message}`;
@@ -11607,13 +11607,14 @@ async function estimateSendEmail(req, res, db, auth, body) {
     brandFor(biz.slug)
   );
 
+  let sentMail = null;
   try {
-    await sendEmail({ slug: biz.slug, to: est.customer_email, subject, html, throwOnError: true });
+    sentMail = await sendEmail({ slug: biz.slug, to: est.customer_email, subject, html, throwOnError: true });
   } catch (e) {
     return res.status(502).json({ error: `Email failed to send: ${e.message}` });
   }
 
-  const patch = await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth), 'email');
+  const patch = await markEstimateContacted(db, biz.id, body.id, auth.name || adminAuthorName(auth), 'email', sentMail && sentMail.id);
   return res.status(200).json({ ok: true, estimate: patch });
 }
 

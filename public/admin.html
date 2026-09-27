@@ -10297,6 +10297,8 @@ function plWhen(iso, zone){
     return today ? t : d.toLocaleDateString('en-US',{timeZone:z,weekday:'short',month:'numeric',day:'numeric'})+' '+t;
   }catch(_){ return ''; }
 }
+// Phone under the name when we have a real name (owner 2026-09-27).
+function plPhoneSub(c){ return String(c.name||'').trim()&&c.phone?(c.phone_pretty||fmtPhone(c.phone)):''; }
 function plTitle(c){ return String(c.name||'').trim() || c.phone_pretty || fmtPhone(c.phone) || 'Unknown caller'; }
 // A name only when it is one: callers who never gave a name come back as
 // "Caller (no phone saved)" or as their own number, and neither should be
@@ -10472,7 +10474,7 @@ function paintPipeline(){
   const openC=_plOpen&&plCard(_plOpen);
   const modal=openC?`<div class="plv-pop" data-plkey="${esc(openC.key)}"><div class="plv-pop-bg" data-pl="toggle"></div>
       <div class="plv-pop-card" role="dialog" aria-label="${esc(plTitle(openC))}">
-        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b><small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
+        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b>${plPhoneSub(openC)?`<small style="display:block;">${esc(plPhoneSub(openC))}</small>`:''}<small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
@@ -10504,7 +10506,7 @@ function plTileHtml(c){
   const sub=[c.source, bn&&!String(c.source||'').includes(bn)?bn:'', c.opened_at?plAgo(c.opened_at):''].filter(Boolean).join(' · ');
   const ic=c.leak||tone==='danger'?PL_ALERT:'<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>';
   return `<button type="button" class="plv-tile${c.leak?' leak':''}" data-plkey="${esc(c.key)}" data-pl="toggle" title="${esc(next.text||'')}">
-    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
+    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}${plPhoneSub(c)?`<small style="display:block;font-weight:600;font-size:11.5px;opacity:.8;">${esc(plPhoneSub(c))}</small>`:''}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
     <span class="plv-tile-b"><span><small>VALUE</small><b>${plMoney(c.amount)||'$0'}</b>${sub?`<i>${esc(sub)}</i>`:''}</span><span class="plv-ic ${c.leak?'danger':tone}">${ic}</span></span>
     ${next.text?`<span class="plv-tile-n ${c.leak?'danger':tone}">${esc(next.text)}</span>`:''}
   </button>`;
@@ -10604,7 +10606,7 @@ function plDetailHtml(c){
   const info=[
     ['Brand', c.business&&c.business.name?esc(c.business.name):'—'],
     // Owner 2026-09-27: Estimate sent (tap to view it here) instead of Phone.
-    ['Estimate sent', e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'} · ${_plEstOpen?'hide':'view'}</button>`:(e.id?'<span class="danger">Saved, not sent</span>':'No')],
+    ['Estimate sent', e.bounced?'<span class="danger">Email BOUNCED — check the address on the call</span>':e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'} · ${_plEstOpen?'hide':'view'}</button>`:(e.id?'<span class="danger">Saved, not sent</span>':'No')],
     ['Handled by', c.secretary?esc(c.secretary):'—'],
   ];
   if(e.sent_at){
