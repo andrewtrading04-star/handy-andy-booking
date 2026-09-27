@@ -14952,6 +14952,12 @@ function paintReviewCalls(){
   // Guided-card controls. Every one is delegated off the freshly painted view,
   // so a card that does not render a given control simply has none to wire.
   view.querySelectorAll('[data-rc-out]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'outcome',null,b.dataset.rcOut)));
+  view.querySelectorAll('[data-rc-offer]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('Text the customer the discount now?')) return;
+    b.disabled=true; b.textContent='Sending…';
+    try{ await api('review_offer_send',{ method:'POST', body:{ id:b.dataset.rcOffer }}); toast('Discount text sent'); b.outerHTML='<b>Discount text sent ✓</b>'; }
+    catch(e){ toast(e.message||'Could not send'); b.disabled=false; b.textContent='Send the customer the discount'; }
+  }));
   view.querySelectorAll('[data-rc-tag]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'tag',null,b.dataset.rcTag)));
   view.querySelectorAll('[data-rc-chan]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'chan',null,b.dataset.rcChan)));
   view.querySelectorAll('[data-rc-send]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'send')));
@@ -15077,7 +15083,10 @@ function rcCard(r){
     <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when, r.business_timezone))}${r.zip?` · ${esc(r.zip)}`:''}${r.is_completed===false?' <span style="color:var(--mute);">· not marked done</span>':''}</div>
     ${itemsRow}
     ${rcVoicemailRow(r)}
-    ${badges.length?`<div class="rc-badges">${badges.join('')}</div>`:''}`;
+    ${badges.length?`<div class="rc-badges">${badges.join('')}</div>`:''}
+    ${r.loyalty_offer?`<div class="rc-banner" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13.5px;line-height:1.5;">
+      <b>Loyalty discount: $${esc(String(r.loyalty_offer.amount||''))} · code ${esc(r.loyalty_offer.code||'')}</b><br>${esc(r.loyalty_offer.say||'')}
+      <div style="margin-top:8px;">${r.loyalty_offer.sent_at?`<b>Discount text sent ✓</b> ${esc(r.loyalty_offer.sent_by||'')}`:`<button type="button" class="btn" data-rc-offer="${esc(r.id)}">Send the customer the discount</button>`}</div></div>`:''}`;
 
   // 2. the opener, already filled in -- time band sits right above the actual
   // dial action, since that's the one moment it needs to be seen.

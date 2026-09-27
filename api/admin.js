@@ -516,6 +516,7 @@ export default async function handler(req, res) {
       case 'applicants':        return await applicants(req, res, db, auth);
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
+      case 'review_offer_send': return await reviewOfferSend(req, res, db, auth, body);
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'invoice_send':      return await invoiceSend(req, res, db, auth, body);
@@ -8622,6 +8623,32 @@ async function reviewScoreboard(db, businessId, hasTrack) {
 }
 
 // Resend the "How did we do?" email for one completed job.
+// One-time loyalty discount text (owner 2026-09-27): Joey offers it on the
+// review call, then taps a button to text it. The wording and code live on the
+// booking (metadata.loyalty_offer); the review link is this job's own.
+async function reviewOfferSend(req, res, db, auth, body) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
+  const id = body.id; if (!id) return res.status(400).json({ error: 'id required' });
+  const { data: b } = await db.from('bookings')
+    .select('id, business_id, review_token, metadata, sms_consent, customer:customers(name, phone)').eq('id', id).maybeSingle();
+  if (!b) return res.status(404).json({ error: 'Job not found' });
+  const offer = b.metadata && b.metadata.loyalty_offer;
+  if (!offer || !offer.text) return res.status(400).json({ error: 'No discount set on this job.' });
+  if (offer.sent_at) return res.status(409).json({ error: 'The discount was already sent.' });
+  if (!b.customer?.phone || !b.sms_consent) return res.status(400).json({ error: 'No phone with texts on for this customer.' });
+  await ensureReviewToken(db, b);
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const link = b.review_token ? `${baseUrl}/api/book?action=review_click&token=${encodeURIComponent(b.review_token)}&ch=sms` : '';
+  const msg = String(offer.text).replace('{review_link}', link);
+  const r = await sendSMSResult(b.customer.phone, msg);
+  await logAutomatedMessage(db, { businessId: b.business_id, customerPhone: b.customer.phone, body: msg, result: r });
+  if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
+  const sent = { ...offer, sent_at: new Date().toISOString(), sent_by: auth.name || 'office' };
+  await db.from('bookings').update({ metadata: { ...(b.metadata || {}), loyalty_offer: sent } }).eq('id', id);
+  return res.status(200).json({ ok: true });
+}
+
 async function reviewResend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = body.id;
@@ -9936,6 +9963,8 @@ function rcMapRow(row, b, zipTzMap) {
     phone: row.customer?.phone || null,
     zip,   // booking zip first; imported customers often have it only on the booking
     has_email: !!row.customer?.email,
+    // One-time loyalty discount the owner set on this job (metadata.loyalty_offer).
+    loyalty_offer: row.metadata?.loyalty_offer || null,
     has_sms: !!(row.customer?.phone && row.sms_consent),
     // The review text goes out once: reviewResend refuses a second unless the
     // first failed, so the queue must not offer the text again.
