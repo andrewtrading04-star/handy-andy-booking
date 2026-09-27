@@ -1,3 +1,4 @@
+import { callDayRows } from './_lib/call-counts.js';
 import { numberVolumes } from './_lib/number-volume.js';
 // ============================================================================
 // Admin dashboard API (consolidated router to stay under Vercel's function cap).
@@ -12179,9 +12180,8 @@ async function auditReport(req, res, db, auth) {
   const dayStr = (off) => localDayStartUTC(tz, off).toISOString().slice(0, 10);
   const to = dayStr(offset), from = dayStr(offset - (days - 1));
 
-  const [{ data: dayRows }, { data: audits }] = await Promise.all([
-    db.from('call_audit_days').select('audit_date, grasshopper_number, calls_counted')
-      .gte('audit_date', from).lte('audit_date', to),
+  const [dayRows, { data: audits }] = await Promise.all([
+    callDayRows(db, from, to),
     db.from('call_audits')
       .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, handled_by, service, caller_name, caller_phone, answers, flagged, notes, listen_reason, heard_at, owner_note')
       .gte('audit_date', from).lte('audit_date', to)
@@ -12210,7 +12210,7 @@ async function auditReport(req, res, db, auth) {
     const n = Number(r.calls_counted) || 0;
     totalCounted += n;
     countedByDay[r.audit_date] = (countedByDay[r.audit_date] || 0) + n;
-    byLine[r.grasshopper_number] = (byLine[r.grasshopper_number] || 0) + n;
+    if (r.grasshopper_number) byLine[r.grasshopper_number] = (byLine[r.grasshopper_number] || 0) + n;
   }
   const totalScripted = (liveCalls || []).length;
 

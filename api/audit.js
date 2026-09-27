@@ -20,6 +20,7 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { auditPrefill } from './_lib/audit-prefill.js';
+import { callDayRows, AUTO_COUNT_FROM } from './_lib/call-counts.js';
 import { signToken, verifyToken, getBearer, applyCors, safeEqual } from './_lib/auth.js';
 import { GRASSHOPPER_LINES, prettyPhone } from './_lib/grasshopper.js';
 import { localDateStartUTC, localDateTimeUTC, addDaysStr, localDayStartUTC } from './_lib/time.js';
@@ -188,11 +189,9 @@ async function day(req, res, db, auth) {
 
   const lines = auditLines();
 
-  const { data: dayRows } = await db.from('call_audit_days')
-    .select('grasshopper_number, calls_counted')
-    .eq('audit_date', date);
+  const dayRows = await callDayRows(db, date, date);
   const counts = {};
-  for (const r of (dayRows || [])) counts[r.grasshopper_number] = r.calls_counted;
+  for (const r of (dayRows || [])) if (r.grasshopper_number) counts[r.grasshopper_number] = r.calls_counted;
 
   // Scripted calls are bounded by the business's own local day. Both brands run
   // America/Denver today, but reading it off the row rather than assuming keeps
@@ -252,6 +251,7 @@ async function day(req, res, db, auth) {
     date,
     lines,
     counts,
+    counts_auto: date >= AUTO_COUNT_FROM,
     calls,
     audits: audits || [],
     auditor: auth.name || 'Auditor',
@@ -274,9 +274,7 @@ async function week(req, res, db, auth) {
   const days = Array.from({ length: 7 }, (_, i) => addDaysStr(monday, i));
   const sunday = days[6];
 
-  const { data: dayRows } = await db.from('call_audit_days')
-    .select('audit_date, calls_counted')
-    .gte('audit_date', monday).lte('audit_date', sunday);
+  const dayRows = await callDayRows(db, monday, sunday);
 
   const { data: auditRows } = await db.from('call_audits')
     .select('id, audit_date, grasshopper_number, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at')

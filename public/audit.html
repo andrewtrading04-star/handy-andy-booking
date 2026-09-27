@@ -1144,9 +1144,15 @@ function renderLines(){
     inp.value=(data.counts&&data.counts[l.number]!=null)?data.counts[l.number]:'';
     inp.placeholder='0'; inp.dataset.num=l.number;
     inp.oninput=paintRecon;
+    if(data.counts_auto){ inp.readOnly=true; inp.title='Counted automatically from the phone system'; }
     const cnt=document.createElement('span'); cnt.className='cnt'; cnt.dataset.for=l.number;
     d.append(inp,cnt); w.appendChild(d);
   });
+  // Owner 2026-09-27: counts are automatic from Sep 22 (all lines on our phone system).
+  const sv=$('saveDay'); if(sv) sv.style.display=data.counts_auto?'none':'';
+  let an=document.getElementById('autoCountNote');
+  if(!an){ an=document.createElement('p'); an.id='autoCountNote'; an.className='sub'; an.style.margin='6px 0 0'; w.after(an); }
+  an.textContent=data.counts_auto?'Counted automatically from the phone system. Nothing to type.':'';
   paintRecon();
 }
 
