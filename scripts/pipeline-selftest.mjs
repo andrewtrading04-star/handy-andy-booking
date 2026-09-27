@@ -112,7 +112,7 @@ await check('talked -> estimate -> 7 days -> Lost "No reply after estimate"', ()
   assert.equal(card.lost.at, ago(D));
   const q = one(raw({ calls: [inbound({ occurred_at: ago(6 * D + 5 * M) })], estimates: [estimate({ created_at: ago(6 * D), text_opened_at: ago(5 * D) })] }));
   assert.equal(q.stage, 'quoted');
-  assert.deepEqual(q.next, { text: 'Estimate 6d old · opened', tone: 'danger' });
+  assert.deepEqual(q.next, { text: 'Sent 6d ago · opened · NO follow-up email', tone: 'danger' });
   assert.equal(q.estimate.total, 216.5);
   assert.equal(q.amount, 216.5);
 });

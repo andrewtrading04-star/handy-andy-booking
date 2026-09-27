@@ -10499,7 +10499,9 @@ function paintPipeline(){
 // Board tile: name, where it came from, value, and a colored next-step icon.
 function plTileHtml(c){
   const next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
-  const sub=[c.source, businesses.length>1&&c.business&&c.business.name?c.business.name:'', c.opened_at?plAgo(c.opened_at):''].filter(Boolean).join(' · ');
+  const bn=businesses.length>1&&c.business&&c.business.name?c.business.name:'';
+  // Don't repeat the brand when the line name already says it ("Dom's · Dom's").
+  const sub=[c.source, bn&&!String(c.source||'').includes(bn)?bn:'', c.opened_at?plAgo(c.opened_at):''].filter(Boolean).join(' · ');
   const ic=c.leak||tone==='danger'?PL_ALERT:'<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>';
   return `<button type="button" class="plv-tile${c.leak?' leak':''}" data-plkey="${esc(c.key)}" data-pl="toggle" title="${esc(next.text||'')}">
     <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
@@ -10605,6 +10607,11 @@ function plDetailHtml(c){
     ['Estimate sent', e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'} · ${_plEstOpen?'hide':'view'}</button>`:(e.id?'<span class="danger">Saved, not sent</span>':'No')],
     ['Handled by', c.secretary?esc(c.secretary):'—'],
   ];
+  if(e.sent_at){
+    const age=Date.now()-new Date(e.sent_at).getTime();
+    info.push(['Estimate age', `<span class="${age>=2*864e5?'danger':''}">${esc(plAgo(e.sent_at))}${e.opened?' · opened':' · not opened'}</span>`]);
+    info.push(['3-hour follow-up email', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:(age>4*36e5?'<span class="danger">Not sent</span>':'Not yet (goes at 3h)')]);
+  }
   if(Number(c.tries)>0) info.push(['Callback tries', `${Number(c.tries)} with no answer`]);
   if(pj||pc) info.push(['History', `${pj?`Returning · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent):''}`:'Asked before'}`]);
   const tab=_plTab||'ov', nHist=Array.isArray(c.timeline)?c.timeline.length:0;
@@ -10664,7 +10671,7 @@ function plAudio(t){
 }
 // Overview: every voicemail, recorded call and text on this card, newest first.
 function plMediaHtml(c){
-  const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'));
+  const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
   if(!tl.length) return '';
   return `<div class="rc-count" style="margin:4px 0 6px;">Voicemails, calls &amp; texts</div><div class="pl-tl">${tl.slice().reverse().map(t=>
     `<div class="pl-tl-i"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}${plAudio(t)}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`).join('')}</div>`;

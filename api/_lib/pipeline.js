@@ -780,10 +780,11 @@ function nextFor(st, card, nowMs) {
     case 'quoted': {
       if (callbackNext) return callbackNext;
       const e = st.estimate.est; const age = nowMs - e.sentMs;
-      let text = `Estimate ${fmtAgo(age)} old`;
-      if (e.openedMs) text += ' · opened';
-      if (e.couponMs) text += ' · coupon sent';
-      return { text, tone: age < DAY ? 'ok' : age < 5 * DAY ? 'warn' : 'danger' };
+      // Owner 2026-09-27: age up front, opened or not, and the 3-hour follow-up email.
+      const fu = e.couponMs ? 'follow-up email sent' : age > 4 * HOUR ? 'NO follow-up email' : 'follow-up email due at 3h';
+      const text = `Sent ${fmtAgo(age)} ago · ${e.openedMs ? 'opened' : 'not opened'} · ${fu}`;
+      const tone = age >= 2 * DAY || (!e.couponMs && age > 4 * HOUR) ? 'danger' : age >= 3 * HOUR ? 'warn' : 'ok';
+      return { text, tone };
     }
     case 'talked': {
       if (st.onCall && !st.leak) return { text: 'On the phone now', tone: 'ok' };
