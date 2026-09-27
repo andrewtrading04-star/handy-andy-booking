@@ -565,6 +565,7 @@
   .plv-col-h{border-top:4px solid var(--st);padding:8px 10px;background:#fff;display:flex;flex-direction:column;}
   .plv-col-h b{font-size:13.5px;} .plv-col-h span{font-size:12.5px;color:var(--mute);font-weight:700;}
   .plv-col-b{padding:8px;display:flex;flex-direction:column;gap:8px;}
+  .plv-col.plv-col-min{flex:0 0 130px;}
   .plv-none{font-size:12px;color:var(--mute);text-align:center;padding:10px 0;}
   .plv-tile{flex:none;display:block;width:100%;text-align:left;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;}
   .plv-tile:hover{box-shadow:0 4px 12px rgba(15,23,42,.1);} .plv-tile.leak{border-color:#f87171;}
@@ -10270,7 +10271,8 @@ let _pl=null, _plErr=null, _plLoading=false, _plReq=0, _plDirty=false;
 let _plRange='yesterday', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
 let _plScrollTo=null;
-let _plTab='ov';   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
+let _plTab='ov';
+let _plBookedOpen=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10459,8 +10461,12 @@ function paintPipeline(){
     }).join('')}</div>`;
   const colHtml=([k,l])=>{
     const list=cards.filter(c=>c.stage===k);
-    return `<div class="plv-col${_plStage===k?' on':''}" id="plcol-${k}">
+    // Booked is the goal -- collapsed to a thin column by default (owner 2026-09-27).
+    if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}" id="plcol-${k}">
       <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span></div>
+      <div class="plv-col-b"><button type="button" class="rc-btn ghost" data-pl="bktoggle">Show</button></div></div>`;
+    return `<div class="plv-col${_plStage===k?' on':''}" id="plcol-${k}">
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
       <div class="plv-col-b">${list.length?list.map(plTileHtml).join(''):'<div class="plv-none">Empty</div>'}</div></div>`;
   };
   const openC=_plOpen&&plCard(_plOpen);
@@ -10707,6 +10713,7 @@ function plClick(e){
   const b=e.target.closest('[data-pl]'); if(!b || b.disabled) return;
   const act=b.dataset.pl;
   if(act==='stage'){ _plStage=b.dataset.stage; _plScrollTo=_plStage; paintPipeline(); return; }
+  if(act==='bktoggle'){ _plBookedOpen=!_plBookedOpen; paintPipeline(); return; }
   if(act==='tab'){ _plTab=b.dataset.tab||'ov'; paintPipeline(); return; }
   if(act==='leaks'){
     const cards=(_pl&&Array.isArray(_pl.cards))?_pl.cards:[];
