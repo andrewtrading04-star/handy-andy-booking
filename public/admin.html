@@ -2286,7 +2286,7 @@
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="askandrew" id="navAskAndrew" style="display:none;"><span class="ic" data-ico="other">🤖</span> Ask Andrew</button>
-      <button data-nav="myday" id="navMyDay"><span class="ic" data-ico="other">📝</span> My Day</button>
+      <button data-nav="myday" id="navMyDay"><span class="ic" data-ico="other">📝</span> Tasks</button>
       <button data-nav="notes" id="navNotes" style="display:none;"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
@@ -3601,7 +3601,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'My Day',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'Tasks',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -10160,10 +10160,6 @@ function paintMyDay(){
       ${hasMic?`<button type="button" id="mdMic" class="md-mic" title="Say it" aria-label="Speak a task">🎙</button>`:''}
       <button type="submit" class="md-plus" aria-label="Add">+</button>
     </form>`:`<div class="md-past">Past page — read only. <a href="#" id="mdToday">Back to today</a></div>`}
-    <div class="md-sec"><div class="md-sec-h">Habits <button type="button" class="md-link" id="mdHabitEdit">${_myDayHabitEdit?'Done':'Edit'}</button></div>
-      <div class="md-habits">${habits||'<span class="md-sub">No habits yet.</span>'}
-        ${_myDayHabitEdit?`<form id="mdHabitAdd" class="md-habit-add"><input id="mdHabitName" placeholder="New habit" maxlength="60"><button type="submit">Add</button></form>`:''}
-      </div></div>
     <div class="md-sec"><div class="md-sec-h">${live?'To do':'Still open that day'} <span class="md-count">${open.length}</span></div>
       ${open.map(t=>taskRow(t)+kidsOf(t.id).map(k=>taskRow(k,true)).join('')).join('')||`<div class="md-empty">${live?'Nothing on the page. Add something above.':'Nothing was left open.'}</div>`}
       ${done.length?`<div class="md-sec-h md-doneh">Crossed off <span class="md-count">${done.length}</span></div>${done.map(t=>taskRow(t)+kidsOf(t.id).map(k=>taskRow(k,true)).join('')).join('')}`:''}
@@ -10208,11 +10204,10 @@ function paintMyDay(){
   view.querySelectorAll('[data-mdsub]').forEach(b=>b.onclick=()=>{ const v=prompt('Subtask:'); if(v&&v.trim()) myDayCall('task_add',{ title:v.trim(), parent_id:b.dataset.mdsub }); });
   view.querySelectorAll('[data-mdtime]').forEach(b=>b.onclick=()=>{ const v=prompt('Loose time (like "3 PM" or "afternoon"). Leave empty to clear.', b.dataset.cur||''); if(v!==null) myDayCall('task_edit',{ id:b.dataset.mdtime, time_hint:v }); });
   view.querySelectorAll('[data-mddel]').forEach(b=>b.onclick=()=>{ if(confirm('Delete this task?')) myDayCall('task_delete',{ id:b.dataset.mddel }); });
-  view.querySelectorAll('[data-mdhabit]').forEach(b=>b.onclick=()=>myDayCall('habit_check',{ id:b.dataset.mdhabit, done:b.dataset.done!=='1' }));
+
   // (a skipped habit reports done=1 above, so a tap clears it -- same as un-checking)
   view.querySelectorAll('[data-mdhabitrm]').forEach(b=>b.onclick=()=>{ if(confirm('Remove this habit? Its streak history is kept.')) myDayCall('habit_remove',{ id:b.dataset.mdhabitrm }); });
-  $('mdHabitEdit').onclick=()=>{ _myDayHabitEdit=!_myDayHabitEdit; paintMyDay(); };
-  if($('mdHabitAdd')) $('mdHabitAdd').onsubmit=e=>{ e.preventDefault(); const v=$('mdHabitName').value.trim(); if(v) myDayCall('habit_add',{ name:v }); };
+
   view.querySelectorAll('[data-mdlist]').forEach(b=>b.onclick=()=>myDayCall('list_done',{ id:b.dataset.mdlist, done:b.dataset.done!=='1' }));
   view.querySelectorAll('[data-mdlistdel]').forEach(b=>b.onclick=()=>myDayCall('list_delete',{ id:b.dataset.mdlistdel }));
   $('mdListAdd').onsubmit=e=>{ e.preventDefault(); const v=$('mdListInput').value.trim(); if(!v) return; $('mdListInput').value=''; myDayCall('list_add',{ title:v }); };
@@ -10220,6 +10215,7 @@ function paintMyDay(){
 // Once a day at/after 6 PM Bangkok (until the page turns at 5 AM): if any
 // habit is still open, one popup. Remembered per page so it never repeats.
 function startMyDayNudge(){
+  return; // habits removed (owner 2026-09-27)
   if(role!=='owner'||window._myDayNudgeOn) return; window._myDayNudgeOn=true;
   const check=async()=>{
     try{
@@ -10232,7 +10228,7 @@ function startMyDayNudge(){
       if(!left.length) return;
       try{ localStorage.setItem(key,'1'); }catch(_){}
       const n=document.createElement('div'); n.className='md-nudge';
-      n.innerHTML=`<b>Not done yet today:</b> ${esc(left.join(', '))}<div class="md-nudge-b"><button type="button" class="btn sm" data-go>Open My Day</button><button type="button" class="btn ghost sm" data-x>Later</button></div>`;
+      n.innerHTML=`<b>Not done yet today:</b> ${esc(left.join(', '))}<div class="md-nudge-b"><button type="button" class="btn sm" data-go>Open Tasks</button><button type="button" class="btn ghost sm" data-x>Later</button></div>`;
       document.body.appendChild(n);
       n.querySelector('[data-go]').onclick=()=>{ n.remove(); navTo('myday'); };
       n.querySelector('[data-x]').onclick=()=>n.remove();
