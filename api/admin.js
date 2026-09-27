@@ -9219,6 +9219,23 @@ async function callClaim(req, res, db, auth, body) {
 // for free at ingest — service/market/caller_phone as the secretary learns
 // them, then a resolution once the call is over.
 const CALL_RESOLUTIONS = ['booked', 'estimate_sent', 'refused', 'other'];
+// True when an estimate tied to this call (or its caller, within 6h after the
+// call) was texted or emailed.
+async function callHasSentEstimate(db, callId) {
+  const { data: call } = await db.from('calls').select('id, caller_phone, occurred_at, inbound_call_id').eq('id', callId).maybeSingle();
+  if (!call) return false;
+  const ids = [call.id, call.inbound_call_id].filter(Boolean);
+  const isSent = (e) => !!(e.texted_at || e.emailed_at || e.status === 'contacted' || e.status === 'scheduled');
+  const { data: byCall } = await db.from('estimates').select('id, status, texted_at, emailed_at').in('call_id', ids);
+  if ((byCall || []).some(isSent)) return true;
+  const ph = String(call.caller_phone || '').replace(/[^0-9]/g, '').slice(-10);
+  if (ph.length !== 10 || !call.occurred_at) return false;
+  const t0 = new Date(new Date(call.occurred_at).getTime() - 30 * 60000).toISOString();
+  const t1 = new Date(new Date(call.occurred_at).getTime() + 6 * 3600000).toISOString();
+  const { data: near } = await db.from('estimates').select('id, status, texted_at, emailed_at, customer_phone')
+    .gte('created_at', t0).lte('created_at', t1).ilike('customer_phone', '%' + ph.slice(-4));
+  return (near || []).some((e) => String(e.customer_phone || '').replace(/[^0-9]/g, '').slice(-10) === ph && isSent(e));
+}
 const PHONE_REQUEST_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function callUpdate(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -9262,6 +9279,11 @@ async function callUpdate(req, res, db, auth, body) {
   if (body.resolution !== undefined) {
     const r = String(body.resolution || '').trim();
     if (r && !CALL_RESOLUTIONS.includes(r)) return res.status(400).json({ error: 'Unknown resolution' });
+    // Owner rule 2026-09-27: "Estimate sent" only when a real estimate was
+    // actually sent for this call -- never on the secretary's word alone.
+    if (r === 'estimate_sent' && !(await callHasSentEstimate(db, id))) {
+      return res.status(400).json({ error: 'No estimate was sent for this call. Send the estimate first (Send estimate button), then mark it.' });
+    }
     patch.resolution = r || null;
     if (r) {
       patch.status = 'resolved';

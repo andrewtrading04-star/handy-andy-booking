@@ -13572,7 +13572,6 @@ function callCard(r,handled,g,v2){
         ? `<div class="rc-btn-row"><button class="rc-btn ghost" data-callact="new" data-callid="${esc(r.id)}">Reopen</button></div>`
         : `<div class="rc-btn-row">
              <button class="rc-btn green" data-callresolve="booked" data-callid="${esc(r.id)}">Booked</button>
-             <button class="rc-btn blue" data-callresolve="estimate_sent" data-callid="${esc(r.id)}">Estimate sent</button>
              <button class="rc-btn red" data-callresolve="refused" data-callid="${esc(r.id)}">Declined</button>
            </div>`)
     : handled
@@ -21078,7 +21077,6 @@ async function renderCallWiz(){
     body.innerHTML=`${callWizScript('How did this call end?')}
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button type="button" class="btn ghost" data-cwres="booked">Customer booked</button>
-        <button type="button" class="btn ghost" data-cwres="estimate_sent">Estimate sent</button>
         <button type="button" class="btn ghost" data-cwres="refused">Customer declined</button>
         <button type="button" class="btn ghost" data-cwres="other">Other</button>
       </div>
