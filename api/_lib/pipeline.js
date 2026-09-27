@@ -1201,6 +1201,11 @@ export async function pipelineHandler(req, res, db, auth, body) {
     }));
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (body && body.op === 'ask_why') {
+    const { askWhy } = await import('./pipeline-ask.js');
+    const r = await askWhy(db, auth, body, allowedSlugsFor(auth));
+    return res.status(r.status).json(r.json);
+  }
   try {
     return await pipelineOp(res, db, auth, body || {});
   } catch (e) {

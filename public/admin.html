@@ -10274,7 +10274,7 @@ let _plRange='yesterday', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
 let _plScrollTo=null;
 let _plTab='ov';
-let _plBookedOpen=false, _plLeakOnly=false, _plEstOpen=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
+let _plBookedOpen=false, _plLeakOnly=false, _plEstOpen=false, _plWhy=null;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10648,7 +10648,16 @@ function plDetailHtml(c){
   const un=c.unanswered, who=c.secretary||'the office';
   const unBanner=un?`<div style="background:#fdecec;border:1px solid #f3c2c2;color:#991b1b;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
     <b>Not called back · ${esc(who)}'s lead</b><br>${esc(plTitle(c))} ${un.kind==='voicemail'?'left a voicemail':un.kind==='text'?'texted us':'called and we missed it'} ${esc(plWhen(un.at,c.tz))}. No reply for ${un.hours>=1?un.hours+'h':un.mins+' min'}.</div>`:'';
-  return `<div class="pl-detail">${top.join('')}${unBanner}${tabs}<div class="plt-body">${body}</div>
+  // Ask why (owner 2026-09-27): Opus explains what's holding this card back.
+  const W_=_plWhy&&_plWhy.key===c.key?_plWhy:null;
+  const whyBox=c.stage==='booked'?'':(W_&&W_.ans
+    ?`<div style="border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
+        <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
+        <div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>
+        <div style="margin-top:5px;"><b>Next step:</b> ${esc(W_.ans.next_step)}</div>
+        <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
+    :`<div style="margin:0 0 12px;"><button type="button" class="pl-btn" data-pl="askwhy"${W_&&W_.loading?' disabled':''}>${W_&&W_.loading?'Thinking…':(c.stage==='completed'?'Ask why no review':'Ask why')}</button>${W_&&W_.err?` <span class="danger" style="font-size:12.5px;">${esc(W_.err)}</span>`:''}</div>`);
+  return `<div class="pl-detail">${top.join('')}${unBanner}${whyBox}${tabs}<div class="plt-body">${body}</div>
   </div>`;
 }
 // Owner only (the server also leaves `audit` out for secretaries). Score is
@@ -10814,6 +10823,14 @@ function plClick(e){
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
+    case 'askwhy': case 'askwhy-fresh': {
+      e.preventDefault();
+      const key=c.key; _plWhy={ key, loading:true }; paintPipeline();
+      api('pipeline',{ method:'POST', body:{ op:'ask_why', card_key:key, fresh:act==='askwhy-fresh' }, timeoutMs:60000 })
+        .then(ans=>{ if(_plWhy&&_plWhy.key===key){ _plWhy={ key, ans }; paintPipeline(); } })
+        .catch(err=>{ if(_plWhy&&_plWhy.key===key){ _plWhy={ key, err:err.message||'Could not get an answer' }; paintPipeline(); } });
+      return;
+    }
     case 'rv-email': case 'rv-sms': {
       const r=c.review||{}; if(!r.booking_id) return;
       const ch=act==='rv-sms'?'sms':'email';
