@@ -10597,7 +10597,8 @@ function plDetailHtml(c){
     ['Review given', bk.review_at||null, bk.review_rating?'★'.repeat(Math.max(0,Math.min(5,Math.round(bk.review_rating)))):''],
   ];
   if(c.lost) steps.push(['Lost · '+esc(c.lost.reason||''), c.lost.at||true, c.lost.note?'“'+esc(c.lost.note)+'”':'']);
-  const stepHtml=steps.map(([label,at,extra])=>`<div class="plt-step${at?' on':''}"><span class="plt-dot">${at?'✓':''}</span><span class="plt-lab">${label}${extra?`<small>${extra}</small>`:''}</span><span class="plt-at">${at&&at!==true?W(at):at?'':'—'}</span></div>`).join('');
+  // Only steps that actually happened (owner 2026-09-27).
+  const stepHtml=steps.filter(x=>x[1]).map(([label,at,extra])=>`<div class="plt-step${at?' on':''}"><span class="plt-dot">${at?'✓':''}</span><span class="plt-lab">${label}${extra?`<small>${extra}</small>`:''}</span><span class="plt-at">${at&&at!==true?W(at):at?'':'—'}</span></div>`).join('');
   const info=[
     ['Brand', c.business&&c.business.name?esc(c.business.name):'—'],
     ['Phone', phone?esc(c.phone_pretty||fmtPhone(c.phone)):'No number saved'],

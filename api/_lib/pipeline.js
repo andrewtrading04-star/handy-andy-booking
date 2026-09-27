@@ -525,7 +525,13 @@ export function evalStage(card, at, mark) {
     const l = autoLost("We don't do that", lastEst.est.declinedMs); if (l) return l;
   }
   // 6. Quoted; 7 days with no approval and no word from them -> Lost.
-  const sent = ests.filter((t) => t.est.sentMs != null && t.est.sentMs <= atMs);
+  let sent = ests.filter((t) => t.est.sentMs != null && t.est.sentMs <= atMs);
+  // Owner 2026-09-27: the call script's "estimate sent" counts as Quoted even
+  // when no estimate record exists (quoted on the call / texted by hand).
+  if (!sent.length) {
+    const sq = S.filter((t) => t.type === 'wizard' && t.live.resolution === 'estimate_sent' && t.atMs <= atMs);
+    if (sq.length) { const w = sq[sq.length - 1]; sent = [{ type: 'estimate', id: null, atMs: w.atMs, est: { source: 'script', status: null, sentMs: w.atMs, total: w.live.quoted, openedMs: null, fromScript: true } }]; }
+  }
   if (sent.length) {
     const e = sent[sent.length - 1];
     const clock = Math.max(e.est.sentMs, reop ?? -Infinity, lastReply(S, e.est.sentMs) ?? -Infinity);
@@ -1018,7 +1024,11 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
   for (const c of cards) {
     // Not a lead: this caller already has an active appointment (and this card isn't that booking).
     if (c.phone && activePhones.has(c.phone) && !c.touches.some((t) => t.type === 'booking')) continue;
-    if (c.st.stage === 'hidden' || c.openedMs < fromMs || c.openedMs >= toMs) continue;
+    if (c.st.stage === 'hidden') continue;
+    // In range if it started in range OR was booked in range (owner 2026-09-27:
+    // a lead from Sep 25 that booked yesterday counts in Yesterday's Booked).
+    const inRange = (ms) => ms >= fromMs && ms < toMs;
+    if (!inRange(c.openedMs) && !c.touches.some((t) => t.type === 'booking' && !t.timelineOnly && inRange(t.atMs))) continue;
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
   }
