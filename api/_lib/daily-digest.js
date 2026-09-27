@@ -115,7 +115,7 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
       // read as "overdue for completion" here. A real job can only become
       // overdue through this system's own booking flows.
       const { data: overdueRows } = await db.from('bookings')
-        .select(`id, scheduled_at, status,
+        .select(`id, scheduled_at, status, metadata,
                  business:businesses ( name ),
                  customer:customers ( name ),
                  technician:technicians!technician_id ( name )`)
@@ -124,7 +124,8 @@ export async function sendDailyBookingDigest({ force = false, dryRun = false, of
         .neq('source', 'import')
         .order('scheduled_at', { ascending: true })
         .limit(50);
-      overdue = overdueRows || [];
+      // Owner can silence one job's warning: bookings.metadata.digest_ignore.
+      overdue = (overdueRows || []).filter(o => !(o.metadata && o.metadata.digest_ignore));
     } catch (e) {
       console.warn('[daily-digest] overdue-jobs check failed (non-fatal):', e.message);
     }

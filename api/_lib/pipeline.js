@@ -351,7 +351,8 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
         // 'declined' is the office's "Not a fit" -- customers have no decline button.
         declinedMs: e.status === 'declined' ? (msOf(e.updated_at) ?? atMs) : null,
         total: total > 0 ? total : null, openedMs: opened.length ? Math.min(...opened) : null,
-        couponMs: msOf(e.followup_emailed_at), callId: e.call_id || null, label: e.service_label || null } });
+        couponMs: msOf(e.followup_emailed_at), callId: e.call_id || null, label: e.service_label || null,
+        items: (Array.isArray(e.line_items) ? e.line_items : []).slice(0, 30).map((it) => ({ name: String((it && (it.name || it.description)) || 'Item').slice(0, 120), qty: Number(it && (it.qty ?? it.quantity)) || 1, price: Number(it && it.unit_price) || 0 })) } });
   }
 
   for (const b of raw.bookings || []) {
@@ -962,7 +963,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     lost: st.stage === 'lost' ? { reason: st.lost.reason, auto: st.lost.auto, note: st.lost.note || '', by: st.lost.by || null, at: iso(st.lost.atMs) } : null,
     tries: failed,
     estimate: est ? { id: est.id, total: est.est.total, sent_at: iso(est.est.sentMs), opened: est.est.openedMs != null, coupon_at: iso(est.est.couponMs),
-      approved_at: iso(est.est.approvedMs), status: est.est.status, slug: est.slug || null } : null,
+      approved_at: iso(est.est.approvedMs), status: est.est.status, slug: est.slug || null, label: est.est.label || null, items: est.est.items || [] } : null,
     booking: bk ? { id: bk.id, scheduled_at: iso(bk.bk.scheduledMs), status: bk.bk.status, price: bk.bk.price, tech: bk.bk.tech, paid_at: iso(bk.bk.paidMs),
       completed_at: iso(bk.bk.completedMs), created_at: iso(bk.atMs), review_at: iso(bk.bk.reviewMs), review_rating: bk.bk.reviewRating,
       slug: bk.slug || null } : null,

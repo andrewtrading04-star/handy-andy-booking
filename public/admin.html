@@ -2217,6 +2217,7 @@
 .np-thumb button{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;border:0;background:#111;color:#fff;font-size:14px;line-height:1;cursor:pointer;padding:0}
 .note-reply{margin-top:10px;background:rgba(37,99,235,.07);border-left:3px solid var(--accent);border-radius:6px;padding:8px 11px;font-size:13px;line-height:1.45}
 @media(max-width:600px){.conv-card{grid-template-columns:1fr;gap:12px;}.conv-pct{font-size:34px;}.conv-stats{gap:12px;justify-content:center;}.conv-lab,.conv-foot{font-size:9px;}}
+  .rec-btn{display:inline-flex;align-items:center;gap:6px;margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
 </style>
 <!-- Stripe.js — loaded up front so "Change card" / charge flows always have
      window.Stripe available (previously only the New Booking flow loaded it
@@ -10268,7 +10269,7 @@ let _plRange='yesterday', _plBiz='all', _plStage=null, _plOpen=null;
 let _plAsk={};      // card key -> {mode:'bridge', attempt_id} | {mode:'manual'}: the open "Did you talk to them?"
 let _plScrollTo=null;
 let _plTab='ov';
-let _plBookedOpen=false, _plLeakOnly=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
+let _plBookedOpen=false, _plLeakOnly=false, _plEstOpen=false;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
@@ -10376,7 +10377,7 @@ function plHold(){
   if(_plLost && document.querySelector('#plRoot .pl-lost')) return true;
   // Don't rebuild the card while a recording is loaded/playing -- that killed
   // playback and made seeking "restart" (owner 2026-09-27).
-  if([...document.querySelectorAll('#view audio')].some(x=>x.getAttribute('src')||x._recLoading)) return true;
+  if(document.querySelector('#view audio, #view .rec-btn:disabled')) return true;
   const a=document.activeElement, v=document.getElementById('view');
   return !!(a && v && v.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
 }
@@ -10600,7 +10601,8 @@ function plDetailHtml(c){
   const stepHtml=steps.filter(x=>x[1]).map(([label,at,extra])=>`<div class="plt-step${at?' on':''}"><span class="plt-dot">${at?'✓':''}</span><span class="plt-lab">${label}${extra?`<small>${extra}</small>`:''}</span><span class="plt-at">${at&&at!==true?W(at):at?'':'—'}</span></div>`).join('');
   const info=[
     ['Brand', c.business&&c.business.name?esc(c.business.name):'—'],
-    ['Phone', phone?esc(c.phone_pretty||fmtPhone(c.phone)):'No number saved'],
+    // Owner 2026-09-27: Estimate sent (tap to view it here) instead of Phone.
+    ['Estimate sent', e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'} · ${_plEstOpen?'hide':'view'}</button>`:(e.id?'<span class="danger">Saved, not sent</span>':'No')],
     ['Handled by', c.secretary?esc(c.secretary):'—'],
   ];
   if(Number(c.tries)>0) info.push(['Callback tries', `${Number(c.tries)} with no answer`]);
@@ -10612,6 +10614,11 @@ function plDetailHtml(c){
     : tab==='more'
     ? `${moreBtns.length?`<div class="pl-acts">${moreBtns.join('')}</div>`:'<div class="plv-none">Nothing else to do here.</div>'}`
     : `<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+       ${_plEstOpen&&e.id?`<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;">
+         <div style="font-weight:800;margin-bottom:6px;">${esc(e.label||'Estimate')}${e.sent_at?` <span style="color:var(--mute);font-weight:600;">· sent ${esc(plWhen(e.sent_at,c.tz))}${e.opened?' · opened':' · not opened'}</span>`:''}</div>
+         ${(e.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px solid var(--line2);"><span>${esc(it.name)}${it.qty>1?' × '+it.qty:''}</span><span>${plMoney(it.qty*it.price)||'$0'}</span></div>`).join('')||'<div style="color:var(--mute);">No line items.</div>'}
+         ${plMoney(e.total)?`<div style="display:flex;justify-content:space-between;font-weight:800;padding-top:5px;border-top:1px solid var(--line);"><span>Total</span><span>${plMoney(e.total)}</span></div>`:''}
+       </div>`:''}
        <div class="plt-steps">${stepHtml}</div>
        ${plMediaHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
@@ -10641,17 +10648,19 @@ function plTimelineHtml(c){
 // Recording / voicemail player for a timeline item (owner, 2026-09-27).
 // Recordings download whole before playing (owner 2026-09-27: streamed
 // playback restarted from 0 when he dragged ahead). First tap loads + plays.
-document.addEventListener('pointerdown',async e=>{
-  const a=e.target&&e.target.closest&&e.target.closest('audio[data-rec-src]');
-  if(!a||a.getAttribute('src')||a._recLoading) return;
-  a._recLoading=true;
+document.addEventListener('click',async e=>{
+  const b=e.target&&e.target.closest&&e.target.closest('.rec-btn[data-rec-src]');
+  if(!b||b.disabled) return;
+  e.preventDefault(); e.stopPropagation();
+  b.disabled=true; b.textContent='Loading recording...';
   try{
-    const r=await fetch(a.dataset.recSrc); if(!r.ok) throw new Error('Could not load the recording');
-    a.src=URL.createObjectURL(await r.blob()); a.play().catch(()=>{});
-  }catch(err){ toast(err.message||'Could not load the recording'); a._recLoading=false; }
+    const r=await fetch(b.dataset.recSrc); if(!r.ok) throw new Error('Could not load the recording ('+r.status+')');
+    const a=document.createElement('audio'); a.controls=true; a.setAttribute('style',b.dataset.recStyle||'');
+    a.src=URL.createObjectURL(await r.blob()); b.replaceWith(a); a.play().catch(()=>{});
+  }catch(err){ b.disabled=false; b.innerHTML='&#9654; Play recording'; toast(err.message||'Could not load the recording'); }
 },true);
 function plAudio(t){
-  return t&&t.rec&&t.call_id?`<audio controls preload="none" style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+  return t&&t.rec&&t.call_id?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;">&#9654; Play recording</button>`:'';
 }
 // Overview: every voicemail, recorded call and text on this card, newest first.
 function plMediaHtml(c){
@@ -10728,7 +10737,7 @@ function plClick(e){
   if(!c) return;
   switch(act){
     case 'toggle':
-      _plOpen=_plOpen===c.key?null:c.key; _plTab='ov';
+      _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
     case 'call': plCall(c,b); return;
@@ -10758,6 +10767,7 @@ function plClick(e){
       // while it's open (openPayrollJob restores `current` on close).
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
+    case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
     case 'est': {
       const slug=plOwnSlug(c.estimate.slug) || plOwnSlug(c.estimate.business_slug) || plBizSlug(c);
       if(!slug){ toast(`This login can't open ${(c.business&&c.business.name)||'that brand'}'s estimates.`); return; }
@@ -12637,7 +12647,7 @@ async function renderCallAudit(){
     const dateLabel=new Date(f.audit_date+'T12:00:00').toLocaleDateString([], {month:'short',day:'numeric'});
     const h12=f.time_local?(()=>{const [hh,mm]=f.time_local.split(':').map(Number);return ((hh+11)%12)+1+':'+String(mm).padStart(2,'0')+(hh<12?' AM':' PM');})():null;
     const t=dateLabel+(h12?', '+h12+' CT':'');
-    const audio=f.has_recording?`<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:8px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(f.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+    const audio=f.has_recording?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(f.call_id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:8px;">&#9654; Play recording</button>`:'';
     return `<div class="au-listen" style="border:1px solid var(--line);background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:6px;">${esc(f.listen_reason||'')}</div>
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:13px;">
@@ -13446,7 +13456,7 @@ function callEarlierRow(r){
   const tz=r.tracking_label?shortTrackingLabel(r.tracking_label):'';
   const line=[r.business?.name, tz?`${tz} line`:null].filter(Boolean).map(esc).join(' · ');
   const audio=r.recording_url
-    ? `<audio controls preload="none" style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+    ? `<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:'';
   const tx=r.transcript?txView(r):'';
   return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
     <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
@@ -13535,7 +13545,7 @@ function callCard(r,handled,g,v2){
   const audio=r.recording_url
     ? `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;max-width:420px;">
          <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
-         <audio controls preload="none" style="width:100%;height:34px;display:block;" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}"></audio>
+         <button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;height:34px;display:block;">&#9654; Play recording</button>
        </div>`
     : '';
 
