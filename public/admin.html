@@ -7052,7 +7052,7 @@ function anaRender(d){
     ['ZIP Checks', (t.zipServed+t.zipUnserved), `<span class="bad">${t.zipUnserved} outside area</span>`],
   ];
   // Owner 2026-09-27: daily sessions + bookings line chart at the very top.
-  html+=`<div class="card section" style="margin-bottom:14px;"><div class="chartbox" style="height:260px;"><canvas id="ana-ch-timeline"></canvas></div></div>`;
+  if(String(anaDays)==='30'||anaCompareDays) html+=`<div class="card section" style="margin-bottom:14px;"><div class="chartbox" style="height:260px;"><canvas id="ana-ch-timeline"></canvas></div></div>`;
   html+=`<div class="grid kpis">`+kpis.map(k=>
     `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
   ).join('')+`</div>`;
