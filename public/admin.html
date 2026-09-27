@@ -479,6 +479,7 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
+  body.sec-nav.pl-on #navPipeline{display:flex !important;}
   .cv-item{flex-direction:row!important;align-items:center;gap:13px!important;padding:14px 14px!important;}
   .cv-av{flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
   .cv-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
@@ -3261,6 +3262,8 @@ function enterApp(){
   // Secretaries (owner, 2026-09-24): no Pipeline; Bracket Inventory, My
   // Availability, Technicians, Customers and Photos move under their own Other tab.
   document.body.classList.toggle('sec-nav', role==='secretary');
+  // Pipeline for secretaries, one at a time (owner 2026-09-27: Heather first).
+  document.body.classList.toggle('pl-on', role==='secretary' && ['Heather'].includes(userName));
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
   renderSwitcher();
