@@ -564,7 +564,7 @@
   .plv-col.on{outline:2px solid #2563eb;}
   .plv-col-h{border-top:4px solid var(--st);padding:8px 10px;background:#fff;display:flex;flex-direction:column;}
   .plv-col-h b{font-size:13.5px;} .plv-col-h span{font-size:12.5px;color:var(--mute);font-weight:700;}
-  .plv-col-b{padding:8px;display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow-y:auto;}
+  .plv-col-b{padding:8px;display:flex;flex-direction:column;gap:8px;}
   .plv-none{font-size:12px;color:var(--mute);text-align:center;padding:10px 0;}
   .plv-tile{flex:none;display:block;width:100%;text-align:left;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;}
   .plv-tile:hover{box-shadow:0 4px 12px rgba(15,23,42,.1);} .plv-tile.leak{border-color:#f87171;}
@@ -10607,6 +10607,7 @@ function plDetailHtml(c){
     ? `${moreBtns.length?`<div class="pl-acts">${moreBtns.join('')}</div>`:'<div class="plv-none">Nothing else to do here.</div>'}`
     : `<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>
        <div class="plt-steps">${stepHtml}</div>
+       ${plMediaHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
   return `<div class="pl-detail">${top.join('')}${tabs}<div class="plt-body">${body}</div>
   </div>`;
@@ -10628,8 +10629,19 @@ function plTimelineHtml(c){
   if(!tl.length) return '';
   return `<div class="pl-tl">${tl.map(t=>{
     const tone=PL_TONES.includes(t&&t.tone)?t.tone:'';
-    return `<div class="pl-tl-i ${tone}"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}</span><span class="w" title="${esc(t.at||'')}">${esc(plWhen(t.at,c.tz))}</span></div>`;
+    return `<div class="pl-tl-i ${tone}"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}${plAudio(t)}</span><span class="w" title="${esc(t.at||'')}">${esc(plWhen(t.at,c.tz))}</span></div>`;
   }).join('')}</div>`;
+}
+// Recording / voicemail player for a timeline item (owner, 2026-09-27).
+function plAudio(t){
+  return t&&t.rec&&t.call_id?`<audio controls preload="none" style="width:100%;max-width:340px;height:32px;display:block;margin-top:5px;" src="${API}?action=call_recording&id=${encodeURIComponent(t.call_id)}&token=${encodeURIComponent(token)}"></audio>`:'';
+}
+// Overview: every voicemail, recorded call and text on this card, newest first.
+function plMediaHtml(c){
+  const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'));
+  if(!tl.length) return '';
+  return `<div class="rc-count" style="margin:4px 0 6px;">Voicemails, calls &amp; texts</div><div class="pl-tl">${tl.slice().reverse().map(t=>
+    `<div class="pl-tl-i"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}${plAudio(t)}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`).join('')}</div>`;
 }
 
 // Every write: POST {op,...}, then re-read the board (the server returns only

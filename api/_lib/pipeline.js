@@ -299,7 +299,7 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
     else { talk = 'unconfirmed'; why = 'unconfirmed'; }
     touches.push({ type: 'call_in', id: x.id, atMs: x.atMs, phone: x.phone, slug: x.slug, family: x.family, canOpen: true,
       staff: ctx.handsetName.get(x.fwd) || null, talk, why, dur, answered: c.answered, line: x.line, lineName: x.lineName,
-      endMs: x.atMs + (dur || 0) * 1000, wizard: wizardLinked.has(x.id),
+      endMs: x.atMs + (dur || 0) * 1000, wizard: wizardLinked.has(x.id), rec: !!c.recording_url,
       // Left a voicemail (owner, 2026-09-26): a missed call we recorded, or an
       // answered call the office/auditor marked as voicemail.
       vm: (c.answered === false && !!c.recording_url) || why === 'marked_voicemail' || why === 'audit_voicemail' });
@@ -817,6 +817,9 @@ function timelineFor(card, st, mark, audits) {
         else if (t.why === 'no_person') out.push(item(t.atMs, 'missed', `Call not answered by a person${line}`, t.staff, 'danger'));
         else if (t.why === 'short') out.push(item(t.atMs, 'missed', `Answered ${fmtDur(t.dur)} — too short, likely voicemail${line}`, t.staff, 'danger'));
         else out.push(item(t.atMs, 'missed', `Answered ${fmtDur(t.dur)} — marked voicemail${line}`, t.staff, 'mute'));
+        // Owner 2026-09-27: voicemails + recordings playable right on the card.
+        if (t.vm && t.why === 'missed') out[out.length - 1].text = `Voicemail left${line}`;
+        if (t.rec) { out[out.length - 1].call_id = t.id; out[out.length - 1].rec = true; }
         break;
       case 'wizard': {
         const r = t.live.resolution;
@@ -826,8 +829,8 @@ function timelineFor(card, st, mark, audits) {
         out.push(item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'));
         break;
       }
-      case 'text_in': out.push(item(t.atMs, 'text', `Text: ${clip(t.body, 90)}`, null, 'ok')); break;
-      case 'text_out_staff': out.push(item(t.atMs, 'text', `Text reply: ${clip(t.body, 90)}`, t.staff, 'ok')); break;
+      case 'text_in': out.push(item(t.atMs, 'text', `Text: ${clip(t.body, 600)}`, null, 'ok')); break;
+      case 'text_out_staff': out.push(item(t.atMs, 'text', `Text reply: ${clip(t.body, 600)}`, t.staff, 'ok')); break;
       case 'text_auto': {
         const label = { missed_call: 'Auto-text sent (missed call)', estimate: 'Estimate link texted', booked: 'Booking confirmation texted' }[t.auto];
         if (!label && autoOther >= AUTO_TEXT_OTHER_CAP) break;
