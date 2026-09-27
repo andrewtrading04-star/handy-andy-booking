@@ -1042,6 +1042,11 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     if (doneJob) {
       const b = c.st.booking && c.st.booking.bk;
       if (!b || b.gotReview) continue;
+      // Any phone contact after the appointment (review call logged, or a
+      // connected call either way) takes it off Completed (owner 2026-09-27).
+      const after = Math.min(b.scheduledMs ?? Infinity, b.completedMs ?? Infinity);
+      if (b.rv.call_status && (!b.rv.call_at || msOf(b.rv.call_at) >= after - DAY)) continue;
+      if (c.touches.some((t) => t.atMs > after && ((t.type === 'attempt' && (t.att.dialStatus === 'completed' || t.talk === 'yes')) || (t.type === 'call_in' && t.talk)))) continue;
       if (nowMs - (b.completedMs ?? b.paidMs ?? 0) > 14 * DAY) continue;
       if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
       shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
