@@ -15420,6 +15420,11 @@ async function bracketPurchases(req, res, db, auth) {
 // sync if this ever changes).
 async function creditWirePlateInv(db, businessId, technicianId, delta) {
   if (!delta) return;
+  // The plate STOCK row lives under the tech's own home business, never the
+  // order's: a Handy Andy order assigned to a Dom's tech (Gregory, 2026-09-26)
+  // otherwise spawns a second, empty-bracket row for that tech.
+  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', technicianId).maybeSingle();
+  businessId = techRow?.business_id || businessId;
   const { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty').eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
   if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
@@ -16258,10 +16263,7 @@ async function wirePlateRemove(req, res, db, auth, body) {
   for (const r of rows) {
     // Reverse any inventory credit so removing a counted order doesn't leave phantom plates.
     if (hasCredited && r.credited && r.technician_id && (r.plates || 0) > 0) {
-      const { data: inv } = await db.from('bracket_inventory')
-        .select('id, wire_plate_qty').eq('technician_id', r.technician_id).eq('business_id', r.business_id).maybeSingle();
-      if (inv) await db.from('bracket_inventory')
-        .update({ wire_plate_qty: Math.max(0, (inv.wire_plate_qty || 0) - (r.plates || 0)) }).eq('id', inv.id);
+      await creditWirePlateInv(db, r.business_id, r.technician_id, -(r.plates || 0));
     }
     const { error: delErr } = await db.from('wire_plate_purchases').delete().eq('id', r.id);
     if (!delErr) removed++;

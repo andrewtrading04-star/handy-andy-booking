@@ -327,6 +327,11 @@ const PLATES_PER_UNIT = parseInt(process.env.PLATES_PER_UNIT) || 5;
 // a later email. Silently no-ops if migration 0039 isn't applied yet.
 async function adjustWirePlateInv(db, businessId, technicianId, delta) {
   if (!delta) return;
+  // The plate STOCK row lives under the tech's own home business, never the
+  // order's: a Handy Andy order assigned to a Dom's tech (Gregory, 2026-09-26)
+  // otherwise spawns a second, empty-bracket row for that tech.
+  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', technicianId).maybeSingle();
+  businessId = techRow?.business_id || businessId;
   const { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty')
     .eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
