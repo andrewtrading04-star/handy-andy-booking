@@ -13927,42 +13927,63 @@ let _callsMobOpen=null;
 // Which companies this caller rang, and which one they booked with
 // (owner 2026-09-28: Chris called Handy Andy AND Dom's, then booked Handy Andy
 // -- that has to be obvious, not buried in one merged card).
-function callBrandsStrip(g){
+// Caller who rang MORE THAN ONE of our companies (owner 2026-09-28): one
+// customer at the top, the journey across companies in order, then each
+// company side by side with its own calls and its own price.
+function callSplitView(g){
   const all=(g&&g.rows||[]).slice().sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at)));
   const rows=all.filter(r=>r.kind!=='live'&&r.kind!=='sms');
-  const tz=CALL_TZ[(g&&g.latest&&g.latest.market)]||'America/Denver';
+  const bn=r=>(r.business&&r.business.name)||'Unknown line';
+  const brands=[...new Set(rows.map(bn))];
+  if(brands.length<2) return '';
+  const tz=CALL_TZ[(g.latest&&g.latest.market)]||'America/Denver';
   const t=iso=>{ try{ return new Date(iso).toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
-  const brands=[...new Set(rows.map(r=>(r.business&&r.business.name)||'Unknown line'))];
-  const lb=g&&g.latest&&g.latest.history&&g.latest.history.latest_booking;
-  const firstCall=rows.length?rows[0].occurred_at:null;
-  const bookedNow=!!(lb&&lb.created_at&&firstCall&&lb.created_at>=firstCall);
-  if(brands.length<2&&!bookedNow) return '';
-  const sumPick=(r,k)=>{ const it=(r.transcript_summary&&r.transcript_summary.items)||[]; return (it.find(i=>i.kind===k)||{}).text||''; };
-  // Call flow: every call and the booking, in time order.
-  const steps=rows.map(r=>{
-    const who=r.answered===false?'Missed':(r.routed_to_name||r.handled_by||'Answered');
-    const brief=[sumPick(r,'price'), sumPick(r,'booked')||sumPick(r,'not_booked')].filter(Boolean).join(' · ');
-    return { at:r.occurred_at, html:`<b>${esc((r.business&&r.business.name)||'Unknown line')}</b> · ${esc(who)}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}${brief?`<div style="color:var(--ink-2);font-size:12.5px;">${esc(brief)}</div>`:''}` };
-  });
-  if(bookedNow) steps.push({ at:lb.created_at, html:`<b style="color:#15803d;">Booked with ${esc(lb.brand||'us')}</b>${lb.booked_by?' · by '+esc(lb.booked_by):''}${lb.price?' · $'+Math.round(lb.price):''}` });
+  const lb=g.latest&&g.latest.history&&g.latest.history.latest_booking;
+  const booked=!!(lb&&lb.created_at&&lb.created_at>=rows[0].occurred_at)?lb:null;
+  const pick=(r,k)=>{ const it=(r.transcript_summary&&r.transcript_summary.items)||[]; return (it.find(i=>i.kind===k)||{}).text||''; };
+  const money=txt=>{ const m=String(txt||'').match(/\$\s?(\d[\d,]*)/); return m?Number(m[1].replace(/,/g,'')):null; };
+  const COL=['#FF6B35','#2563EB','#16a34a','#7c3aed'];
+  const color=n=>COL[brands.indexOf(n)%COL.length];
+  // price per company: booked price, else the last quoted $ in its calls
+  const price={}; brands.forEach(n=>{ if(booked&&booked.brand===n&&booked.price){ price[n]=Math.round(booked.price); return; }
+    const q=rows.filter(r=>bn(r)===n).map(r=>money(pick(r,'price'))).filter(v=>v!=null).pop(); if(q!=null) price[n]=q; });
+  const name=(g.latest.customer&&g.latest.customer.name)||'';
+  const phone=g.latest.caller_pretty||g.latest.caller_phone||'';
+  // journey chips
+  const steps=rows.map(r=>({ at:r.occurred_at, brand:bn(r), label:r.answered===false?'No answer':`${r.routed_to_name||'Answered'}${r.duration_sec?' · '+callDuration(r.duration_sec):''}` }));
+  if(booked) steps.push({ at:booked.created_at, brand:booked.brand, label:'Booked', ok:true });
   steps.sort((a,b)=>String(a.at).localeCompare(String(b.at)));
-  const flow=steps.map((st,k)=>`<div style="display:flex;gap:10px;padding:5px 0;${k?'border-top:1px solid var(--line2);':''}font-size:13px;"><span style="flex:none;width:62px;color:var(--mute);">${esc(t(st.at))}</span><span style="flex:1;">${st.html}</span></div>`).join('');
-  // What each company offered.
-  const per=brands.map(n=>{
-    if(bookedNow&&lb.brand===n){
-      const when=lb.at?new Date(lb.at).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-      return `<div style="font-size:13.5px;"><b style="color:#15803d;">✅ ${esc(n)}: booked</b>${lb.price?' $'+Math.round(lb.price):''}${when?' · '+esc(when):''}</div>`;
-    }
-    const mine=rows.filter(r=>((r.business&&r.business.name)||'Unknown line')===n);
-    const price=mine.map(r=>sumPick(r,'price')).filter(Boolean).pop();
-    const liveQ=all.filter(r=>r.kind==='live'&&r.quoted_total&&mine.some(m=>m.id===r.inbound_call_id)).map(r=>'$'+Math.round(r.quoted_total)).pop();
-    return `<div style="font-size:13.5px;"><b style="color:#b91c1c;">❌ ${esc(n)}: not booked</b>${price?' · '+esc(price):liveQ?' · quoted '+esc(liveQ):''}</div>`;
-  }).join('');
-  return `<div style="border:2px solid #111418;border-radius:12px;padding:10px 12px;margin-bottom:12px;background:#f8fafc;">
-    <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📞 Called ${brands.length} compan${brands.length===1?'y':'ies'}</div>
-    ${per}
-    <div style="font-weight:800;font-size:13px;margin:10px 0 2px;">Call flow</div>${flow}</div>`;
+  const journey=steps.map((st,k)=>`${k?'<span style="color:var(--mute);font-size:18px;padding:0 2px;">→</span>':''}<span style="display:inline-flex;flex-direction:column;border:2px solid ${st.ok?'#16a34a':color(st.brand)};background:${st.ok?'#ecfdf5':'#fff'};border-radius:10px;padding:5px 9px;min-width:92px;"><span style="font-size:11px;color:var(--mute);">${esc(t(st.at))}</span><b style="font-size:12.5px;color:${color(st.brand)};">${esc(st.brand)}</b><span style="font-size:12px;${st.ok?'color:#15803d;font-weight:800;':''}">${esc(st.label)}</span></span>`).join('');
+  const ps=brands.filter(n=>price[n]!=null);
+  const diff=ps.length>1?Math.max(...ps.map(n=>price[n]))-Math.min(...ps.map(n=>price[n])):0;
+  const col=n=>{
+    const mine=rows.filter(r=>bn(r)===n), won=booked&&booked.brand===n;
+    const when=won&&booked.at?new Date(booked.at).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    return `<div style="flex:1;min-width:250px;border:2px solid ${color(n)};border-radius:12px;overflow:hidden;background:#fff;">
+      <div style="background:${color(n)};color:#fff;padding:8px 12px;font-weight:800;">${esc(n)}</div>
+      <div style="padding:10px 12px;border-bottom:1px solid var(--line);">
+        <div style="font-size:26px;font-weight:800;">${price[n]!=null?'$'+price[n]:'—'}</div>
+        <div style="font-weight:800;color:${won?'#15803d':'#b91c1c'};">${won?'✅ Booked'+(when?' · '+esc(when):'')+(booked.booked_by?' · by '+esc(booked.booked_by):''):'❌ Not booked'}</div>
+      </div>
+      ${mine.map(r=>`<div style="padding:9px 12px;border-bottom:1px solid var(--line2);font-size:13px;">
+        <div><b>${esc(t(r.occurred_at))}</b> · ${r.answered===false?'<span style="color:#b91c1c;">No answer</span>':esc(r.routed_to_name||'Answered')}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</div>
+        ${[pick(r,'job'),pick(r,'price'),pick(r,'booked')||pick(r,'not_booked')].filter(Boolean).map(x=>`<div style="color:var(--ink-2);font-size:12.5px;">${esc(x)}</div>`).join('')}
+        ${r.recording_url?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:''}
+        ${r.transcript&&/^(Staff|Customer):/m.test(r.transcript)?`<details style="margin-top:4px;"><summary style="font-size:12px;cursor:pointer;color:var(--accent);">Show conversation</summary>${txView(r)}</details>`:''}
+      </div>`).join('')}
+    </div>`;
+  };
+  return `<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;background:#f8fafc;">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
+      <div><div style="font-size:20px;font-weight:800;">${esc(name||phone)}</div>${name?`<div style="color:var(--mute);">${esc(phone)}</div>`:''}</div>
+      <div style="font-weight:800;color:#b45309;">Called ${brands.length} of your companies</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:10px 0;">${journey}</div>
+    ${diff>0?`<div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:8px 12px;font-weight:800;margin-bottom:10px;">⚠ Two different prices: ${ps.map(n=>esc(n)+' $'+price[n]).join(' vs ')} ($${diff} apart)</div>`:''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">${brands.map(col).join('')}</div>
+  </div>`;
 }
+function callBrandsStrip(g){ return ''; }
 function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
     const missed=r.answered===false;
@@ -13977,10 +13998,10 @@ function callInboxPhone(groups){
       </button>
       ${on?`<div class="cm-body">
         ${g.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped.</div>`:''}
-        ${callBrandsStrip(g)}
+        ${callSplitView(g)||''}
         ${callHaveBoxes(g)}
-        ${callCard(r, !g.open, g)}
-        ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+        ${callSplitView(g)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(r, !g.open, g)}</details>`:callCard(r, !g.open, g)}
+        ${!callSplitView(g)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
       </div>`:''}
     </div>`; }).join('')}</div>`;
 }
@@ -14006,9 +14027,9 @@ function callInbox(groups){
     </button>`; }).join('')}
   </div><section class="ci-detail cv-detail" aria-label="Selected caller details">
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
-    ${callBrandsStrip(selected)}
-    ${callCard(selected.latest, !selected.open, selected, true)}
-    ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+    ${callSplitView(selected)||''}
+    ${callSplitView(selected)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(selected.latest, !selected.open, selected, true)}</details>`:callCard(selected.latest, !selected.open, selected, true)}
+    ${!callSplitView(selected)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
   </section></div>`;
 }
 // The Text box on a call card: pops that ONE customer's texts over the Calls
