@@ -741,7 +741,9 @@ async function login(req, res, body) {
   const db = serviceClient();
   // The switcher is driven entirely by this list, so a secretary with extra
   // brands gets them here (they land in its "Lead Gen" dropdown automatically).
-  const loginExtra = scope === 'all' ? [] : (SECRETARY_EXTRA_BUSINESSES[scope] || []);
+  // Same live rule as session_status (allowedSlugsFor): includes access-only
+  // grants like Joey -> Handy Andy, which the raw extras map does not.
+  const loginExtra = scope === 'all' ? [] : (allowedSlugsFor({ scope }) || []).filter(sl => sl !== scope);
   // analytics_config (migration 0106) rides along here so the client-side
   // Analytics screens (website-traffic backend, Cities tab) never need their
   // own hardcoded per-business map — one place fills it in, this is the one
@@ -820,7 +822,7 @@ async function viewAs(req, res, db, auth) {
   // Mirror the real login exactly, extra brands included — the whole point of
   // View As is showing the owner what that secretary actually sees, and Joey's
   // login now carries the Austin/Houston lead-gen brands.
-  const viewAsExtra = SECRETARY_EXTRA_BUSINESSES[viewSlug] || [];
+  const viewAsExtra = (allowedSlugsFor({ scope: viewSlug }) || []).filter(sl => sl !== viewSlug);
   const { data: businesses, error } = await db.from('businesses')
     .select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true)
     .in('slug', [viewSlug, ...viewAsExtra]).order('name');

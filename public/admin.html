@@ -1068,6 +1068,8 @@
   .est-quote-line b{color:var(--ink);}
   .est-quote-total{display:flex;justify-content:space-between;gap:10px;font-size:14px;font-weight:800;color:var(--ink);margin-top:6px;padding-top:6px;border-top:1px solid var(--line2);}
   .est-quote-total .amt{color:var(--accent);}
+  .est-quote-sub{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--mute);margin-top:4px;}
+  .est-quote-line + .est-quote-sub{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line2);}
   .est-approval{display:inline-flex;align-items:center;gap:6px;margin-top:10px;border-radius:8px;padding:6px 11px;font-size:13px;font-weight:800;line-height:1.3;}
   .est-approval.approved{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
   .est-approval.waiting{background:#fef3c7;color:#b45309;border:1px solid #fde68a;}
@@ -1088,7 +1090,7 @@
   .est-toprow .name{flex:1;min-width:0;}
   .age-pill{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;flex:none;margin-top:1px;}
   .age-pill.ok{background:var(--line2);color:var(--mute);}
-  .age-pill.stale{background:#dc2626;color:#fff;}
+  .age-pill.stale{background:#dc2626;color:#fff !important;border-radius:999px;}
   .job.est-card.stale{border-color:#fca5a5;background:#fff6f6;box-shadow:0 0 0 1px #fecaca;animation:estcardpulse 2.4s ease-in-out infinite;}
   @keyframes estcardpulse{0%,100%{box-shadow:0 0 0 1px #fecaca;}50%{box-shadow:0 0 0 4px rgba(239,68,68,.15);}}
   @media(prefers-reduced-motion:reduce){.job.est-card.stale{animation:none;}}
