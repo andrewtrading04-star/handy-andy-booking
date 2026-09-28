@@ -15320,13 +15320,12 @@ function rcCard(r){
   // 2. the opener, already filled in -- time band sits right above the actual
   // dial action, since that's the one moment it needs to be seen.
   h+=`${rcTimeBandHtml(r)}
-    <div style="text-align:center;font-size:28px;line-height:1;color:var(--mute);margin:18px 0;" aria-hidden="true">↓</div>
     <div class="rc-step">1 · Say this</div>
     <div class="rc-say"><i></i><p>${esc(rcScript(r))}</p></div>
     ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
 
   // 3. how it went
-  h+=`<div class="rc-step">2 · How did it go?</div><div class="rc-opts">`
+  h+=`<div style="text-align:center;font-size:28px;line-height:1;color:var(--mute);margin:18px 0;" aria-hidden="true">↓</div><div class="rc-step">2 · How did it go?</div><div class="rc-opts">`
     + RC_OUTCOMES.map(o=>`<button type="button" class="rc-opt ${o.tone}${w.outcome===o.v?' on':''}" data-rc-out="${o.v}" data-rc-id="${r.id}">
          <span class="d"></span><span>${esc(o.label)}</span></button>`).join('')
     + `</div>`;
