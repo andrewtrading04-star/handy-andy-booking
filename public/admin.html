@@ -22188,13 +22188,10 @@ document.getElementById('nbCategory').addEventListener('change',async e=>{
 function renderGdsStep(){
   const steps=document.getElementById('nbSteps');
   if(!steps) return;
-  steps.innerHTML=
-    `<div class="nb-step-t">Guaranteed Dismount Service</div>`+
-    `<div class="nb-hint">Free — the tech removes one TV. $0 to the customer; the technician is paid $60.</div>`+
-    `<div style="margin-top:12px;">`+
-      `<label style="display:block;font-size:12px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">What phone number did the customer use?</label>`+
-      `<input class="search" style="margin:0;" id="nbGdsPhone" inputmode="tel" autocomplete="off" placeholder="Phone the customer used">`+
-    `</div>`;
+  // Owner 2026-09-28: nothing to fill in for a GDS job -- no phone question,
+  // no custom lines. Picking the category is enough.
+  steps.innerHTML='';
+  nbShowCustomLines(false);
   updateNbTotal();
 }
 
@@ -22791,7 +22788,8 @@ let nbGdsActive=false, nbGdsServiceId=null, nbNoChargeActive=false, nbCustomTask
 // stamped with the real booking id, see the booking_create success handler.
 let nbLinkedCallId=null, nbLinkedCallDraft=null;
 function nbOnlyFrame(){ return nbFrameTvQty.frame > 0 && nbFrameTvQty.regular === 0; }
-function resetNbSteps(){ for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; for(const k in nbOptionPrices) delete nbOptionPrices[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
+function nbShowCustomLines(on){ ['nbCustomLinesWrap','nbAddCustomLine'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=on?'':'none'; }); }
+function resetNbSteps(){ nbShowCustomLines(true); for(const k in nbQty) delete nbQty[k]; for(const k in nbOptionNotes) delete nbOptionNotes[k]; for(const k in nbOptionPrices) delete nbOptionPrices[k]; nbOptionGroups=[]; nbFrameTvQty={regular:0,frame:0}; nbHandymanActive=false; nbHandymanHours=0; nbHandymanLabel=''; nbHandymanNote=''; nbAssurionActive=false; nbAssurionSel.clear(); nbGdsActive=false; nbNoChargeActive=false; nbCustomTaskActive=false; document.getElementById('nbSteps').innerHTML=''; nbPrevSecondMode='none'; nbPrevAvailKey='single'; const stw=document.getElementById('nbSecondTechWrap'); if(stw) stw.style.display='none'; const sts=document.getElementById('nbSecondTech'); if(sts) sts.value=''; }
 // Free-text notes the admin can attach to an "Other" option, keyed by option id.
 const nbOptionNotes={};
 // Price typed by hand for an "Other" add-on, keyed by option id. The catalog
@@ -23584,9 +23582,9 @@ function nbBuildNotes(assurion, selections, payout){
 }
 // Notes for a Guaranteed Dismount booking — records the phone the customer used
 // so the redemption can be traced back to the original purchase.
-function nbBuildGdsNotes(phone){
+function nbBuildGdsNotes(){
   const userNotes=document.getElementById('nbNotes').value.trim();
-  let note=`Guaranteed Dismount Service (free)\nPhone customer used: ${phone||'—'}`;
+  let note='Guaranteed Dismount Service (free)';
   if(userNotes) note=`${userNotes}\n\n${note}`;
   return note;
 }
@@ -23944,8 +23942,6 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
   // the notes so the payroll engine matches it ("Assurion … Tech pay: $X").
   const assurion=nbAssurionActive;
   const gds=nbGdsActive;
-  const gdsPhone=gds?(document.getElementById('nbGdsPhone').value||'').trim():'';
-  if(gds && !gdsPhone){ err.textContent='Enter the phone number the customer used.'; return; }
   const assurionPayout=assurion?selections.reduce((s,x)=>s+x.price*x.quantity,0):0;
   if(assurion && selections.length===0){ err.textContent='Pick at least one Assurion service'; return; }
   // A completely bare booking — no category chosen at all, so nbOptionGroups
@@ -24095,7 +24091,7 @@ document.getElementById('nbForm').addEventListener('submit',async e=>{
       subtotal,
       tax,
       price: totalPrice,
-      notes: gds ? nbBuildGdsNotes(gdsPhone) : nbBuildNotes(assurion, selections, assurionPayout),
+      notes: gds ? nbBuildGdsNotes() : nbBuildNotes(assurion, selections, assurionPayout),
       payment_method: paymentMethod || null,
       payment_method_id: paymentMethodId,
       sms_consent: document.getElementById('nbSmsConsent').checked,
