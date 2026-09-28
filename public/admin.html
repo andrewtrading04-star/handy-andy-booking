@@ -22220,8 +22220,7 @@ function renderNoChargeStep(){
 function renderCustomTaskStep(){
   const steps=document.getElementById('nbSteps');
   if(!steps) return;
-  steps.innerHTML=
-    `<div class="nb-step-t">Custom Task</div>`;
+  steps.innerHTML='';
   if(!nbCustomLines.length){ nbCustomLines=[{label:'',price:''}]; }
   nbRenderCustomLines();
   updateNbTotal();
