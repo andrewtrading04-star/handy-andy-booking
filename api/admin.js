@@ -10334,7 +10334,7 @@ async function attachInboundVoicemails(db, rows) {
     }
     if (!byPhone.size) return;
     const { data } = await db.from('calls')
-      .select('caller_phone, transcript, occurred_at, market, status')
+      .select('id, caller_phone, transcript, transcript_summary, occurred_at, market, status')
       .in('caller_phone', [...byPhone.keys()])
       .order('occurred_at', { ascending: false });
     for (const c of (data || [])) {
@@ -10343,7 +10343,7 @@ async function attachInboundVoicemails(db, rows) {
         // seen for a number wins.
         if (!r.inbound_voicemail) {
           r.inbound_voicemail = {
-            transcript: c.transcript, occurred_at: c.occurred_at, market: c.market, status: c.status,
+            id: c.id, transcript: c.transcript, transcript_summary: c.transcript_summary || null, occurred_at: c.occurred_at, market: c.market, status: c.status,
           };
         }
       }
