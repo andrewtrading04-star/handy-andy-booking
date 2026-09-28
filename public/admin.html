@@ -7422,15 +7422,30 @@ async function loadWebAnalytics(){
         ? api('city_pages_analytics',{ params:{ business:current.slug, days:30 }}).catch(e=>({pages:[],sessions:[],error:e.message}))
         : Promise.resolve(null),
     ]);
+    // Owner, 2026-09-28: daily Page Views + Clicks line graph, 7/30-day views
+    // only (one point per Denver day; today/yesterday would be a single dot).
+    // The backends return totals, not timestamped events, so ask per day.
+    const trend=(webDays==='7'||webDays==='30')?await webTrend(base,parseInt(webDays,10)):null;
     await chartReady;
     // Owner, 2026-09-24: our own preview/testing tools are not traffic sources.
     const junkRef=n=>/mobileviewer|github|clone|vercel\.app/i.test(String(n||''));
     if(ref&&ref.referrers) ref.referrers=ref.referrers.filter(r=>!junkRef(r.name));
     if(ses&&ses.sessions) ses.sessions=ses.sessions.filter(s=>!junkRef(s.referrer));
-    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,city,lastUpdated:new Date().toISOString()});
+    webRender({pv,clk,form,fun,scr,ses,top,dev,ref,bounce,exit,gsc,city,trend,lastUpdated:new Date().toISOString()});
   }catch(err){
     if(content) content.innerHTML=`<div class="card err" style="padding:18px;">Error loading website analytics: ${esc(err.message)}</div>`;
   }finally{ webLoading=false; }
+}
+
+async function webTrend(base,days){
+  const one=async(path,from,to)=>{ try{ const r=await fetch(base+path+'?from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to)); return r.ok?((await r.json()).total||0):0; }catch{ return 0; } };
+  const out={labels:[],pv:[],clk:[]};
+  const rows=await Promise.all(Array.from({length:days},(_,i)=>{
+    const off=i-(days-1); const {from,to}=anaDenverDayRange(off);
+    return Promise.all([one('/api/analytics/page-views',from,to),one('/api/analytics/clicks',from,to)]).then(([pv,clk])=>({from,pv,clk}));
+  }));
+  rows.forEach(r=>{ out.labels.push(new Date(r.from).toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'America/Denver'})); out.pv.push(r.pv); out.clk.push(r.clk); });
+  return out;
 }
 
 function webRender(d){
@@ -7460,6 +7475,8 @@ function webRender(d){
     html+=`<div class="grid kpis">`+kpis.map(k=>
       `<div class="card kpi"><div class="lbl">${k[0]}</div><div class="val">${k[1]??'—'}</div><div class="extra">${k[2]||''}</div></div>`
     ).join('')+`</div>`;
+
+    if(d.trend) html+=`<div class="section card"><h2>Page Views &amp; Clicks</h2><div class="chartbox"><canvas id="web-ch-trend"></canvas></div></div>`;
 
     // DFW location pages — the 6 new pages the owner asked to monitor closely.
     // Own dedicated section, always visible regardless of the top range picker
@@ -7742,6 +7759,13 @@ function webDrawCharts(d,brand){
   Object.entries(d.scr.depth_distribution||{}).forEach(([pct,cnt])=>{
     const p=Number(pct), c=Number(cnt)||0;
     if(p<=25) buckets[0]+=c; else if(p<=50) buckets[1]+=c; else if(p<=75) buckets[2]+=c; else buckets[3]+=c;
+  });
+  const trEl=document.getElementById('web-ch-trend');
+  if(trEl&&d.trend) webCharts.tr=new Chart(trEl,{ type:'line',
+    data:{ labels:d.trend.labels, datasets:[
+      { label:'Page Views', data:d.trend.pv, borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,.12)', tension:.3, pointRadius:3 },
+      { label:'Clicks', data:d.trend.clk, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.12)', tension:.3, pointRadius:3 } ] },
+    options:{ maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{legend:{display:true,position:'bottom'}}, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
   });
   const sc=document.getElementById('web-ch-scroll');
   if(sc) webCharts.sc=new Chart(sc,{ type:'bar',
