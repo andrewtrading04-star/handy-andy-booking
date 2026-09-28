@@ -481,7 +481,7 @@ export default async function handler(req, res) {
       case 'booking_note_delete':  return await bookingNoteDelete(req, res, db, auth, body);
       case 'photo_gallery':        return await photoGallery(req, res, db, auth);
       case 'jiyah_photos':         return await jiyahPhotos(req, res, db, auth);
-      case 'photo_logo_scan':      return await photoLogoScan(req, res, db, auth, body);
+      case 'photo_logo_scan':      return res.status(410).json({ error: 'Removed' });   // owner 2026-09-28
       case 'analytics_overview':   return await analyticsOverview(req, res, db, auth);
       case 'insights_overview':    return await insightsOverview(req, res, db, auth);
       case 'estimate_check': return await estimateCheckAction(req, res, db, auth);

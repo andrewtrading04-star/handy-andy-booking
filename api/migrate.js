@@ -11,7 +11,6 @@ import { checkLateTechs } from './_lib/tech-late.js';
 import { checkPaidNotComplete } from './_lib/paid-not-complete.js';
 import { checkEstimateFollowups } from './_lib/estimate-followup.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
-import { scanLogoPhotos } from './_lib/photo-logo-scan.js';
 import { runDomainWatch } from './_lib/domain-watch.js';
 import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
@@ -1087,7 +1086,9 @@ export default async function handler(req, res) {
   //   &limit=N  scan up to N this run (default 40, max 300 — raise it to
   //             chew through the backfill of older photos faster)
   //   &dry=1    report how many are waiting without calling the API
-  if (action === 'photo_logo_scan') {
+  // Photo logo check removed (owner 2026-09-28).
+  if (action === 'photo_logo_scan') return res.status(410).json({ error: 'Removed' });
+  if (action === 'photo_logo_scan_removed') {
     const secret = process.env.CRON_SECRET;
     if (!secret) return res.status(400).json({ error: 'CRON_SECRET env var not set. Add it in Vercel first.' });
     const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -1095,7 +1096,7 @@ export default async function handler(req, res) {
     if (provided !== secret) return res.status(401).json({ error: 'Unauthorized. Pass ?secret=CRON_SECRET or Authorization: Bearer.' });
     try {
       const dryRun = req.query.dry === '1' || req.query.dry === 'true';
-      const summary = await scanLogoPhotos({ limit: req.query.limit, dryRun });
+      const summary = { dryRun };
       return res.status(200).json({ ok: true, ...summary });
     } catch (e) {
       console.error('[photo_logo_scan]', (e && e.stack) || e);

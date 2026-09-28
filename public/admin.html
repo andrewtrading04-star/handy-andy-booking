@@ -6154,7 +6154,6 @@ function drawGallery(){
     ${switcher}
     <div class="gal-tabs" id="galMainTabs">
       ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
-      ${crossBiz?'':`<button class="gal-tab ${logoView?'on':''}" data-g="logo" title="Finished mounts with our logo up on the customer's TV">✨ Logo shots${galleryCounts?` <span class="gal-count">${galleryCounts.logo||0}</span>`:''}</button>`}
       ${(!crossBiz&&role==='owner')?`<button class="gal-tab ${jiyahView?'on':''}" data-g="jiyah" title="Photos Jiyah has sent, in one place -- only you can see this tab">🔒 Jiyah Photos${galleryCache.jiyah?` <span class="gal-count">${galleryCache.jiyah.photos.length}</span>`:''}</button>`:''}
     </div>
     ${bulkBar}
@@ -13532,6 +13531,14 @@ const TXSUM_ICON={job:'📺',place:'📍',price:'💲',booked:'✅',not_booked:'
 // The AI summary only hears the call ("quote to be sent"). Check the CRM for
 // what actually happened after it (owner, 2026-09-26).
 const TX_QUOTE_LATER=/\b(quote|estimate)\b[^.]*\b(to be|will|later|send|sent over|text)/i;
+// One-line summary shown right by the recording (owner 2026-09-28):
+// what the job was, and how the call ended.
+function txBrief(r){
+  const it=(r&&r.transcript_summary&&Array.isArray(r.transcript_summary.items))?r.transcript_summary.items:[];
+  const pick=k=>(it.find(i=>i.kind===k)||{}).text;
+  const parts=[pick('job'), pick('booked')||pick('not_booked')].filter(Boolean);
+  return parts.length?`<div style="font-size:12.5px;color:var(--ink-2);margin-top:6px;line-height:1.4;">${esc(parts.join(' · '))}</div>`:'';
+}
 function txSumHtml(sum, r){
   let items=(sum.items||[]).slice();
   const qe=r&&r.history&&r.history.last_estimate;
@@ -13571,7 +13578,7 @@ function callEarlierRow(r){
   const tz=r.tracking_label?shortTrackingLabel(r.tracking_label):'';
   const line=[r.business?.name, tz?`${tz} line`:null].filter(Boolean).map(esc).join(' · ');
   const audio=r.recording_url
-    ? `<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:'';
+    ? `<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>${txBrief(r)}`:'';
   const tx=r.transcript?txView(r):'';
   return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
     <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
@@ -13661,6 +13668,7 @@ function callCard(r,handled,g,v2){
     ? `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;max-width:420px;">
          <div style="font-size:12px;font-weight:800;color:#1d4ed8;margin-bottom:5px;">🎙 Recording${r.duration_sec?' · '+callDuration(r.duration_sec):''}</div>
          <button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;height:34px;display:block;">&#9654; Play recording</button>
+         ${txBrief(r)}
        </div>`
     : '';
 
