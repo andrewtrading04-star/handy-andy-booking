@@ -1366,7 +1366,7 @@
   #modal #nbConvertSummary{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#c7dcff;}
   #modal #nbBringsOwnNote{background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.35);color:#fdba74;}
   #modal #nbRequestedTimes{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
-  #modal #nbTotalDisplay{background:#16213f;color:#eef2f7;}
+  #modal #nbQuoteBox{background:#16213f;color:#eef2f7;} #modal #nbTotalDisplay{color:#eef2f7;}
   #modal .nb-min-warn.floored{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.4);color:#fca5a5;}
   #modal .nb-min-warn.waived{background:rgba(251,146,60,.14);border-color:rgba(251,146,60,.4);color:#fdba74;}
   #modal .nb-cust{background:#16273f;border-color:rgba(255,255,255,.14);}
@@ -2397,14 +2397,17 @@
       <select class="search" style="margin:0" id="nbCategory"></select>
       <select class="search" style="margin:0;display:none" id="nbService"></select>
       <div id="nbSteps"></div>
-      <div id="nbCustomLinesWrap" style="margin-top:10px;"></div>
-      <button type="button" id="nbAddCustomLine" class="seg-btn" style="margin:6px 0 0;">+ Add custom line</button>
       <div style="display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border-radius:10px;margin:10px 0 12px;padding:11px 13px;">
         <span style="font-size:14px;font-weight:500;color:#0f1b33;white-space:nowrap;">+ Travel</span>
         <input id="nbTravelFee" placeholder="$0.00" inputmode="decimal" autocomplete="off" name="nb-travel-surcharge-do-not-autofill" style="width:90px;background:transparent;border:none;color:#0f1b33;font-size:14px;outline:none;text-align:center;">
       </div>
       <div id="nbConvertSummary" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:8px;"></div>
-      <div id="nbTotalDisplay" style="font-size:13px;padding:12px 14px;border-radius:10px;"></div>
+      <!-- Custom lines live inside the quote box (owner 2026-09-28). -->
+      <div id="nbQuoteBox" style="border-radius:10px;padding:12px 14px;">
+        <div id="nbCustomLinesWrap"></div>
+        <button type="button" id="nbAddCustomLine" class="seg-btn" style="margin:0 0 10px;">+ Add custom line</button>
+        <div id="nbTotalDisplay" style="font-size:13px;"></div>
+      </div>
       <div id="nbMinWarn" class="nb-min-warn" style="display:none;"></div>
       <select class="search" style="margin:0" id="nbTech"></select>
       <div id="nbSecondTechWrap" style="display:none;">
