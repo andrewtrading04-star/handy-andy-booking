@@ -309,6 +309,8 @@
   .rl-card.rl-won{text-align:center;border-color:#4ade80;box-shadow:0 0 0 1px #4ade80 inset;padding:26px 18px;}
   .rl-won-big{font-size:26px;font-weight:900;color:#4ade80;}
   .rl-won-sub{color:var(--ink);font-size:14px;margin-top:10px;line-height:1.55;}
+  .est-q{display:block;font-size:13.5px;font-weight:700;margin:10px 0 5px;}
+  .est-in{width:100%;box-sizing:border-box;background:var(--navy);color:inherit;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:14.5px;}
 </style>
 <script src="https://js.stripe.com/v3/"></script>
 </head>
@@ -1167,6 +1169,10 @@ async function showDetail(id){
     // A company bracket job can't be completed until one tech records who supplied it.
     const bracketOK = !(j.bracket && j.bracket.needed) || !!(j.bracket && j.bracket.supplied_by);
     const needsBracket = next && next.to==='completed' && !bracketOK;
+    // $50 estimate visit: four answers before the job can be closed.
+    const en=j.estimate_notes||{};
+    const estOK = !j.estimate_visit || !!(en.goal && en.why && en.parts && Number(en.labor)>0);
+    const needsEst = next && next.to==='completed' && !estOK;
 
     v.innerHTML=`<div class="detail">
       <button class="back" id="back">‹ Today's jobs</button>
@@ -1195,6 +1201,19 @@ async function showDetail(id){
         ${j.maps_url?`<a class="btn ghost" style="margin-top:10px;display:block;text-align:center;text-decoration:none;" href="${j.maps_url}" target="_blank">${ic('navigate')} Get Directions</a>`:''}
       </div>
       ${j.customer_notes?`<div class="card"><h3>Special Notes</h3><div class="notes">${esc(j.customer_notes)}</div></div>`:''}
+      ${j.estimate_visit?`<div class="card" id="estCard"><h3>Estimate questions</h3>
+        <div class="sub" style="color:var(--mute);font-size:13px;margin-bottom:10px;">Answer all four before you complete this job. The office sees your answers.</div>
+        <label class="est-q">What is the customer's main goal?</label>
+        <textarea id="estGoal" rows="2" class="est-in">${esc(en.goal||'')}</textarea>
+        <label class="est-q">Why did the customer need an estimate? What's special?</label>
+        <textarea id="estWhy" rows="2" class="est-in">${esc(en.why||'')}</textarea>
+        <label class="est-q">What parts do you need for this job? Make a list.</label>
+        <textarea id="estParts" rows="3" class="est-in" placeholder="One part per line">${esc(en.parts||'')}</textarea>
+        <label class="est-q">How much do you want to do the job? Labor only.</label>
+        <div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;">$</span><input id="estLabor" inputmode="decimal" class="est-in" style="max-width:140px;" value="${en.labor?esc(en.labor):''}" placeholder="0"></div>
+        <button class="btn sm" id="estSave" style="margin-top:12px;">${estOK?'Update answers':'Save answers'}</button>
+        ${en.at?`<div class="sub" style="color:var(--green);font-size:12.5px;margin-top:6px;">✓ Saved</div>`:''}
+      </div>`:''}
       ${j.review_rating?`<div class="card"><h3>Customer Review</h3>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           ${starRow(j.review_rating,18)}
@@ -1288,10 +1307,21 @@ async function showDetail(id){
         ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">💳 Take payment to complete</button></div>`
         : needsBracket
         ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📦 Record who supplied the bracket</button></div>`
+        : needsEst
+        ? `<div class="statusbar"><button class="btn big" id="advance" disabled style="opacity:.5;">📝 Answer the estimate questions to complete</button></div>`
         : `<div class="statusbar"><button class="btn big ${next.cls}" id="advance">${next.label}</button></div>`)
       : (j.status==='completed'?`<div class="statusbar"><div style="text-align:center;color:var(--green);font-weight:700;padding:6px;">✓ Job Completed</div></div>`:'') }`;
 
     document.getElementById('back').addEventListener('click',showJobs);
+    const estSave=document.getElementById('estSave');
+    if(estSave) estSave.addEventListener('click',async()=>{
+      const v=id=>(document.getElementById(id).value||'').trim();
+      const body={ id:j.id, goal:v('estGoal'), why:v('estWhy'), parts:v('estParts'), labor:v('estLabor').replace(/[^0-9.]/g,'') };
+      if(!body.goal||!body.why||!body.parts||!(Number(body.labor)>0)){ toast('Answer all four questions (labor must be a price).'); return; }
+      estSave.disabled=true; estSave.textContent='Saving…';
+      try{ await api('estimate_notes_save',{ method:'POST', body }); toast('Saved'); showDetail(j.id); }
+      catch(e){ toast(e.message||'Could not save'); estSave.disabled=false; estSave.textContent='Save answers'; }
+    });
     const adv=document.getElementById('advance');
     if(adv && !adv.disabled) adv.addEventListener('click',async()=>{
       adv.disabled=true;

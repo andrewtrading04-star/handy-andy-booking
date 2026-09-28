@@ -4655,6 +4655,13 @@ function openBooking(b){
     </div></div>
     ${b.customer_notes?`<div class="bk-d"><div class="bk-dtile">${bkIcon('note')}</div><div>
       <span class="bk-dl">Customer notes</span><div class="bk-dv">${esc(b.customer_notes)}</div></div></div>`:''}
+    ${(()=>{ const en=b.metadata&&b.metadata.estimate_visit_notes; if(!en) return '';
+      // Tech's answers on a $50 estimate visit (owner 2026-09-29).
+      const row=(k,v)=>v?`<div style="margin-top:6px;"><b>${k}</b><div style="white-space:pre-wrap;">${esc(v)}</div></div>`:'';
+      return `<div class="bk-d"><div class="bk-dtile">${bkIcon('note')}</div><div style="flex:1;">
+        <span class="bk-dl">Tech's estimate notes${en.by?' · '+esc(en.by):''}</span><div class="bk-dv">
+        ${row('Customer\'s main goal',en.goal)}${row('Why an estimate / what\'s special',en.why)}${row('Parts needed',en.parts)}
+        <div style="margin-top:6px;"><b>Labor price</b> $${esc(Number(en.labor||0).toFixed(2))}</div></div></div></div>`; })()}
     ${b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>
       <span class="bk-dl">Review</span><div class="bk-dv">${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>

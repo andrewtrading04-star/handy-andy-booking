@@ -164,6 +164,18 @@ export default async function handler(req, res) {
     const db = serviceClient();
     switch (action) {
       case 'jobs':             return await jobs(req, res, db, auth);
+      case 'estimate_notes_save': {
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        const { data: b } = await fetchMine(() => scopeMine(db.from('bookings').select('id, metadata, price'), auth).eq('id', String(body.id || '')).maybeSingle());
+        if (!b) return res.status(404).json({ error: 'Job not found' });
+        const t = (v, n) => String(v || '').trim().slice(0, n);
+        const notes = { goal: t(body.goal, 1000), why: t(body.why, 1000), parts: t(body.parts, 2000),
+          labor: Math.round(Math.max(0, Number(body.labor) || 0) * 100) / 100, by: auth.name || null, at: new Date().toISOString() };
+        if (!notes.goal || !notes.why || !notes.parts || !(notes.labor > 0)) return res.status(400).json({ error: 'Answer all four questions.' });
+        const { error } = await db.from('bookings').update({ metadata: { ...(b.metadata || {}), estimate_visit_notes: notes } }).eq('id', b.id);
+        if (error) throw error;
+        return res.status(200).json({ ok: true, notes });
+      }
       case 'calendar_link':    return res.status(200).json(calLinks(auth.tech_id));
       // Repeat-customer stars (owner 2026-09-28): phone -> paid job count, 3+ only.
       case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone, paid_jobs'); return res.status(200).json({ counts: Object.fromEntries((data || []).map((r) => [r.phone, r.paid_jobs])) }); }
@@ -502,6 +514,10 @@ async function job(req, res, db, auth) {
   if (error && /sort_order/.test(error.message || '')) ({ data, error } = await fetchMine(build(false)));
   if (error || !data) return res.status(404).json({ error: 'Job not found' });
   const shaped = shapeJob(data, true, true);
+  // Estimate visit (owner 2026-09-29): a $50 job. The tech answers four
+  // questions before closing it; the answers show on the staff ticket.
+  shaped.estimate_visit = Number(data.price) === 50;
+  shaped.estimate_notes = (data.metadata && data.metadata.estimate_visit_notes) || null;
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
   shaped.company_name = brandName(data.business?.slug, data.business?.name);
   shaped.company_slug = data.business?.slug || null;
@@ -971,6 +987,10 @@ async function status(req, res, db, auth, body) {
     // only one tech supplies it, and that tech's inventory must be the one counted.
     if (await jobNeedsBracketSupplier(db, id)) {
       return res.status(400).json({ error: 'Select which technician supplied the bracket before completing this job.' });
+    }
+    const en = existing.metadata && existing.metadata.estimate_visit_notes;
+    if (Number(existing.price) === 50 && !(en && en.goal && en.why && en.parts && Number(en.labor) > 0)) {
+      return res.status(400).json({ error: 'Answer the estimate questions before completing this job.' });
     }
   }
 
