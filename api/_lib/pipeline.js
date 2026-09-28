@@ -653,7 +653,16 @@ export function groupCards(touches, marks = [], now = Date.now(), noPhone = []) 
   }
   // A script call we could not tie to any phone still counts: its own card.
   for (const t of noPhone) if (t.atMs <= nowMs) cards.push(newCard(t, 0));
-  for (const c of cards) c.st = evalStage(c, nowMs, markBy.get(c.key));
+  for (const c of cards) {
+    c.st = evalStage(c, nowMs, markBy.get(c.key));
+    // Owner moved it forward by hand (owner 2026-09-28). Only ever forward:
+    // real activity that is already further along wins.
+    const m = markBy.get(c.key);
+    const MAN = ['new', 'talked', 'quoted', 'booked'];
+    if (m && m.manual_stage && MAN.includes(c.st.stage) && MAN.indexOf(m.manual_stage) > MAN.indexOf(c.st.stage)) {
+      c.st = { ...c.st, stage: m.manual_stage, stageMs: msOf(m.manual_stage_at) ?? c.st.stageMs, manual: { by: m.manual_stage_by || null, at: m.manual_stage_at }, leak: false, callback: null };
+    }
+  }
   return cards;
 }
 
@@ -769,6 +778,7 @@ function sourceLabel(t, ctx) {
 function nextFor(st, card, nowMs) {
   const cb = st.callback;
   const callbackNext = cb ? { text: `${cb.type === 'text_in' ? 'Text back — texted' : cb.vm ? 'Call back — voicemail' : 'Call back — missed'} ${fmtAgo(nowMs - cb.atMs)} ago`, tone: 'danger' } : null;
+  if (st.manual) return { text: `Moved here by ${st.manual.by || 'the owner'}`, tone: 'mute' };
   switch (st.stage) {
     case 'lost': return { text: `Lost · ${st.lost.reason}`, tone: 'mute' };
     case 'paid': {
@@ -956,6 +966,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     stage: st.stage === 'paid' || (st.stage === 'booked' && st.doneUnpaid) ? 'completed' : st.stage,
     paid: st.stage === 'paid',
     leak: st.stage === 'talked' && !!st.leak,
+    manual: st.manual || null,
     voicemail: c.touches.some((t) => t.type === 'call_in' && t.vm),
     review: st.booking && st.booking.bk ? { ...st.booking.bk.rv, booking_id: st.booking.id, completed_at: iso(st.booking.bk.completedMs) } : null,
     // Customer reached out and nobody replied (owner 2026-09-27): drives the red banner.
@@ -1190,7 +1201,7 @@ export async function loadHistory(db, phones) {
 }
 
 // ── The action ──────────────────────────────────────────────────────────────
-const OPS = new Set(['mark_lost', 'not_a_lead', 'reopen', 'no_talk', 'talk', 'log_attempt', 'attempt_outcome']);
+const OPS = new Set(['mark_lost', 'not_a_lead', 'reopen', 'no_talk', 'talk', 'log_attempt', 'attempt_outcome', 'set_stage']);
 
 export async function pipelineHandler(req, res, db, auth, body) {
   // The auditor never reaches CRM customer data (api/audit.js header).
@@ -1288,6 +1299,13 @@ async function pipelineOp(res, db, auth, body) {
     }
     case 'not_a_lead': patch = { not_a_lead: true, not_a_lead_by: who, not_a_lead_at: nowIso }; break;
     case 'reopen': patch = { reopened_at: nowIso, reopened_by: who, not_a_lead: false }; break;
+    case 'set_stage': {
+      if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can move cards' });
+      const stage = String(body.stage || '');
+      if (!['talked', 'quoted', 'booked'].includes(stage)) return res.status(400).json({ error: 'Pick Talked to, Quoted or Booked' });
+      patch = { manual_stage: stage, manual_stage_at: nowIso, manual_stage_by: who };
+      break;
+    }
     case 'no_talk':
     case 'talk': {
       const callId = String(body.call_id || '');

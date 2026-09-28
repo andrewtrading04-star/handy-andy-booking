@@ -10647,7 +10647,8 @@ function plDetailHtml(c){
        ${c.stage==='completed'?plReviewHtml(c):`<div class="plt-steps">${stepHtml}</div>`}
        ${plMediaHtml(c)}
        ${plNotesHtml(c)}
-       ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
+       ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}
+       ${plOwnerMoveHtml(c)}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
   const un=c.unanswered, who=c.secretary||'the office';
   const unBanner=un?`<div style="background:#fdecec;border:1px solid #f3c2c2;color:#991b1b;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
@@ -10731,6 +10732,16 @@ function plNotesHtml(c){
       <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
       <button type="button" class="pl-btn" data-pl="note-add">Save</button>
     </div>`;
+}
+// Owner only (2026-09-28): move a card forward a step, or mark it lost.
+function plOwnerMoveHtml(c){
+  if(role!=='owner') return '';
+  const NEXT={ new:['talked','Talked to'], talked:['quoted','Quoted'], quoted:['booked','Booked'] }[c.stage];
+  if(!NEXT && c.stage!=='booked') return '';
+  return `<div class="pl-acts" style="margin-top:8px;">
+    ${NEXT?`<button type="button" class="pl-btn" data-pl="move" data-stage="${NEXT[0]}">Move to ${NEXT[1]} →</button>`:''}
+    ${c.stage!=='booked'?'<button type="button" class="pl-btn red" data-pl="lost">Mark lost</button>':''}
+  </div>`;
 }
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
@@ -10837,6 +10848,12 @@ function plClick(e){
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
+    case 'move': {
+      const stg=b.dataset.stage;
+      if(!confirm(`Move this card to ${plStageLabel(stg)}?`)) return;
+      plOp(c, { op:'set_stage', card_key:c.key, stage:stg }, 'Moved');
+      return;
+    }
     case 'note-add': {
       const ta=document.getElementById('plNoteIn'); const text=ta?ta.value.trim():'';
       if(!text){ toast('Write a note first'); return; }
