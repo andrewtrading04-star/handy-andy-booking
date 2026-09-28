@@ -14346,7 +14346,7 @@ function vipStar(phone){ const n=vipN(phone), s=vipStars(n); return s?'<span tit
 function vipPre(phone){ return ''; }  // owner 2026-09-28: stars only after the name
 function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN); _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){}
   // Repaint once the stars arrive, so they show without a refresh.
-  if(was!==JSON.stringify(_vipN)){ try{ if(section==='schedule') renderSchedule(); else if(section==='messages') paintMessages(); else if(section==='callhub'||section==='pipeline') navTo(section); }catch(_){} }
+  if(was!==JSON.stringify(_vipN)&&section==='messages'&&_msgThreads){ try{ paintMessages(); }catch(_){} }
 }).catch(()=>{}); }
 function openCallLink(id){
   if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
