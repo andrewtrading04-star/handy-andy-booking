@@ -16,6 +16,7 @@
 // text for every one of these leads, and texting him here as well would double
 // each one.
 import { sendSMS } from './_lib/sms.js';
+import { sendEmail } from './_lib/email.js';
 import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
 import { isBlockedPhone } from './_lib/blocked.js';
 
@@ -66,6 +67,32 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // Random-letter junk ("gXYbEukFfLiqPlhicNPAh"): answer like a success.
+  const gib = (v) => { v = String(v || '').trim(); return /^[A-Za-z]{12,}$/.test(v) && (v.slice(1).match(/[A-Z]/g) || []).length >= 3; };
+  if (gib(name) || gib(message) || gib(body.experience_details)) {
+    console.warn('[doms-lead] blocked: gibberish', { name: name.slice(0, 80) });
+    return res.status(200).json({ ok: true });
+  }
+
+  // Careers form (owner 2026-09-28: landingsite removed, forms come straight
+  // here). A job applicant texts + emails the owner; it is not a sales lead.
+  if (body.kind === 'careers') {
+    const contact = (body.contact_info || '').toString().trim().slice(0, 200);
+    if (!name || !contact) return res.status(400).json({ error: 'name and contact are required' });
+    const lines = [
+      "New Dom's job applicant",
+      `${name} — ${contact}`,
+      zip ? `Zip: ${zip}` : null,
+      body.tv_mounting_experience ? `TV mounting experience: ${String(body.tv_mounting_experience).slice(0, 40)}` : null,
+      body.willing_to_learn ? `Willing to learn: ${String(body.willing_to_learn).slice(0, 40)}` : null,
+      body.experience_details ? String(body.experience_details).slice(0, 600) : null,
+    ].filter(Boolean);
+    if (process.env.OWNER_PHONE_NUMBER) await sendSMS(process.env.OWNER_PHONE_NUMBER, lines.slice(0, 4).join('\n')).catch((e) => console.error('[doms-lead] careers sms failed:', e.message));
+    const to = process.env.OWNER_NOTIFY_EMAIL || process.env.OWNER_EMAIL;
+    if (to) await sendEmail({ slug: 'doms', to, subject: `Dom's job applicant: ${name}`, html: lines.map((l) => `<p>${escHtml(l)}</p>`).join('') }).catch((e) => console.error('[doms-lead] careers email failed:', e.message));
+    return res.status(200).json({ ok: true });
+  }
+
   if (!name || !phone) {
     return res.status(400).json({ error: 'name and phone are required' });
   }
@@ -92,6 +119,17 @@ export default async function handler(req, res) {
   } else {
     console.error('[doms-lead] OWNER_PHONE_NUMBER not set — owner not texted');
   }
+  // Email copy (replaces landingsite's form email, owner 2026-09-28).
+  const to = process.env.OWNER_NOTIFY_EMAIL || process.env.OWNER_EMAIL;
+  if (to) {
+    const rows = [['Name', name], ['Phone', phone], ['Email', email], ['Zip', zip], ['Message', message]].filter(([, v]) => v);
+    await sendEmail({ slug: 'doms', to, subject: `New Dom's website lead: ${name}`, html: rows.map(([k, v]) => `<p><b>${k}:</b> ${escHtml(v)}</p>`).join('') })
+      .catch((e) => console.error('[doms-lead] email failed:', e.message));
+  }
 
   return res.status(200).json({ ok: true });
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
