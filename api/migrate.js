@@ -18,6 +18,8 @@ import { enRouteMessage } from './_lib/en-route.js';
 import { reviewRequestSms } from './_lib/review-token.js';
 import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
 import { ingestBracketSyncReport, bracketSyncWatchdog } from './_lib/bracket-sync-health.js';
+import { isGibberish } from './_lib/lead-guard.js';
+import { isBlockedPhone } from './_lib/blocked.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -371,7 +373,18 @@ async function websiteLeadSync(req, res) {
     const { data: dupe } = await db.from('estimates')
       .select('id').eq('external_key', external_key).maybeSingle();
     if (dupe) return res.status(200).json({ ok: true, action: 'already_synced', id: dupe.id });
+    // Deleted in the Estimates tab (migration 0157): stays deleted.
+    const { data: gone } = await db.from('deleted_lead_keys')
+      .select('external_key').eq('external_key', external_key).maybeSingle();
+    if (gone) return res.status(200).json({ ok: true, action: 'deleted_by_office' });
   }
+  // Same junk guards as api/doms-lead.js, which only sees the site's own
+  // submits: a bot posting straight to the form host reaches this path alone.
+  if (isGibberish(b.name) || isGibberish(message)) {
+    console.warn('[website_lead] skipped: gibberish', { name: String(b.name || '').slice(0, 80) });
+    return res.status(200).json({ ok: true, action: 'spam_skipped' });
+  }
+  if (b.phone && await isBlockedPhone(b.phone)) return res.status(200).json({ ok: true, action: 'blocked_number' });
 
   const name = (b.name || '').toString().trim().slice(0, 120) || 'Website visitor';
   const phone = (b.phone || '').toString().trim() || null;

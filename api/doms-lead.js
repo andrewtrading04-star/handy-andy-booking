@@ -17,7 +17,7 @@
 // each one.
 import { sendSMS } from './_lib/sms.js';
 import { sendEmail } from './_lib/email.js';
-import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
+import { overSpeedLimit, clientIp, isGibberish } from './_lib/lead-guard.js';
 import { isBlockedPhone } from './_lib/blocked.js';
 
 export default async function handler(req, res) {
@@ -68,8 +68,7 @@ export default async function handler(req, res) {
   }
 
   // Random-letter junk ("gXYbEukFfLiqPlhicNPAh"): answer like a success.
-  const gib = (v) => { v = String(v || '').trim(); return /^[A-Za-z]{12,}$/.test(v) && (v.slice(1).match(/[A-Z]/g) || []).length >= 3; };
-  if (gib(name) || gib(message) || gib(body.experience_details)) {
+  if (isGibberish(name) || isGibberish(message) || isGibberish(body.experience_details)) {
     console.warn('[doms-lead] blocked: gibberish', { name: name.slice(0, 80) });
     return res.status(200).json({ ok: true });
   }

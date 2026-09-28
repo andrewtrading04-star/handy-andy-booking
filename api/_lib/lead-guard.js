@@ -69,3 +69,10 @@ export function overSpeedLimit(scope, { ip, email, phone } = {}) {
   if (digits.length >= 7 && recordAndCount(`${scope}|ph|${digits}`, now) > MAX_PER_WINDOW) over = true;
   return over;
 }
+
+/** Random-letter bot junk ("gXYbEukFfLiqPlhicNPAh"): one long run of letters
+ *  with capitals scattered through it. A real name has a space or is short. */
+export function isGibberish(v) {
+  v = String(v || '').trim();
+  return /^[A-Za-z]{12,}$/.test(v) && (v.slice(1).match(/[A-Z]/g) || []).length >= 3;
+}

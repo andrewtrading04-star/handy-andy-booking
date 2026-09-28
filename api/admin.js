@@ -11023,10 +11023,18 @@ async function estimateUpdate(req, res, db, auth, body) {
 
   // Confirm the estimate belongs to this business before touching it.
   const { data: existing } = await db.from('estimates')
-    .select('id, photo_path, customer_email, approved_at').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
+    .select('id, photo_path, customer_email, approved_at, external_key').eq('id', body.id).eq('business_id', biz.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Estimate not found' });
 
   if (body.op === 'delete') {
+    // A website lead is re-filed from the mailbox on every sync unless its key
+    // is remembered (migration 0157). Written BEFORE the delete so a sync
+    // running at the same moment can't slip it back in.
+    if (existing.external_key) {
+      const { error: tombErr } = await db.from('deleted_lead_keys')
+        .upsert({ external_key: existing.external_key, deleted_by: auth.name || adminAuthorName(auth) });
+      if (tombErr) console.warn('[estimate_delete] could not remember deleted lead key:', tombErr.message);
+    }
     await db.from('estimates').delete().eq('id', body.id).eq('business_id', biz.id);
     if (existing.photo_path) deleteImage(existing.photo_path).catch(() => {});
     return res.status(200).json({ ok: true, deleted: true });
