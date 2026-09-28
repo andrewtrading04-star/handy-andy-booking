@@ -23377,6 +23377,9 @@ function renderNbSteps(){
   const orderedGroups=[...nbOptionGroups].sort((a,b)=>(NB_GROUP_ORDER[a.key]||99)-(NB_GROUP_ORDER[b.key]||99));
   // Required once the job needs this answer at all — matches nbValidateTvMountingRequired.
   const NB_REQUIRED_GROUPS=new Set(['size','fireplace','surface']);
+  // Owner 2026-09-28: one question at a time. Everything after an unanswered
+  // required question stays folded (title only) until it is answered.
+  let blocked=isTvService && nbTotalTvs()===0;
   orderedGroups.forEach(g=>{
     // Lifting help is only relevant for TVs 70" and up — hide it otherwise.
     if(g.key==='lifting'){ if(!showLifting){ if(nbQty[g.id]) delete nbQty[g.id]; return; } }
@@ -23402,6 +23405,8 @@ function renderNbSteps(){
       : '';
     const isRequired = NB_REQUIRED_GROUPS.has(g.key) || (g.key==='lifting' && showLifting);
     const reqTag = ` <span class="nb-req-tag ${isRequired?'req':'opt'}">${isRequired?'Required':'Optional'}</span>`;
+    if(blocked){ html+=`<div class="nb-step" style="opacity:.4;"><div class="nb-step-t" style="margin:0;">${esc(nbGroupLabel(g))}${reqTag}</div></div>`; return; }
+    if(isRequired && !(tvBound ? (capN>0 && gCount>=capN) : gCount>=1)) blocked=true;
     html+=`<div class="nb-step"><div class="nb-step-t">${esc(nbGroupLabel(g))}${reqTag}${capLbl}</div>`;
     if(tvBound && tvCount===0){ html+=`<div class="nb-hint">Select TV type first</div></div>`; return; }
     // Same rule as the lifting/only-frame gates above: when the render-level
