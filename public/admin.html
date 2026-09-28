@@ -497,7 +497,7 @@
   .cv-mid>span{font-size:12.5px;color:#536277;line-height:1.4;}
   .cv-mid strong{font-size:15px;font-weight:800;}
   .cv-when{display:flex;align-items:center;gap:5px;}
-  .cv-out{display:flex;align-items:center;gap:5px;font-weight:600;} .cv-out.ok svg{color:#16a34a;} .cv-out.miss{color:#b91c1c;}
+  .cv-out{display:flex;align-items:center;gap:5px;font-weight:600;} .cv-out.ok svg{color:#16a34a;} .cv-out.miss svg{color:#b91c1c;} .cv-out.miss{color:#b91c1c;}
   .cv-right{flex:none;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink);} .cv-chev{font-size:22px;color:#94a3b8;line-height:1;}
   .cv-head{display:flex;gap:18px;align-items:center;padding:4px 0 18px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap;}
   .cv-head-main{flex:1;min-width:220px;} .cv-title{font-size:26px;font-weight:800;letter-spacing:-.3px;} .cv-sub-num{font-size:14px;font-weight:600;color:var(--mute);}
@@ -13697,6 +13697,9 @@ function callPills(g){
 }
 // Calls design upgrade (owner, 2026-09-25): avatar list + header/cards detail.
 const CV_ICON={
+  // Direction arrows (owner 2026-09-29): ↙ the customer called us, ↗ we called them.
+  inArrow:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7L7 17M7 9v8h8"/></svg>',
+  outArrow:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>',
   ok:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/></svg>',
   miss:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/><path d="M15 3l6 6m0 -6l-6 6"/></svg>',
   cal:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>',
@@ -14253,7 +14256,12 @@ function callInbox(groups){
           return `<strong style="font-size:15px;${missed?'color:#dc2626;':''}">${vipPre(r.caller_phone)+esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
         <span style="font-size:15px;color:var(--ink);font-weight:400;">${esc(r.caller_pretty||r.caller_phone||'Unknown number')}</span>
         <span style="font-size:12.5px;color:var(--mute);">${esc(r.routed_to_name || 'Not assigned')}</span>
-        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss+' Not answered':CV_ICON.ok+' Answered')+' - '+quote}</span>`; })()}
+        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.inArrow+' Not answered':CV_ICON.inArrow+' Answered')+' - '+quote}</span>${(()=>{
+          // We only see an outbound call when someone tapped Call back / logged it
+          // (calls go out from their own phones). Show the latest one after the call in.
+          const inAt=Date.parse(r.occurred_at)||0; let best=null;
+          for(const x of g.rows){ for(const [t,who] of [[x.called_back_at,x.claimed_by],[x.claimed_at,x.claimed_by]]){ const ms=Date.parse(t||''); if(ms>inAt && (!best||ms>best.ms)) best={ms,who}; } }
+          return best?`<span class="cv-out" style="color:#2563eb;">${CV_ICON.outArrow} Called back${best.who?' · '+esc(best.who):''} · ${esc(new Date(best.ms).toLocaleTimeString('en-US',{timeZone:(CALL_TZ[r.market]||'America/Denver'),hour:'numeric',minute:'2-digit'}))}</span>`:''; })()}`; })()}
         ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
       </span>
       <span class="cv-right"><b>${r.duration_sec?esc(callDuration(r.duration_sec)):'—'}</b><span class="cv-chev">›</span></span>
