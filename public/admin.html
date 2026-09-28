@@ -2520,6 +2520,7 @@
   </div>
 </div>
 
+<style>.rs-who{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 8px}.rs-who-b{border:1px solid var(--line,#d1d5db);background:#fff;border-radius:999px;padding:5px 12px;font-size:13px;font-weight:600;cursor:pointer}.rs-who-b.on{background:#111827;color:#fff;border-color:#111827}</style>
 <!-- Reschedule modal: tap a date + one of the fixed time slots -->
 <div id="rsModal" class="modal hidden">
   <div class="sheet" style="max-width:420px;">
@@ -5246,7 +5247,7 @@ async function loadRsSlots(){
   if(!rsState) return;
   const list=document.getElementById('rsSlots');
   const mySeq=++rsState.seq, date=rsState.date, tech=document.getElementById('rsTech').value;
-  rsState.slot=null;
+  rsState.slot=null; rsState.pick=null;
   if(!date){ list.innerHTML='<div class="sub" style="font-size:13px;">Pick a date.</div>'; return; }
   list.innerHTML='<div class="sub" role="status" style="font-size:13px;">Checking open times…</div>';
   const params={ business:current.slug, date, technician_id:tech||'any', pool:'own' };
@@ -5261,14 +5262,23 @@ async function loadRsSlots(){
 function renderRsSlots(){
   const list=document.getElementById('rsSlots'); const open=(rsState&&rsState.open)||[];
   if(!open.length){ list.innerHTML='<div class="sub" style="font-size:13px;">No open times for this tech on this date. Try another date or tech.</div>'; return; }
-  list.innerHTML=open.map(s=>
-    `<button type="button" class="nb-slot${rsState.slot===s.slot_key?' on':''}" data-key="${esc(s.slot_key)}">${esc(s.label)}</button>`).join('');
+  // "Any available tech": once a time is picked, list who is free then and
+  // make the office choose one -- saving "any" as-is would unassign the job.
+  const any=!document.getElementById('rsTech').value;
+  list.innerHTML=open.map(s=>{
+    const on=rsState.slot===s.slot_key;
+    const who=(any&&on)?`<div class="rs-who">${(s.free_techs||[]).length?(s.free_techs||[]).map(t=>`<button type="button" class="rs-who-b${rsState.pick===t.id?' on':''}" data-tech="${esc(t.id)}">${esc(t.name)}</button>`).join(''):'<span class="sub" style="font-size:12px;">No one listed as free</span>'}</div>`:'';
+    return `<button type="button" class="nb-slot${on?' on':''}" data-key="${esc(s.slot_key)}">${esc(s.label)}${(any&&!on&&(s.free_techs||[]).length)?`<span class="sub" style="font-size:12px;margin-left:8px;">${esc((s.free_techs||[]).map(t=>t.name).join(', '))}</span>`:''}</button>${who}`;
+  }).join('');
 }
 function closeRsModal(){ document.getElementById('rsModal').classList.add('hidden'); rsState=null; }
 document.getElementById('rsDate').addEventListener('change',e=>{ if(rsState){ rsState.date=e.target.value; loadRsSlots(); } });
 document.getElementById('rsTech').addEventListener('change',()=>{ if(rsState) loadRsSlots(); });
 document.getElementById('rsSlots').addEventListener('click',e=>{
-  const btn=e.target.closest('.nb-slot'); if(!btn||!rsState) return;
+  if(!rsState) return;
+  const who=e.target.closest('.rs-who-b'); if(who){ rsState.pick=who.dataset.tech; renderRsSlots(); return; }
+  const btn=e.target.closest('.nb-slot'); if(!btn) return;
+  if(rsState.slot!==btn.dataset.key) rsState.pick=null;
   rsState.slot=btn.dataset.key; renderRsSlots();
 });
 document.getElementById('rsCancel').onclick=closeRsModal;
@@ -5278,10 +5288,11 @@ document.getElementById('rsSave').onclick=async()=>{
   const err=document.getElementById('rsErr'); err.textContent='';
   if(!rsState.date){ err.textContent='Pick a date.'; return; }
   if(!rsState.slot){ err.textContent='Pick a time.'; return; }
+  if(!document.getElementById('rsTech').value && !rsState.pick){ err.textContent='Pick which tech takes this time.'; return; }
   const btn=document.getElementById('rsSave'); btn.disabled=true;
   const onDone=rsState.onDone;
   try{
-    const techVal=document.getElementById('rsTech').value;
+    const techVal=document.getElementById('rsTech').value||rsState.pick;
     await apiConfirmUnavailable('booking_update',{ business:current.slug, id:rsState.bookingId, action:'reschedule', scheduled_date:rsState.date, scheduled_slot:rsState.slot, technician_id:techVal||null });
     toast('Rescheduled ✓');
     closeRsModal();

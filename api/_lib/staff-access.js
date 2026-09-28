@@ -30,6 +30,16 @@ export const SECRETARY_EXTRA_BUSINESSES = {
   ],
 };
 
+// Dashboard ACCESS only -- deliberately a separate map. Brands listed here can
+// be opened, searched and called from, but they do NOT change who gets that
+// brand's voicemail/late-tech texts or which pipeline family it belongs to
+// (those read SECRETARY_EXTRA_BUSINESSES only). Owner, 2026-09-29: Joey (doms)
+// can work Handy Andy jobs, e.g. call a Handy Andy customer to reschedule,
+// while Handy Andy's alerts keep going to Heather.
+export const SECRETARY_ACCESS_ONLY = {
+  doms: ['handy-andy'],
+};
+
 // Every business slug a token may act on: its primary scope plus any extras.
 // Owner ('all') is unrestricted, and returns null meaning "apply no filter".
 //
@@ -39,7 +49,7 @@ export const SECRETARY_EXTRA_BUSINESSES = {
 // still behaves identically because it uses this same map.
 export function allowedSlugsFor(auth) {
   if (!auth || auth.scope === 'all') return null;
-  const fromScope = SECRETARY_EXTRA_BUSINESSES[auth.scope] || [];
+  const fromScope = [...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || []), ...(SECRETARY_ACCESS_ONLY[auth.scope] || [])];
   return [auth.scope, ...new Set(fromScope)].filter(Boolean);
 }
 

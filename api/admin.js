@@ -186,6 +186,14 @@ async function partnerBusiness(db, hostSlug) {
 // hostAreaOverride: a precomputed service_area_id for hostBiz+postalCode, when
 // the caller already looked it up (availableSlots does, for its own tz lookup)
 // — skips repeating the exact same service_area_zips query.
+const _denverAreaCache = new Map();
+async function isDenverArea(db, areaId) {
+  if (!_denverAreaCache.has(areaId)) _denverAreaCache.set(areaId, (async () => {
+    const { data } = await db.from('service_areas').select('name').eq('id', areaId).maybeSingle();
+    return /denver/i.test(data?.name || '');
+  })().catch(() => { _denverAreaCache.delete(areaId); return false; }));
+  return _denverAreaCache.get(areaId);
+}
 async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   const zip = (postalCode || '').toString().trim();
   const hostArea = hostAreaOverride !== undefined
@@ -194,6 +202,13 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   // soleTechOf = the BOOKING's brand, so scopedRosterTechs can apply the
   // SOLE_TECH lock to whichever roster (own or partner) it ends up reading.
   const host = { bizId: hostBiz.id, serviceAreaId: hostArea, soleTechOf: hostBiz.slug };
+  // Owner rule, 2026-09-29, CRM-wide: in DENVER, "any tech" means the whole
+  // Denver crew across both companies (TK + Greg on Dom's, Kregg + Steve on
+  // Handy Andy), not just the booking's own company. So for a Handy Andy or
+  // Dom's job in the Denver metro, the default/"own" pool widens to cross.
+  // Other metros keep their own-company default.
+  if ((pool === '' || pool === 'own') && (hostBiz.slug === 'handy-andy' || hostBiz.slug === 'doms')
+      && hostArea && await isDenverArea(db, hostArea)) pool = 'cross';
   if (pool !== 'cross' && pool !== 'partner') return [host];
   const p = await partnerBusiness(db, hostBiz.slug);
   if (!p) return [host];
