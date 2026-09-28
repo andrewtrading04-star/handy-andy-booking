@@ -21410,8 +21410,10 @@ async function renderCallWiz(){
         ${committed&&delta<=0&&!loading?cwAmber('That did not change the total. There is no room left on this ticket.'):''}
         ${committed?`${priceCard()}
         ${moved?answers(room>0?'a promo code':'sending the estimate','Customer agrees to price','Customer doesnt agree'):exits()}`:cwOpNote('Next','Tap where they heard about us. The price drops before you say it.')}
-        ${cwBackBtnHtml('Back')}`;
+        ${cwBackBtnHtml('Back')}
+        ${committed?'':'<div style="text-align:center;margin-top:10px;"><button type="button" id="cwSrcSkip" style="background:none;border:none;color:var(--mute);font:inherit;font-size:12px;text-decoration:underline;cursor:pointer;padding:4px;">Skip</button></div>'}`;
       cwWireLadderCommon(body);
+      cwOn('cwSrcSkip','click',()=>cwAdvance(cwNextRung()));
       cwWireBack('recap');
       return;
     }
