@@ -1416,6 +1416,13 @@ async function calendar(req, res, db, auth) {
     const otherBizById = {};
     for (const ob of (otherBiz || [])) otherBizById[ob.id] = ob;
     const otherBizIds = Object.keys(otherBizById);
+    // Owner, 2026-09-29: a ghost the viewer is ALSO allowed to open (e.g. Joey
+    // viewing Dom's sees Greg busy on a Handy Andy job) carries the real
+    // booking id + slug so the card can open that job. Never sent otherwise.
+    const openRef = (b) => {
+      const slug = otherBizById[b.business_id]?.slug;
+      return (slug && mayUseBusiness(auth, slug)) ? { booking_id: b.id, open_slug: slug } : {};
+    };
     // Ghosts already added for a booking, so the lead-gen sweep below can't
     // repeat one that source 1 surfaced through a shared tech.
     const ghostedBookingIds = new Set();
@@ -1433,11 +1440,11 @@ async function calendar(req, res, db, auth) {
         const companyName = otherBizById[b.business_id]?.name || 'Partner';
         const customerName = b.customer?.name || null;
         if (ownTechIdSet.has(b.technician_id)) {
-          ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          ghostBookings.push({ technician_id: b.technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName, ...openRef(b) });
           ghostedBookingIds.add(b.id);
         }
         if (b.secondary_technician_id && ownTechIdSet.has(b.secondary_technician_id)) {
-          ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName });
+          ghostBookings.push({ technician_id: b.secondary_technician_id, scheduled_at: b.scheduled_at, duration_minutes: b.duration_minutes || 60, partner_company: companyName, customer_name: customerName, ...openRef(b) });
           ghostedBookingIds.add(b.id);
         }
       }
@@ -1481,6 +1488,7 @@ async function calendar(req, res, db, auth) {
             duration_minutes: b.duration_minutes || 60,
             partner_company: otherBizById[b.business_id]?.name || 'Lead gen',
             customer_name: b.customer?.name || null,
+            ...openRef(b),
           });
         }
       }

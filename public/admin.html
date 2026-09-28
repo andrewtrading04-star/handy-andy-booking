@@ -171,6 +171,9 @@
   .daycount{padding:8px 12px 6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mute);text-transform:uppercase;}
   .daybody{padding:0 8px 14px;display:flex;flex-direction:column;gap:8px;}
   .evt{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 10px;box-shadow:0 1px 2px rgba(20,30,50,.05);overflow:hidden;}
+  .evt-ghost-open{cursor:pointer !important;}
+  .evt-ghost-open:hover{border-color:#94a3b8;}
+  .evt-ghost .ghost-open{font-size:11px;font-weight:700;color:var(--accent,#2563eb);margin-top:4px;}
   .evt-ghost{background:repeating-linear-gradient(135deg,#f1f2f5,#f1f2f5 6px,#f7f8fa 6px,#f7f8fa 12px);border:1px dashed #cbd2dc;border-left:3px dashed #b6bfcc;border-radius:9px;padding:9px 10px;box-shadow:none;cursor:default;}
   .ghost-t{font-size:12.5px;font-weight:700;color:#9aa4b2;}
   .ghost-n{font-size:12.5px;font-weight:600;color:#9aa4b2;margin-top:3px;display:flex;align-items:center;gap:5px;}
@@ -3906,6 +3909,14 @@ function ghostEvtCard(g){
   const start=fmtClock(g.scheduled_at);
   const end=fmtClock(new Date(new Date(g.scheduled_at).getTime()+(g.duration_minutes||60)*60000).toISOString());
   const who=g.customer_name?` for ${esc(g.customer_name)}`:'';
+  // Owner, 2026-09-29: when this login may also work the other company (Joey
+  // on Handy Andy), the server sends the real booking -- click opens that job.
+  const canOpen=!!(g.booking_id&&g.open_slug&&businesses.some(x=>x.slug===g.open_slug));
+  if(canOpen) return `<div class="evt evt-ghost evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}" title="Open this ${esc(g.partner_company||'partner')} job${who}">
+    <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
+    <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
+    <div class="ghost-open">Open job →</div>
+  </div>`;
   return `<div class="evt evt-ghost" title="${esc(techName)} is booked on a ${esc(g.partner_company||'partner')} job${who} during this time — informational only, not a job on your schedule.">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
     <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
@@ -4000,6 +4011,7 @@ function renderJobsView(dates){
   document.querySelectorAll('.evt[data-id]').forEach(el=>el.addEventListener('click',()=>{
     const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
   }));
+  document.querySelectorAll('.evt-ghost-open').forEach(el=>el.addEventListener('click',()=>openAlertJob(el.dataset.ghostSlug, el.dataset.ghostId)));
 }
 // Economics strip for a Schedule > List row. Everyone sees the service bucket,
 // cost to customer, and paid status. Tech payout + profit are owner-only — and
