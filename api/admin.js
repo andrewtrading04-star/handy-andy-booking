@@ -517,7 +517,7 @@ export default async function handler(req, res) {
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'review_offer_send': return await reviewOfferSend(req, res, db, auth, body);
-      case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone'); return res.status(200).json({ phones: (data || []).map((r) => r.phone) }); }
+      case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone'); return res.status(200).json({ phones: (data || []).map((r) => r.phone), counts: Object.fromEntries((data || []).map((r) => [r.phone, r.paid_jobs])) }); }
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'invoice_send':      return await invoiceSend(req, res, db, auth, body);

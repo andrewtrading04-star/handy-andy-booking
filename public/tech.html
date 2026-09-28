@@ -1104,7 +1104,7 @@ function renderDay(){
     <div class="jobc${j.cross_company?' xco':''}" data-id="${j.id}">
       ${j.cross_company?`<div class="xco-tag">⚠ FOR ${esc((j.company_name||'OTHER COMPANY').toUpperCase())}</div>`:''}
       <div class="t">${esc(j.slot_time||fmtTime(j.scheduled_at))}</div>
-      <div class="n">${esc(j.customer_name)}</div>
+      <div class="n">${vipName(j.customer_name,j.customer_phone)}</div>
       <div class="m">${esc(j.service||'')}<br>${esc(j.address||'')}</div>
       ${statusBadge(j.status)}
     </div>`).join('') : `<div class="empty">No jobs scheduled ${isToday?'today':'on '+dLabel}.<br>Enjoy your day! 🎉</div>`;
@@ -1185,7 +1185,7 @@ async function showDetail(id){
         <!-- Owner rule (2026-09-19): the company this job is FOR sits big and
              bold at the top of every job, whichever company the tech belongs to. -->
         <div class="job-biz">${esc((j.company_name||(tech&&tech.company_name)||'').toUpperCase())}</div>
-        <div class="big-name">${esc(j.customer_name)}</div>
+        <div class="big-name">${vipName(j.customer_name,j.customer_phone)}</div>
         <div class="kv">${ic('wrench')} ${esc(j.service||'Service')}</div>
         ${j.customer_phone?`<div class="kv">${ic('phone')} <a href="tel:${esc(j.customer_phone)}">${esc(j.customer_phone)}</a></div>`:''}
         ${j.sms_opt_out?`<div class="sms-off">📵 This customer replied STOP to our texts — "On My Way" will NOT text them. Call them with your ETA when you head out.</div>`:''}
@@ -2869,6 +2869,15 @@ setInterval(()=>{ if(document.hidden) return; refreshTechSession(); }, 30*60*100
 // to the normal login screen rather than a broken half-session.
 // #reviews also deep-links for an ALREADY signed-in tech, so re-tapping the
 // text after the token was consumed still lands on the right tab.
+// Repeat-customer stars (owner 2026-09-28): 3+ paid jobs = 1, 5+ = 2, 8+ = 3 before and after.
+let _vipN={}; try{ _vipN=JSON.parse(localStorage.getItem('ha_vipn')||'{}')||{}; }catch(_){}
+function vipN(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d?(_vipN[d]||0):0; }
+function vipStars(n){ return n>=8?'★★★':n>=5?'★★':n>=3?'★':''; }
+function vipStar(p){ const s=vipStars(vipN(p)); return s?'<span title="'+vipN(p)+' paid jobs" style="color:#f5a524;margin-left:4px;">'+s+'</span>':''; }
+function vipPre(p){ return vipN(p)>=8?'<span style="color:#f5a524;margin-right:4px;">★★★</span>':''; }
+function vipName(name,p){ return vipPre(p)+esc(name)+vipStar(p); }
+function loadVip(){ api('vip_phones').then(d=>{ _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){} }).catch(()=>{}); }
+setTimeout(loadVip,1500);
 (function boot(){
   const magic=new URLSearchParams(location.search).get('login');
   const wantReviews=location.hash==='#reviews';

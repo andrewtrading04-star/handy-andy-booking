@@ -151,6 +151,8 @@ export default async function handler(req, res) {
     const db = serviceClient();
     switch (action) {
       case 'jobs':             return await jobs(req, res, db, auth);
+      // Repeat-customer stars (owner 2026-09-28): phone -> paid job count, 3+ only.
+      case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone, paid_jobs'); return res.status(200).json({ counts: Object.fromEntries((data || []).map((r) => [r.phone, r.paid_jobs])) }); }
       case 'job':              return await job(req, res, db, auth);
       case 'status':           return await status(req, res, db, auth, body);
       case 'job_line_items_save': return await jobLineItemsSave(req, res, db, auth, body);
