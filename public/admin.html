@@ -16494,10 +16494,37 @@ async function loadEstFollowups(){
     paintEstFollowups(d);
   }catch(_){ const box=document.getElementById('estFollow'); if(box) box.innerHTML='<div class="empty">Could not load the follow-up list.</div>'; }
 }
+let _fuOpen=null; const _fuStory={};
+const FU_ICON={ created:'📝', sent:'📤', opened:'👀', followup:'🔁', approved:'✅', declined:'✖', problem:'⚠️', call:'📞', missed:'📵', text_in:'💬', text_out:'💬', note:'🗒' };
+function fuStoryHtml(st){
+  if(st.error) return `<div style="color:#b91c1c;font-size:13px;">${esc(st.error)}</div>`;
+  const e=st.estimate||{}, ev=st.events||[];
+  const lines=(e.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px solid var(--line2);"><span>${esc(it.label)}${it.qty>1?' × '+it.qty:''}</span><span>${money2(it.qty*it.price)}</span></div>`).join('')||'<div style="color:var(--mute);">No line items.</div>';
+  const tz=(current&&current.timezone)||'America/Denver';
+  const when=iso=>new Date(iso).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.45;">
+    <div><div style="font-weight:800;margin-bottom:6px;">The quote${e.service?' · '+esc(e.service):''}</div>
+      ${lines}
+      <div style="display:flex;justify-content:space-between;color:var(--mute);padding-top:5px;"><span>Subtotal</span><span>${money2(e.subtotal||0)}</span></div>
+      <div style="display:flex;justify-content:space-between;color:var(--mute);"><span>Tax</span><span>${money2(e.tax||0)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--line);margin-top:4px;padding-top:4px;"><span>Total</span><span>${money2(e.total||0)}</span></div>
+      ${e.description&&!(e.items||[]).length?`<div style="margin-top:8px;color:var(--mute);">${esc(e.description)}</div>`:''}
+      ${[e.email,e.zip&&('ZIP '+e.zip),e.address].filter(Boolean).length?`<div style="margin-top:8px;color:var(--mute);">${[e.email,e.zip&&('ZIP '+e.zip),e.address].filter(Boolean).map(esc).join(' · ')}</div>`:''}
+    </div>
+    <div><div style="font-weight:800;margin-bottom:6px;">What happened, in order</div>
+      ${ev.length?ev.map(x=>`<div style="display:flex;gap:8px;padding:5px 0;border-top:1px solid var(--line2);">
+        <span style="flex:none;width:18px;text-align:center;">${FU_ICON[x.kind]||'•'}</span>
+        <div style="flex:1;min-width:0;"><div${x.kind==='missed'||x.kind==='problem'?' style="color:#b91c1c;"':x.kind==='approved'?' style="color:#15803d;font-weight:700;"':''}>${esc(x.text)}${x.by?` <span style="color:var(--mute);">· ${esc(x.by)}</span>`:''}</div>
+          ${x.detail?`<div style="color:var(--mute);font-size:12.5px;">${esc(x.detail)}</div>`:''}
+          <div style="color:var(--mute);font-size:11.5px;">${esc(when(x.at))}</div></div></div>`).join(''):'<div style="color:var(--mute);">Nothing recorded yet.</div>'}
+    </div></div>`;
+}
 function paintEstFollowups(d){
   const box=document.getElementById('estFollow'); if(!box) return;
-  const row=(r,kind)=>`<div class="fu-row" data-fu="${esc(r.id)}">
-    <div class="fu-who"><b>${esc(r.name||r.phone||'Customer')}${r.phone_estimate?'':' <small style="font-weight:400;color:var(--mute);">website</small>'}</b>
+  // Owner 2026-09-29 redesign: tap a row to see the whole story -- the quote,
+  // every send/open, follow-ups, calls, texts and notes, in order.
+  const row=(r,kind)=>`<div class="fu-row" data-fu="${esc(r.id)}" data-fu-toggle="${esc(r.id)}" style="cursor:pointer;flex-wrap:wrap;">
+    <div class="fu-who"><b>${_fuOpen===r.id?'▾':'▸'} ${esc(r.name||r.phone||'Customer')}${r.name&&r.phone?` <span style="font-weight:400;color:var(--mute);">${esc(fmtPhone(r.phone))}</span>`:''}${r.phone_estimate?' <small style="font-weight:400;color:var(--mute);">phone quote</small>':' <small style="font-weight:400;color:var(--mute);">website</small>'}</b>
       <span>${esc(r.service||'Estimate')}${r.total!=null?' · '+money2(r.total):''}</span>
       <span>${kind==='opened'?`Opened ${fuAgo(r.opened_at)}, not approved`:`Sent ${fuAgo(r.sent_at)}, not opened`}</span>
       ${r.auto_emailed_at?`<span class="est-fu-line">✉ Follow-up email automatically sent ${fuAgo(r.auto_emailed_at)}</span>`:''}
@@ -16505,8 +16532,10 @@ function paintEstFollowups(d){
     <div class="fu-btns">
       ${r.phone?`<a class="rc-btn ghost" href="tel:${esc(r.phone)}" style="text-decoration:none;">Call</a>`:''}
       ${r.can_text?`<button type="button" class="rc-btn" data-fu-remind="${esc(r.id)}">${r.reminded_at?'Text again':'Text reminder'}</button>`:''}
-      <button type="button" class="rc-btn ghost" data-fu-open="${esc(r.id)}">Open</button>
-    </div></div>`;
+      <button type="button" class="rc-btn ghost" data-fu-open="${esc(r.id)}">Edit estimate</button>
+    </div>
+    ${_fuOpen===r.id?`<div class="fu-story" data-fu-story="${esc(r.id)}" style="flex-basis:100%;margin-top:10px;cursor:default;">${_fuStory[r.id]?fuStoryHtml(_fuStory[r.id]):'<div style="color:var(--mute);font-size:13px;">Loading the history…</div>'}</div>`:''}
+    </div>`;
   const opened=d.opened||[], unopened=d.unopened||[];
   box.innerHTML=`<div class="fu-box">
     <div class="fu-head"><div><h3>Follow up now · ${opened.length+unopened.length}</h3><small style="color:var(--mute);">No response for 24 hours since we last reached out. Estimates sent from Sept 22 on.</small></div>
@@ -16515,6 +16544,13 @@ function paintEstFollowups(d){
     ${unopened.length?`<div class="fu-sec">Sent, never opened (${unopened.length})</div>${unopened.map(r=>row(r,'unopened')).join('')}`:''}
     ${opened.length+unopened.length?'':'<div class="fu-none">Nobody to follow up with right now.</div>'}
     <div class="fu-close" id="fuClosePanel" hidden></div></div>`;
+  box.querySelectorAll('[data-fu-toggle]').forEach(el=>el.addEventListener('click',ev=>{
+    if(ev.target.closest('button,a,[data-fu-story]')) return;
+    const id=el.dataset.fuToggle; _fuOpen=_fuOpen===id?null:id; paintEstFollowups(d);
+    if(_fuOpen && !_fuStory[id]) api('estimate_story',{ params:{ business:current.slug, id } })
+      .then(st=>{ _fuStory[id]=st; if(_fuOpen===id) paintEstFollowups(d); })
+      .catch(err=>{ _fuStory[id]={ error:err.message||'Could not load the history' }; if(_fuOpen===id) paintEstFollowups(d); });
+  }));
   box.querySelectorAll('[data-fu-open]').forEach(b=>b.addEventListener('click',()=>{ _estSelected=b.dataset.fuOpen; _estQuery=''; estOrigin='all'; estFilter='contacted'; renderEstimates(); }));
   box.querySelectorAll('[data-fu-remind]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Text this customer a reminder with their estimate link?')) return;

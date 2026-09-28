@@ -581,6 +581,7 @@ export default async function handler(req, res) {
       }
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
+      case 'estimate_story':     return await estimateStory(req, res, db, auth);
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
       case 'estimate_coupon_send': return await estimateCouponSend(req, res, db, auth, body);
       case 'my_day': return await myDay(req, res, db, auth, body);
@@ -11680,6 +11681,64 @@ async function estimateFollowups(req, res, db, auth) {
   opened.sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at));
   unopened.sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
   return res.status(200).json({ opened, unopened });
+}
+
+// The whole story of one estimate, oldest first (owner 2026-09-29: "I can't
+// diagnose why they didn't book"): the quote itself, every send and open, the
+// automatic follow-ups, every call and text with that customer around it, and
+// the office notes. Read-only.
+async function estimateStory(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business || ''); } catch (e) { return bail(res, e); }
+  const id = String(req.query.id || '');
+  const { data: e } = await db.from('estimates').select('*').eq('id', id).eq('business_id', biz.id).maybeSingle();
+  if (!e) return res.status(404).json({ error: 'Estimate not found' });
+  const items = (Array.isArray(e.line_items) ? e.line_items : []).map((it) => ({
+    label: it.description || it.label || it.name || 'Item', qty: Number(it.qty != null ? it.qty : it.quantity) || 1, price: Number(it.unit_price != null ? it.unit_price : it.price) || 0,
+  }));
+  const sub = Math.round(items.reduce((t, it) => t + it.qty * it.price, 0) * 100) / 100;
+  const tax = Math.round(sub * (Number(e.tax_rate) || 0) * 100) / 100;
+  const ev = [];
+  const add = (at, kind, text, by, extra) => { if (at) ev.push({ at, kind, text, by: by || null, ...(extra || {}) }); };
+  const src = e.source === 'manual' ? 'Quote made on a phone call' : e.source === 'website_form' ? 'Website message came in' : 'Estimate request came in from the website';
+  add(e.created_at, 'created', src, e.contacted_by && e.source === 'manual' ? e.contacted_by : null);
+  add(e.texted_at, 'sent', 'Estimate texted to the customer', e.texted_by);
+  add(e.emailed_at, 'sent', 'Estimate emailed to the customer', e.emailed_by);
+  if (!e.texted_at && !e.emailed_at) add(e.contacted_at, 'sent', 'Estimate sent', e.contacted_by);
+  add(e.text_opened_at, 'opened', 'Customer opened the texted estimate');
+  add(e.email_opened_at, 'opened', 'Customer opened the emailed estimate');
+  add(e.followup_emailed_at, 'followup', e.followup_sent_by ? 'Coupon follow-up email sent ($20 off)' : 'Automatic 3-hour coupon email sent ($20 off)', e.followup_sent_by);
+  for (const m of String(e.notes || '').matchAll(/Reminder texted (\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?: by ([^·\n]+))?/g)) add(m[1], 'followup', 'Reminder text sent', m[2] && m[2].trim().replace(/\.$/, ''));
+  add(e.email_bounced_at, 'problem', 'Email bounced — the customer never got it');
+  add(e.approved_at, 'approved', `Customer approved${e.approved_total ? ' · $' + Number(e.approved_total).toFixed(2) : ''}`);
+  if (e.status === 'declined') add(e.updated_at, 'declined', 'Marked declined / not a fit');
+  if (e.customer_note) add(e.approved_at || e.created_at, 'note', `Customer wrote: "${String(e.customer_note).slice(0, 400)}"`);
+  const ph = String(e.customer_phone || '').replace(/\D/g, '').slice(-10);
+  const since = new Date(Date.parse(e.created_at) - 2 * 86400000).toISOString();
+  if (ph.length === 10) {
+    try {
+      const { data: cs } = await db.from('calls').select('id, occurred_at, kind, answered, duration_sec, handled_by, transcript_summary, resolution')
+        .eq('caller_phone', ph).gte('occurred_at', since).order('occurred_at').limit(30);
+      for (const c of cs || []) {
+        const sum = c.transcript_summary && Array.isArray(c.transcript_summary.items) ? c.transcript_summary.items.map((i) => i.text).join(' · ') : '';
+        if (c.kind === 'live') add(c.occurred_at, 'call', `Phone script${c.resolution ? ' · ' + String(c.resolution).replace(/_/g, ' ') : ''}`, c.handled_by);
+        else if (c.kind === 'inbound') add(c.occurred_at, c.answered === false ? 'missed' : 'call', c.answered === false ? 'Customer called — missed' : `Customer called${c.duration_sec ? ' · ' + Math.round(c.duration_sec / 60 * 10) / 10 + ' min' : ''}`, null, { detail: sum || null, call_id: c.id });
+      }
+      const { data: ca } = await db.from('call_attempts').select('started_at, staff_name, talked').eq('phone', ph).gte('started_at', since).order('started_at').limit(20);
+      for (const a of ca || []) add(a.started_at, 'call', a.talked === true ? 'We called the customer — talked' : a.talked === false ? 'We called the customer — no answer' : 'We called the customer back', a.staff_name);
+      const { data: ms } = await db.from('messages').select('created_at, direction, sent_by, body').ilike('customer_phone', '%' + ph).gte('created_at', since).order('created_at').limit(60);
+      for (const m of ms || []) add(m.created_at, m.direction === 'in' ? 'text_in' : 'text_out', `${m.direction === 'in' ? 'Customer texted' : 'We texted'}: ${String(m.body || '').slice(0, 300)}`, m.direction === 'in' ? null : m.sent_by);
+    } catch (err) { console.warn('[estimate_story]', err.message); }
+  }
+  try {
+    const { data: ns } = await db.from('estimate_office_notes').select('body, created_by, created_at').eq('estimate_id', e.id);
+    for (const n of ns || []) add(n.created_at, 'note', `Office note: ${n.body}`, n.created_by);
+  } catch { /* table optional */ }
+  ev.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return res.status(200).json({
+    estimate: { id: e.id, name: e.customer_name || '', phone: e.customer_phone || '', email: e.customer_email || '', zip: e.customer_zip || '', address: e.customer_address || '',
+      service: e.service_label || '', description: e.description || '', status: e.status, source: e.source, items, subtotal: sub, tax, total: Math.round((sub + tax) * 100) / 100 },
+    events: ev,
+  });
 }
 
 // One-tap reminder text for a sent estimate. Needs the customer's text consent;
