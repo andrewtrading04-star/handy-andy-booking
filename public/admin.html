@@ -10434,6 +10434,8 @@ async function plBuildEstimate(c, btn){
     }catch(_){ filled=false; }
   }
   if(p && p.zip) base.postal_code=p.zip;
+  // The card pop-up sits above the builder (z-index 250 vs 60): close it first.
+  if(_plOpen){ _plOpen=null; paintPipeline(); }
   openNewBooking(base);
   if(filled) toast('Filled in from the call. Check it before sending.');
   else if(p && p.error && plHasPhone(c)) toast('Could not fill it from the call: '+p.error);
