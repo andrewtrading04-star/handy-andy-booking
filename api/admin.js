@@ -9976,7 +9976,8 @@ const REVIEW_CALL_STATUSES = ['called', 'voicemail', 'callback', 'reviewed', 'de
 // and got the same call again), raised a complaint (handled + logged), or
 // asked not to be contacted. 'voicemail' / 'callback' stay on the list so Joey
 // tries again. ('reviewed' kept for old data.)
-const REVIEW_CALL_RESOLVED = ['reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint'];
+// 'voicemail' (No answer) is final too (owner 2026-09-28): email re-sent, no more calls.
+const REVIEW_CALL_RESOLVED = ['reviewed', 'declined', 'do_not_contact', 'promised_review', 'complaint', 'voicemail'];
 const RC_TZ = 'America/Denver';
 // NOTE: line_items lives in the booking_line_items TABLE (not a bookings
 // column) — it must be embedded as a relation, exactly like bookingSelect().

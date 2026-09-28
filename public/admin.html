@@ -15201,6 +15201,7 @@ function paintReviewCalls(){
   view.querySelectorAll('[data-rc-send]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'send')));
   view.querySelectorAll('[data-rc-sendnow]').forEach(b=>b.addEventListener('click',()=>{ rcWork(b.dataset.rcId).channel=b.dataset.rcSendnow; rcAction(b.dataset.rcId,'send'); }));
   view.querySelectorAll('[data-rc-done]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'done',null,b.dataset.rcDone)));
+  view.querySelectorAll('[data-rc-na]').forEach(b=>b.addEventListener('click',()=>{ const id=b.dataset.rcId; if(b.dataset.rcNa==='email'){ rcWork(id).channel='email'; rcAction(id,'send'); } else rcAction(id,'done',null,'noanswer'); }));
   // The note is NOT re-rendered on every keystroke — that would steal focus
   // mid-sentence. It updates the working copy and, on a complaint, releases the
   // save button and its banner in place as soon as something is typed.
@@ -15368,8 +15369,8 @@ function rcCard(r){
     // sits OUTSIDE the say-panel. Everything inside .rc-say is read word for
     // word app-wide; a caption living inside it risks getting read aloud too.
     if(na){
-      h+=`<div class="rc-step">3 · Send the link anyway</div>
-        <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">Nothing is said out loud on this one — the review link just goes out by text or email. The call still stays on the list for another try.</div>`;
+      h+=`<div class="rc-step">3 · Log it</div>
+        <div style="font-size:12px;color:var(--mute);margin-bottom:6px;">Nothing is said out loud. The review email goes out again and this customer is done.</div>`;
       // Already sent on an earlier no-answer pass: say so, so a second trip
       // through the queue doesn't quietly text the same customer again.
       if(r.rc_sent&&r.rc_sent.length) h+=`<div class="rc-banner">Link already sent by ${esc(r.rc_sent.join(' and '))} on the last no answer.</div>`;
@@ -15386,14 +15387,10 @@ function rcCard(r){
           : 'This job has no review link yet, so nothing can be sent right now.'}</div>
         <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="noanswer" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Saving…':'Log the call'}</button></div>`;
     }else if(na){
-      h+=`${chan('both','Send Customer SMS and Email review links',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
-        <div class="rc-chans">
-          ${chan('sms','Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
-          ${chan('email','Email',canEmail,canEmail?'':'no email on file')}
-        </div>
-        <div class="rc-gorow">
-          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send link and log no answer'}</button>
-          <button type="button" class="rc-go ghost" data-rc-done="noanswer" data-rc-id="${r.id}"${w.busy?' disabled':''}>Just log no answer</button>
+      // Owner 2026-09-28: one button. Re-sends the review email (if we have one),
+      // logs no answer, and the customer is done: off this list and the Pipeline.
+      h+=`<div class="rc-gorow">
+          <button type="button" class="rc-go" data-rc-na="${canEmail?'email':''}" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Saving…':canEmail?'Log no answer (re-sends the review email)':'Log no answer'}</button>
         </div>`;
     }else if(!r.has_review_link){
       // MUST commit as 'great' (-> promised_review), never 'declined': declined

@@ -1071,6 +1071,12 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
   }
+  // Owner 2026-09-28: a finished review call (no answer, said no, do not contact,
+  // reviewed) means nobody chases this customer again -- off "Needs review collection".
+  for (let i = shaped.length - 1; i >= 0; i--) {
+    const c = shaped[i];
+    if (c.stage === 'completed' && c.review && ['voicemail', 'declined', 'do_not_contact', 'reviewed'].includes(c.review.call_status)) shaped.splice(i, 1);
+  }
   if (opts.legacyBoard) for (const c of shaped) if (c.stage === 'completed') c.stage = 'booked';
   const notesBy = new Map();
   for (const n of raw.notes || []) (notesBy.get(n.card_key) || notesBy.set(n.card_key, []).get(n.card_key)).push({ id: n.id, body: n.body, by: n.created_by || null, at: n.created_at });
