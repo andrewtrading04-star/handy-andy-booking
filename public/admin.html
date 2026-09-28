@@ -21534,7 +21534,7 @@ document.getElementById('nbSendEstimate').addEventListener('click', toggleNbUpse
 // Owner rule (2026-09-19): every customer with a phone number gets job texts.
 // The box only exists to switch them OFF for someone who asks; the server
 // treats the phone number itself as the opt-in regardless.
-const TEXTS_ON_LABEL='Text this customer job updates (on for everyone with a phone number — untick only if they ask not to be texted; they can also reply STOP).';
+const TEXTS_ON_LABEL='Text this customer.';
 function smsConsentScript(biz){
   const slug=biz&&biz.slug;
   const brand=slug==='handy-andy'?'Handy Andy TV Mounting':((biz&&biz.name)||'We');
