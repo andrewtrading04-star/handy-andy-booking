@@ -15315,6 +15315,7 @@ function rcCard(r){
   // 2. the opener, already filled in -- time band sits right above the actual
   // dial action, since that's the one moment it needs to be seen.
   h+=`${rcTimeBandHtml(r)}
+    <div style="text-align:center;font-size:28px;line-height:1;color:var(--mute);margin:18px 0;" aria-hidden="true">↓</div>
     <div class="rc-step">1 · Say this</div>
     <div class="rc-say"><i></i><p>${esc(rcScript(r))}</p></div>
     ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
@@ -15369,10 +15370,10 @@ function rcCard(r){
           : 'This job has no review link yet, so nothing can be sent right now.'}</div>
         <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="noanswer" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Saving…':'Log the call'}</button></div>`;
     }else if(na){
-      h+=`${chan('both','Both',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
+      h+=`${chan('both','Send Customer SMS and Email review links',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
         <div class="rc-chans">
-          ${chan('sms','💬 Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
-          ${chan('email','✉️ Email',canEmail,canEmail?'':'no email on file')}
+          ${chan('sms','Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
+          ${chan('email','Email',canEmail,canEmail?'':'no email on file')}
         </div>
         <div class="rc-gorow">
           <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send link and log no answer'}</button>
@@ -15391,14 +15392,14 @@ function rcCard(r){
       h+=`<div class="rc-banner warn">${r.review_sms_used?'The review text already went out once and there is no email on file, so there is nothing more to send.':'No mobile with consent and no email on file, so there is nothing to send to right now.'}</div>
         <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="great" data-rc-id="${r.id}">Log the call</button></div>`;
     }else{
-      h+=`${chan('both','Both',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
+      h+=`${chan('both','Send Customer SMS and Email review links',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
         <div class="rc-chans">
-          ${chan('sms','💬 Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
-          ${chan('email','✉️ Email',canEmail,canEmail?'':'no email on file')}
+          ${chan('sms','Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
+          ${chan('email','Email',canEmail,canEmail?'':'no email on file')}
         </div>
         <div class="rc-gorow">
           <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send and log call'}</button>
-          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}"${w.busy?' disabled':''}>They said no thanks</button>
+          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}"${w.busy?' disabled':''}>They said no</button>
         </div>`;
     }
   }else if(w.outcome){
