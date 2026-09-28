@@ -23855,8 +23855,9 @@ async function sendEstimateFromBooking(upsells){
   const phone=document.getElementById('nbPhone').value.trim();
   const email=document.getElementById('nbEmail').value.trim();
 
-  if(!name){ err.textContent='Customer name required'; return; }
-  if(!email){ err.textContent='Customer email required'; return; }
+  // Owner 2026-09-29: a phone OR an email is enough for an estimate (the
+  // server's own rule); a name is optional.
+  if(!phone && !email){ err.textContent='Enter a phone number or an email to send the estimate to'; return; }
 
   const selections=nbCollectSelections();
   if(selections.length===0){ err.textContent='Select at least one service to send'; return; }
@@ -24032,8 +24033,7 @@ function toggleNbUpsellPanel(){
   if(!panel.classList.contains('hidden')){ panel.classList.add('hidden'); return; }
   // Validate the minimum before opening, so the office isn't surprised later.
   const err=document.getElementById('nbErr'); err.textContent='';
-  if(!document.getElementById('nbName').value.trim()){ err.textContent='Customer name required'; return; }
-  if(!document.getElementById('nbEmail').value.trim()){ err.textContent='Customer email required'; return; }
+  if(!document.getElementById('nbPhone').value.trim() && !document.getElementById('nbEmail').value.trim()){ err.textContent='Enter a phone number or an email to send the estimate to'; return; }
   if(nbCollectSelections().length===0){ err.textContent='Select at least one service before sending an estimate'; return; }
   const unpriced=nbUnpricedOtherLabel();
   if(unpriced){ err.textContent=`Enter a price for "${unpriced}" before sending, it's currently $0.`; return; }
