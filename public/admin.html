@@ -10646,6 +10646,7 @@ function plDetailHtml(c){
        </div>`:''}
        ${c.stage==='completed'?plReviewHtml(c):`<div class="plt-steps">${stepHtml}</div>`}
        ${plMediaHtml(c)}
+       ${plNotesHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
   const un=c.unanswered, who=c.secretary||'the office';
@@ -10720,6 +10721,16 @@ function plReviewHtml(c){
     <button type="button" class="pl-btn" data-pl="rv-email">Send review email</button>
     <button type="button" class="pl-btn" data-pl="rv-sms">Send review text</button>
   </div>`;
+}
+// Card notes (owner 2026-09-28): a small notes box on every card.
+function plNotesHtml(c){
+  const ns=Array.isArray(c.notes)?c.notes:[];
+  return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
+    ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
+    <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
+      <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
+      <button type="button" class="pl-btn" data-pl="note-add">Save</button>
+    </div>`;
 }
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
@@ -10826,6 +10837,15 @@ function plClick(e){
       openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
+    case 'note-add': {
+      const ta=document.getElementById('plNoteIn'); const text=ta?ta.value.trim():'';
+      if(!text){ toast('Write a note first'); return; }
+      b.disabled=true;
+      api('pipeline',{ method:'POST', body:{ op:'add_note', card_key:c.key, body:text }})
+        .then(()=>{ if(ta) ta.value=''; toast('Note saved'); ta&&ta.blur(); plLoad(true); })
+        .catch(err=>{ toast(err.message||'Could not save'); b.disabled=false; });
+      return;
+    }
     case 'askwhy': case 'askwhy-fresh': {
       e.preventDefault();
       const key=c.key; _plWhy={ key, loading:true }; paintPipeline();

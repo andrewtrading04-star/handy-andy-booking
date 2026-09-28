@@ -1061,6 +1061,9 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
   }
   if (opts.legacyBoard) for (const c of shaped) if (c.stage === 'completed') c.stage = 'booked';
+  const notesBy = new Map();
+  for (const n of raw.notes || []) (notesBy.get(n.card_key) || notesBy.set(n.card_key, []).get(n.card_key)).push({ id: n.id, body: n.body, by: n.created_by || null, at: n.created_at });
+  for (const c of shaped) c.notes = notesBy.get(c.key) || [];
   const stages = Object.fromEntries(STAGES.map((s) => [s, 0]));
   const board = new Map();
   let calls = 0, converted = 0, leaks = 0;
@@ -1168,7 +1171,9 @@ export async function loadPipelineRaw(db, { nowMs = Date.now(), withAudits = fal
   const activeBookings = await fetchAll('active bookings', () => db.from('bookings').select('id, customer:customers ( phone )')
     .not('status', 'in', '(completed,cancelled)').is('completed_at', null).is('cancelled_at', null)
     .gte('scheduled_at', iso(nowMs - DAY)).order('id'));
-  return { calls, callEvents, messages, estimates, bookings, attempts, marks, auditSkips, staff, silent, blocked, tracking, businesses, audits, activeBookings, history: [] };
+  // Card notes (owner 2026-09-28): short notes the office leaves on a card.
+  const notes = await fetchAll('pipeline_notes', () => db.from('pipeline_notes').select('id, card_key, body, created_by, created_at').gte('created_at', since).order('created_at').order('id'));
+  return { calls, callEvents, messages, estimates, bookings, attempts, marks, auditSkips, staff, silent, blocked, tracking, businesses, audits, activeBookings, notes, history: [] };
 }
 
 // Completed bookings (any time, any source) of these phones: one customers
@@ -1201,6 +1206,13 @@ export async function pipelineHandler(req, res, db, auth, body) {
     }));
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (body && body.op === 'add_note') {
+    const key = String(body.card_key || ''), text = String(body.body || '').trim().slice(0, 1000);
+    if (!/^c_[0-9a-f-]{36}$/i.test(key) || !text) return res.status(400).json({ error: 'Write a note first.' });
+    const { error } = await db.from('pipeline_notes').insert({ card_key: key, body: text, created_by: auth.name || auth.role || 'office' });
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ ok: true });
+  }
   if (body && body.op === 'ask_why') {
     const { askWhy } = await import('./pipeline-ask.js');
     const r = await askWhy(db, auth, body, allowedSlugsFor(auth));
