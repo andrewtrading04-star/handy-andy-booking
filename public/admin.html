@@ -13595,7 +13595,7 @@ function callGroups(rows){
     g.rows.push(r);
   }
   out.forEach(g=>{
-    g.rows.sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+    g.rows.sort((a,b)=>(Date.parse(b.occurred_at)||0)-(Date.parse(a.occurred_at)||0));
     // The card is the caller's newest CALL, not a Take a Call script row:
     // script rows carry caller_phone now (Pipeline, 2026-09-24), so a missed
     // caller called back with the script would otherwise lose Call back /
@@ -13610,7 +13610,8 @@ function callGroups(rows){
     g.blocked=g.rows.some(r=>r.blocked);
     g.open=g.rows.some(r=>!r._handled);
   });
-  out.sort((a,b)=>a.latest.occurred_at<b.latest.occurred_at?1:-1);
+  // Owner 2026-09-29: always newest first, by the caller's most recent activity.
+  out.sort((a,b)=>(Date.parse(b.rows[0].occurred_at)||0)-(Date.parse(a.rows[0].occurred_at)||0));
   return out;
 }
 // What we hold from this caller, as small pills for the list.
