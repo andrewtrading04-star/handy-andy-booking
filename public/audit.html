@@ -277,6 +277,13 @@
      A left nav like the CRM's. Each page is a <section data-page>; only the
      active one is shown. Phones: the nav becomes a scrolling row on top. */
   .shell{display:flex;gap:18px;align-items:flex-start;}
+  /* Calls/Messages embed the owner's screens: use the whole window (owner 2026-09-28). */
+  body.embed-on .wrap{max-width:none;padding:10px 12px 8px;}
+  body.embed-on .shell{gap:12px;}
+  body.embed-on .sidenav{flex-basis:150px;}
+  body.embed-on .page.on{flex:1;min-width:0;}
+  body.embed-on iframe[data-embed]{height:calc(100vh - 140px) !important;min-height:0 !important;}
+  @media (max-width:720px){ body.embed-on iframe[data-embed]{height:calc(100vh - 185px) !important;} body.embed-on .wrap{padding:6px 6px 4px;} }
   .sidenav{flex:0 0 190px;position:sticky;top:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;}
   .sidenav button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;border-radius:9px;
     padding:10px 11px;font:inherit;font-size:14px;font-weight:600;color:var(--ink-2);cursor:pointer;}
@@ -1695,6 +1702,7 @@ function embedOwnerScreen(which, callId){
 }
 function showPage(p){
   page=p;
+  document.body.classList.toggle('embed-on', p==='calls'||p==='messages');
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
