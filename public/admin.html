@@ -13930,7 +13930,8 @@ function callSplitView(g){
   const all=(g&&g.rows||[]).slice().sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at)));
   const rows=all.filter(r=>r.kind!=='live'&&r.kind!=='sms');
   const bn=r=>(r.business&&r.business.name)||'Unknown line';
-  const brands=[...new Set(rows.map(bn))];
+  const _rv=(g.latest&&g.latest.history&&g.latest.history.review)||null;
+  const brands=[...new Set([...rows.map(bn), ...((_rv&&_rv.right)||[]).map(r=>r.brand)])];
   if(brands.length<2) return '';
   const tz=CALL_TZ[(g.latest&&g.latest.market)]||'America/Denver';
   const t=iso=>{ try{ return new Date(iso).toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
