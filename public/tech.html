@@ -334,6 +334,7 @@
     <div class="hdr">
       <div><div class="name" id="techName">—</div><div class="sub" id="jobsSub">Today's jobs</div></div>
       <div class="hdr-actions">
+        <button id="calBtn" class="icbtn" title="Add my jobs to my phone calendar">📅</button>
         <button id="helpBtn" class="icbtn" title="Help">❓</button>
         <button id="logout" class="icbtn" title="Log out">⏻</button>
       </div>
@@ -2878,6 +2879,33 @@ function vipPre(p){ return ''; }
 function vipName(name,p){ return vipPre(p)+esc(name)+vipStar(p); }
 function loadVip(){ api('vip_phones').then(d=>{ _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){} }).catch(()=>{}); }
 setTimeout(loadVip,1500);
+// Phone calendar (owner 2026-09-29): one tap subscribes the tech's own
+// calendar app to their jobs. iPhone opens webcal:// straight into Calendar;
+// Android goes through Google Calendar's "add by URL".
+async function openCalendarSheet(){
+  document.getElementById('calSheet')?.remove();
+  const back=document.createElement('div'); back.id='calSheet';
+  back.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+  back.innerHTML='<div style="background:#fff;color:#111;width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:20px 18px 26px;font-size:15px;line-height:1.45;">'
+    +'<div style="font-size:18px;font-weight:800;margin-bottom:6px;">Put my jobs in my phone calendar</div>'
+    +'<div style="color:#555;margin-bottom:14px;">Every job you get shows up in your calendar with the time and address, and updates by itself. You only do this once.</div>'
+    +'<div id="calBtns" style="display:grid;gap:10px;"><div style="color:#777;">Loading…</div></div>'
+    +'<button type="button" id="calClose" style="margin-top:14px;width:100%;padding:12px;border-radius:10px;border:1px solid #ddd;background:#fff;font:inherit;">Close</button></div>';
+  document.body.appendChild(back);
+  const close=()=>back.remove();
+  back.addEventListener('click',e=>{ if(e.target===back) close(); });
+  back.querySelector('#calClose').onclick=close;
+  try{
+    const l=await api('calendar_link');
+    const ios=/iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const btn=(href,label,primary)=>`<a href="${esc(href)}" target="_blank" rel="noopener" style="display:block;text-align:center;padding:14px;border-radius:10px;font-weight:800;text-decoration:none;${primary?'background:#111;color:#fff;':'background:#f1f1f1;color:#111;'}">${label}</a>`;
+    back.querySelector('#calBtns').innerHTML=(ios
+      ? btn(l.webcal,'Add to iPhone Calendar',true)+btn(l.google,'I use Google Calendar',false)
+      : btn(l.google,'Add to Google Calendar',true)+btn(l.webcal,'Other calendar app',false))
+      +'<div style="font-size:12.5px;color:#777;">Samsung Calendar: add it to Google Calendar, then turn on your Google account in Samsung Calendar settings.</div>';
+  }catch(e){ back.querySelector('#calBtns').innerHTML='<div style="color:#b91c1c;">Could not get your calendar link. Try again.</div>'; }
+}
+document.getElementById('calBtn')?.addEventListener('click',openCalendarSheet);
 (function boot(){
   const magic=new URLSearchParams(location.search).get('login');
   const wantReviews=location.hash==='#reviews';

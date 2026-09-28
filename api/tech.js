@@ -41,6 +41,7 @@ import { denverToday, noteIsLive, isPrivateNotePhoto } from './_lib/notes.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan, isRetired } from './_lib/payroll.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
+import { techIcs, calTechId, calLinks } from './_lib/tech-calendar.js';
 
 // A job is not "complete" until the tech has documented it with photos.
 const MIN_PHOTOS_TO_COMPLETE = 2;
@@ -142,6 +143,18 @@ export default async function handler(req, res) {
     // already-hardened join flow above -- nothing new there.
     if (action === 'apply_start') return await applyStart(req, res, body);
     if (action === 'apply_submit') return await applySubmit(req, res, body);
+    // Calendar subscription feed (owner 2026-09-29). Calendar apps can't send
+    // a header, so the tech's own long-lived calendar token rides in ?t=.
+    if (action === 'calendar') {
+      const techId = calTechId(req.query.t);
+      if (!techId) return res.status(401).send('Invalid calendar link');
+      const ics = await techIcs(serviceClient(), techId);
+      if (!ics) return res.status(404).send('Calendar not available');
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Content-Disposition', 'inline; filename="my-jobs.ics"');
+      return res.status(200).send(ics);
+    }
 
     // <img src> can't send an Authorization header, so note_photo alone also
     // accepts the same signed token as ?token= (admin.js note_photo does too).
@@ -151,6 +164,7 @@ export default async function handler(req, res) {
     const db = serviceClient();
     switch (action) {
       case 'jobs':             return await jobs(req, res, db, auth);
+      case 'calendar_link':    return res.status(200).json(calLinks(auth.tech_id));
       // Repeat-customer stars (owner 2026-09-28): phone -> paid job count, 3+ only.
       case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone, paid_jobs'); return res.status(200).json({ counts: Object.fromEntries((data || []).map((r) => [r.phone, r.paid_jobs])) }); }
       case 'job':              return await job(req, res, db, auth);
