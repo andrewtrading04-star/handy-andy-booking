@@ -9126,7 +9126,19 @@ async function calls(req, res, db, auth) {
     }
   } catch (e) { /* a nicety — never fail the call list over it */ }
 
-  const mapped = (rows || []).map(r => ({
+  // Owner 2026-09-29: a forward that the handset's OWN voicemail picked up
+  // reaches Twilio as "answered" (the carrier answered it). The transcript
+  // opens with the voicemail greeting, so that is what gives it away. Those
+  // calls are missed calls with a voicemail, not conversations.
+  const VM_GREETING = /(leave (me )?(a |your )?(brief |short )?(voice ?)?message|not available|unavailable|at the tone|after the (tone|beep)|record your message|voice ?mail|mailbox|sorry (I|we) missed your call|can't (come to|take) (the|your) (phone|call))/i;
+  const phoneVoicemail = (r) => {
+    if (r.answered !== true || r.kind === 'live' || !r.transcript) return false;
+    // The first two things "Staff" said (a greeting can be split by a
+    // caller's "hello?", and can start 30+ seconds in after a long ring).
+    const staff = String(r.transcript).split(/\r?\n/).filter(l => /^Staff:/.test(l));
+    return VM_GREETING.test(staff.slice(0, 2).join(' '));
+  };
+  const mapped = (rows || []).map(r => (phoneVoicemail(r) ? { ...r, answered: false, vm_on_handset: true } : r)).map(r => ({
     ...r,
     caller_display: r.customer?.name || prettyPhone(r.caller_phone),
     caller_pretty: prettyPhone(r.caller_phone),

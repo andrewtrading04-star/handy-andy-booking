@@ -14179,7 +14179,7 @@ function callInbox(groups){
           const nm=r.customer?.name || (r.history&&r.history.name) || '';
           const qe=r.history&&r.history.last_estimate;
           const quote=(r.booking||callOutcome(r)==='Booked'||(r.history&&r.history.upcoming))?'Booked':qe&&qe.approved_at?'Quote approved':qe&&qe.sent_at?'Quote sent':'Quote not sent';
-          return `<strong style="font-size:15px;">${vipPre(r.caller_phone)+esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
+          return `<strong style="font-size:15px;${missed?'color:#dc2626;':''}">${vipPre(r.caller_phone)+esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
         <span style="font-size:15px;color:var(--ink);font-weight:400;">${esc(r.caller_pretty||r.caller_phone||'Unknown number')}</span>
         <span style="font-size:12.5px;color:var(--mute);">${esc(r.routed_to_name || 'Not assigned')}</span>
         <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss+' Not answered':CV_ICON.ok+' Answered')+' - '+quote}</span>`; })()}
