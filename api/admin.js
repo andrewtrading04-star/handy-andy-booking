@@ -9055,6 +9055,19 @@ async function calls(req, res, db, auth) {
             opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null };
         }
       }
+      // What each secretary priced in the call script (the live row's notes)
+      // and the owner's review of this caller, for the side-by-side card.
+      try {
+        const { data: lives } = await db.from('calls').select('caller_phone, occurred_at, handled_by, notes, quoted_total, resolution, business:businesses(name)')
+          .eq('kind', 'live').in('caller_phone', forms).not('notes', 'is', null).order('occurred_at', { ascending: false }).limit(500);
+        for (const l of (lives || [])) {
+          const x = h(callerDigits(l.caller_phone));
+          if (!x.script_quotes) x.script_quotes = [];
+          if (x.script_quotes.length < 10) x.script_quotes.push({ at: l.occurred_at, by: l.handled_by || null, brand: l.business?.name || null, notes: String(l.notes || '').slice(0, 2000), total: Number(l.quoted_total) || null, outcome: l.resolution || null });
+        }
+        const { data: revs } = await db.from('caller_reviews').select('phone, data').in('phone', callerPhones);
+        for (const r of (revs || [])) h(callerDigits(r.phone)).review = r.data;
+      } catch (_) {}
       // Texts per caller, with the company each one belongs to (owner 2026-09-28).
       try {
         let mq = db.from('messages').select('customer_phone, created_at, direction, body, sent_by, business:businesses(name)')

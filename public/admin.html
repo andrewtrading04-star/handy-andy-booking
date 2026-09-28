@@ -13978,6 +13978,7 @@ function callSplitView(g){
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:10px 0;">${journey}</div>
     ${diff>0?`<div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:8px 12px;font-weight:800;margin-bottom:10px;">⚠ Two different prices: ${ps.map(n=>esc(n)+' $'+price[n]).join(' vs ')} ($${diff} apart)</div>`:''}
+    ${hist.review&&hist.review.job?`<div style="background:#111418;color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:10px;"><div style="font-size:11px;opacity:.7;text-transform:uppercase;font-weight:800;">Owner review · the job</div><div style="font-weight:700;">${esc(hist.review.job)}</div></div>`:''}
     <div style="display:flex;gap:10px;flex-wrap:wrap;">${brands.map(col).join('')}</div>
   </div>`;
 }
@@ -13991,6 +13992,19 @@ function splitExtras(hist, brand, tz){
   const txs=(hist.texts_list||[]).filter(m=>m.brand===brand).slice().reverse();
   const box=(title,inner)=>`<div style="padding:9px 12px;border-bottom:1px solid var(--line2);"><div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:4px;">${title}</div>${inner}</div>`;
   let h='';
+  const rv=hist.review||{};
+  const flags=(rv.flags||[]).filter(f=>f.brand===brand);
+  (hist.script_quotes||[]).filter(q=>q.brand===brand).slice(0,2).forEach(q=>{
+    const lines=String(q.notes||'').split(' · ').map(x=>x.match(/^(.*?)\s+—\s+\$(\d[\d,.]*)$/)).filter(Boolean).map(m=>[m[1].replace(/^[^:]+:\s*/,''),Number(m[2].replace(/,/g,''))]).filter(([,v])=>true);
+    if(!lines.length) return;
+    const tot=lines.reduce((t,[,v])=>t+v,0);
+    h+=box(`Priced on the call · ${esc(q.by||'')}`, `<div style="font-size:13px;">${lines.map(([l,v])=>{ const f=flags.find(x=>l.includes(x.match));
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:6px;${f?'background:#fee2e2;':''}"><span>${f?'❌ ':''}${esc(l)}${f?`<div style="font-size:11.5px;color:#991b1b;font-weight:700;">${esc(f.note)}</div>`:''}</span><b>$${Math.round(v)}</b></div>`; }).join('')}
+      <div style="display:flex;justify-content:space-between;border-top:2px solid var(--ink);margin-top:4px;padding:4px 6px;font-weight:800;"><span>Quoted</span><span>$${Math.round(tot)}</span></div></div>`);
+  });
+  (rv.after||[]).filter(a=>a.brand===brand).forEach(a=>{ h+=box('After the call', `<div style="font-size:12.5px;background:#fff7ed;border-radius:6px;padding:5px 7px;">${esc(a.text)}</div>`); });
+  const right=(rv.right||[]).find(r=>r.brand===brand);
+  if(right) h+=box('Right price', `<div style="font-size:13px;background:#ecfdf5;border-radius:6px;padding:4px 6px;">${right.lines.map(([l,v])=>`<div style="display:flex;justify-content:space-between;gap:8px;"><span>✅ ${esc(l)}</span><b>$${v}</b></div>`).join('')}<div style="display:flex;justify-content:space-between;border-top:2px solid #15803d;margin-top:4px;padding-top:3px;font-weight:800;color:#15803d;"><span>Should have been</span><span>$${right.total}</span></div></div>`);
   h+=box('Quotes', ests.length?ests.map(e=>`<details style="margin:3px 0;"><summary style="cursor:pointer;font-size:13px;"><b>${$(e.total)}</b> · ${esc(e.service||'Estimate')} · ${esc(W(e.created_at))}${e.approved_at?' · <b style="color:#15803d;">approved</b>':e.opened?' · opened':e.sent_at?' · sent, not opened':' · not sent'}</summary>
       <div style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:4px;font-size:12.5px;">${(e.items||[]).map(i=>`<div style="display:flex;justify-content:space-between;gap:8px;"><span>${esc(i.name)}${i.qty>1?' × '+i.qty:''}</span><span>${$(i.qty*i.price)}</span></div>`).join('')||'No line items'}
       <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--line);margin-top:4px;padding-top:3px;"><span>Total</span><span>${$(e.total)}</span></div></div></details>`).join('')
