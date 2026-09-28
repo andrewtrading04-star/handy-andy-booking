@@ -22220,8 +22220,7 @@ function renderCustomTaskStep(){
   const steps=document.getElementById('nbSteps');
   if(!steps) return;
   steps.innerHTML=
-    `<div class="nb-step-t">Custom Task</div>`+
-    `<div class="nb-hint">Not TV Mounting or Handyman. Add each task below as its own line with your own price.</div>`;
+    `<div class="nb-step-t">Custom Task</div>`;
   if(!nbCustomLines.length){ nbCustomLines=[{label:'',price:''}]; }
   nbRenderCustomLines();
   updateNbTotal();
