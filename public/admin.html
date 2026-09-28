@@ -14343,7 +14343,7 @@ let _vipN={}; try{ _vipN=JSON.parse(localStorage.getItem('ha_vipn')||'{}')||{}; 
 function vipN(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d?(_vipN[d]||0):0; }
 function vipStars(n){ return n>=8?'★★★':n>=5?'★★':n>=3?'★':''; }
 function vipStar(phone){ const n=vipN(phone), s=vipStars(n); return s?'<span title="'+n+' paid jobs" style="color:#f5a524;margin-left:4px;">'+s+'</span>':''; }
-function vipPre(phone){ return vipN(phone)>=8?'<span title="'+vipN(phone)+' paid jobs" style="color:#f5a524;margin-right:4px;">★★★</span>':''; }
+function vipPre(phone){ return ''; }  // owner 2026-09-28: stars only after the name
 function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN); _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){}
   // Repaint once the stars arrive, so they show without a refresh.
   if(was!==JSON.stringify(_vipN)){ try{ if(section==='schedule') renderSchedule(); else if(section==='messages') paintMessages(); else if(section==='callhub'||section==='pipeline') navTo(section); }catch(_){} }
@@ -16257,7 +16257,7 @@ function paintEstimates(){
 }
 
 // ── Follow up now: sent estimates the customer opened (or never opened) but did not approve ──
-function fuWhen(iso){ return new Date(iso).toLocaleString('en-US',{timeZone:_tzi.tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+function fuWhen(iso){ return new Date(iso).toLocaleString('en-US',{timeZone:estTimezone(null).tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
 function fuAgo(iso){
   const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));
   return m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:`${Math.floor(m/1440)}d ago`;

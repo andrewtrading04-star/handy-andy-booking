@@ -2874,7 +2874,7 @@ let _vipN={}; try{ _vipN=JSON.parse(localStorage.getItem('ha_vipn')||'{}')||{}; 
 function vipN(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d?(_vipN[d]||0):0; }
 function vipStars(n){ return n>=8?'★★★':n>=5?'★★':n>=3?'★':''; }
 function vipStar(p){ const s=vipStars(vipN(p)); return s?'<span title="'+vipN(p)+' paid jobs" style="color:#f5a524;margin-left:4px;">'+s+'</span>':''; }
-function vipPre(p){ return vipN(p)>=8?'<span style="color:#f5a524;margin-right:4px;">★★★</span>':''; }
+function vipPre(p){ return ''; }
 function vipName(name,p){ return vipPre(p)+esc(name)+vipStar(p); }
 function loadVip(){ api('vip_phones').then(d=>{ _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){} }).catch(()=>{}); }
 setTimeout(loadVip,1500);
