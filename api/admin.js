@@ -10115,8 +10115,24 @@ async function reviewCalls(req, res, db, auth) {
     });
   }
 
-  const days = Math.max(1, Math.min(Number(req.query.days) || 1, 30));
+  // Owner rule 2026-09-28: the to-call list is ALWAYS the last 7 days. It was
+  // "yesterday" by default, so a skipped day meant those customers were never
+  // called. Everyone in the window who hasn't reviewed us anywhere stays on it.
+  const days = 7;
   const out = [];
+  // Google reviews count too (owner rule): matched to the job directly, or by
+  // the customer's name on the same business in the last 60 days.
+  const gByBooking = new Set(), gByName = new Set();
+  try {
+    const { data: gr } = await db.from('google_reviews').select('booking_id, reviewer_name, business_id')
+      .gte('review_date', new Date(Date.now() - 60 * 86400000).toISOString());
+    const norm = (v) => String(v || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+    for (const g of (gr || [])) {
+      if (g.booking_id) gByBooking.add(g.booking_id);
+      if (g.reviewer_name) gByName.add(g.business_id + '|' + norm(g.reviewer_name));
+    }
+    var gNorm = norm;
+  } catch (e) { console.warn('[review_calls] google reviews check failed:', e.message); }
   await Promise.all((bizs || []).map(async b => {
     const tz = b.timezone || RC_TZ;
     const winStart = localDayStartUTC(tz, -days);   // start of (today − days), that business's local day
@@ -10141,15 +10157,17 @@ async function reviewCalls(req, res, db, auth) {
       // signal. Plus a >= 4 backstop. A job that merely carries a stale imported
       // rating (no submission → no reviewed_at) stays callable.
       if (row.reviewed_at != null || Number(row.review_rating) >= 4) continue;
+      if (gByBooking.has(row.id)) continue;
+      if (typeof gNorm === 'function' && row.customer?.name && gByName.has(b.id + '|' + gNorm(row.customer.name))) continue;
       if (REVIEW_CALL_RESOLVED.includes(row.review_call_status)) continue;   // handled by Joey — find it under its folder tab now
       out.push(rcMapRow(row, b, tzMap));
     }
   }));
-  // Not-yet-called first, then most-recently-completed first.
+  // Not-yet-called first, OLDEST first: those are about to drop off the 7 days.
   out.sort((a, c) => {
     const au = a.call_status ? 1 : 0, cu = c.call_status ? 1 : 0;
     if (au !== cu) return au - cu;
-    return new Date(c.when || 0) - new Date(a.when || 0);
+    return new Date(a.when || 0) - new Date(c.when || 0);
   });
   await attachInboundVoicemails(db, out);
   return res.status(200).json({

@@ -12098,7 +12098,7 @@ async function renderDisputes(){
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
 // ── Review Calls — Joey's daily review-outreach queue ────────────────────────
-let _rcDays=1, _rcData=[], _rcComplaintFor=null, _rcComplaintText='', _rcWarning=null;
+let _rcDays=7, _rcData=[], _rcComplaintFor=null, _rcComplaintText='', _rcWarning=null;
 let _rcFolder='to_call', _rcWeekOffset=0, _rcFolderCounts={}, _rcWeekLabel='';
 // Per-card working state for the guided call, keyed by booking id. Lives outside
 // the render so tapping an outcome, a tag or the note never loses what is
@@ -15132,7 +15132,7 @@ function paintReviewCalls(){
     </button>`).join('')}</div><section class="ch-review-detail" aria-label="Selected customer review call">${(isToCall?rcCard:rcFolderCard)(selected)}</section></div>`
     : `<div class="empty" style="padding:34px 12px;">${isToCall?'🎉 Nobody to call for this window — everyone has left a review or been handled.':'Nothing logged in this folder that week.'}</div>`;
   const rangeControl = isToCall
-    ? `<div class="rc-seg">${seg(1,'Yesterday')}${seg(3,'Last 3 days')}${seg(7,'Last 7 days')}</div>`
+    ? `<div class="rc-seg" style="font-weight:700;font-size:13px;padding:6px 10px;">Last 7 days · everyone not called yet · oldest first</div>`
     : `<div class="rc-week-nav">
          <button class="rc-week-arrow" data-rcweek="-1" title="Previous week">‹</button>
          <span class="rc-week-label">Week of ${esc(_rcWeekLabel)}</span>
@@ -17890,7 +17890,7 @@ async function renderGreeting(){
       refreshEstimateBadge(),
       // How many review calls Joey has to make (cross-business, yesterday's jobs).
       // Not part of Heather's (Handy Andy) platform — skip the call entirely.
-      scope==='handy-andy' ? Promise.resolve({counts:{}}) : api('review_calls',{ params:{ days:1 }}).catch(()=>({counts:{}})),
+      scope==='handy-andy' ? Promise.resolve({counts:{}}) : api('review_calls',{ params:{ days:7 }}).catch(()=>({counts:{}})),
     ];
     // Owner: also check for pending brackets + current per-tech stock levels
     // (the stock feeds the low-stock warning in the Predicted-income box).
