@@ -8694,7 +8694,11 @@ async function reviewResend(req, res, db, auth, body) {
     // second is allowed only when the first never reached them; otherwise the
     // reminder goes by email.
     const smsSentAt = b.review_sms_sent_at || b.metadata?.review_sms_sent_at || null;
-    if (smsSentAt && !['failed', 'undelivered'].includes(String(b.review_sms_status || ''))) {
+    // Owner 2026-09-28: a customer who says YES on a review call ("would you
+    // mind if I send you something?") may get the text again -- it's a reply
+    // to their request, not an unrequested follow-up. Recorded on the job.
+    const customerAsked = !!(body.from_review_call && body.customer_asked === true);
+    if (smsSentAt && !customerAsked && !['failed', 'undelivered'].includes(String(b.review_sms_status || ''))) {
       return res.status(409).json({ error: 'The review text was already sent for this job, and we only text it once. Send it by email instead.' });
     }
     if (!smsNotificationsOn()) return res.status(503).json({ error: 'Text notifications are turned off.' });
@@ -8707,7 +8711,7 @@ async function reviewResend(req, res, db, auth, body) {
     if (!r.ok) return res.status(502).json({ error: 'Text failed to send: ' + (r.error || 'unknown error') });
 
     const now = new Date().toISOString();
-    await db.from('bookings').update({ metadata: { ...(b.metadata || {}), review_sms_sent_at: now } }).eq('id', id);
+    await db.from('bookings').update({ metadata: { ...(b.metadata || {}), review_sms_sent_at: now, ...(customerAsked ? { review_sms_customer_asked_at: now, review_sms_customer_asked_by: auth.name || null } : {}) } }).eq('id', id);
     // Best-effort tracking-column bump — same fresh-delivery-attempt reset as
     // the email path below (Twilio's status callback matches by review_token,
     // not message sid, so there's no id column to re-point here).

@@ -15339,7 +15339,8 @@ function rcCard(r){
   // still gets another try tomorrow (see RC_OUT_RESOLVES).
   if(w.outcome==='great' || w.outcome==='noanswer'){
     const na = w.outcome==='noanswer';
-    const canSms=!!(r.has_sms && r.has_review_link && !r.review_sms_used);
+    // On "Went great" the customer just agreed on the call, so the text is allowed again.
+    const canSms=!!(r.has_sms && r.has_review_link && (!r.review_sms_used || w.outcome==='great'));
     const canEmail=!!(r.has_email && r.has_review_link);
     const canBoth=canSms&&canEmail;
     // Default to both whenever both are possible; otherwise to whichever is.
@@ -15430,7 +15431,7 @@ async function rcSendReview(id, channel){
       // from_review_call makes the server resolve the business from the BOOKING.
       // Joey's token is scoped to Doms, so naming the business here would 403 on
       // every Handy Andy card in this deliberately cross-business queue.
-      await api('review_resend',{ method:'POST', body:{ id, channel:ch, from_review_call:true }});
+      await api('review_resend',{ method:'POST', body:{ id, channel:ch, from_review_call:true, customer_asked:rcWork(id).outcome==='great' }});
       okd.push(ch==='sms'?'text':'email');
     }catch(e){ failed.push(`${ch==='sms'?'text':'email'} (${e.message})`); }
   }
