@@ -13539,8 +13539,23 @@ function txBrief(r){
   const parts=[pick('job'), pick('booked')||pick('not_booked')].filter(Boolean);
   return parts.length?`<div style="font-size:12.5px;color:var(--ink-2);margin-top:6px;line-height:1.4;">${esc(parts.join(' · '))}</div>`:'';
 }
+// "ZIP 80134" -> "Denver (80134)" (owner 2026-09-28): metro from the zip.
+function zipMetro(z){
+  z=String(z||'');
+  if(/^8[01]/.test(z)) return 'Denver';
+  if(/^78[67]/.test(z)) return 'Austin';
+  if(/^77/.test(z)) return 'Houston';
+  if(/^78[12]/.test(z)) return 'San Antonio';
+  if(/^85/.test(z)) return 'Phoenix';
+  if(/^9[01]/.test(z)) return 'Los Angeles';
+  return '';
+}
 function txSumHtml(sum, r){
-  let items=(sum.items||[]).slice();
+  let items=(sum.items||[]).slice().map(i=>{
+    if(i.kind!=='place') return i;
+    const z=(String(i.text||'').match(/\b\d{5}\b/)||[])[0], m=z&&zipMetro(z);
+    return m?{...i,text:`${m} (${z})`}:i;
+  });
   const qe=r&&r.history&&r.history.last_estimate;
   const callMs=r&&Date.parse(r.occurred_at||'');
   const sentAfter=qe&&qe.sent_at&&(!callMs||Date.parse(qe.sent_at)>=callMs-10*60000);
