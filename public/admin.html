@@ -2525,12 +2525,12 @@
   <div class="sheet" style="max-width:420px;">
     <h2>Reschedule</h2>
     <div class="sub" id="rsSub" style="font-size:13px;margin:-8px 0 16px;"></div>
-    <label class="rs-lbl" for="rsDate">New date</label>
+    <label class="rs-lbl" for="rsTech">1. Technician</label>
+    <select id="rsTech" class="search" style="margin:0 0 16px;"></select>
+    <label class="rs-lbl" for="rsDate">2. New date</label>
     <input type="date" id="rsDate" class="search" style="margin:0 0 16px;">
-    <label class="rs-lbl">New time</label>
+    <label class="rs-lbl">3. Open times</label>
     <div id="rsSlots" class="rs-slots"></div>
-    <label class="rs-lbl" for="rsTech" style="margin-top:14px;display:block;">Technician</label>
-    <select id="rsTech" class="search" style="margin:0;"></select>
     <div style="display:flex;gap:8px;margin-top:18px;">
       <button class="btn" type="button" id="rsSave">Save new time</button>
       <button class="btn ghost" type="button" id="rsCancel">Cancel</button>
@@ -5228,23 +5228,45 @@ function rsSlotKeyForIso(iso){
 let rsState=null;   // { bookingId, date, slot, onDone }
 function openReschedule(b, onDone){
   const curDate=localDateOf(b.scheduled_at)||todayStr();
-  rsState={ bookingId:b.id, date:curDate, slot:rsSlotKeyForIso(b.scheduled_at), onDone:onDone||null };
+  // Owner, 2026-09-29: pick the tech first, then only that tech's REAL open
+  // times are offered (same available_slots check New Booking uses). The
+  // current slot is not pre-selected: the point of rescheduling is a new time.
+  rsState={ bookingId:b.id, date:curDate, slot:null, zip:b.postal_code||'', seq:0, onDone:onDone||null };
   document.getElementById('rsSub').innerHTML=`${esc(b.customer?.name||'Customer')} · now <strong>${esc(fmtDateTime(b.scheduled_at))}</strong>`;
   const di=document.getElementById('rsDate'); di.value=curDate; di.min=todayStr();
   document.getElementById('rsErr').textContent='';
-  renderRsSlots();
   // Same tech picker the booking detail modal's Assign dropdown uses, so the
   // office can move the time AND swap the tech (e.g. the customer asked for
   // someone else) in one step instead of two separate screens.
-  document.getElementById('rsTech').innerHTML=bkPrimaryTechOptionsHtml(b);
+  document.getElementById('rsTech').innerHTML=bkPrimaryTechOptionsHtml(b).replace('— Unassigned —','Any available tech');
   document.getElementById('rsModal').classList.remove('hidden');
+  loadRsSlots();
+}
+async function loadRsSlots(){
+  if(!rsState) return;
+  const list=document.getElementById('rsSlots');
+  const mySeq=++rsState.seq, date=rsState.date, tech=document.getElementById('rsTech').value;
+  rsState.slot=null;
+  if(!date){ list.innerHTML='<div class="sub" style="font-size:13px;">Pick a date.</div>'; return; }
+  list.innerHTML='<div class="sub" role="status" style="font-size:13px;">Checking open times…</div>';
+  const params={ business:current.slug, date, technician_id:tech||'any', pool:'own' };
+  if(rsState.zip) params.postal_code=rsState.zip;
+  try{
+    const r=await api('available_slots',{ params });
+    if(!rsState||mySeq!==rsState.seq) return;
+    rsState.open=r.slots||[];
+    renderRsSlots();
+  }catch(e){ if(rsState&&mySeq===rsState.seq) list.innerHTML=`<div class="err" style="font-size:13px;">${esc(e.message)}</div>`; }
 }
 function renderRsSlots(){
-  document.getElementById('rsSlots').innerHTML=BOOKING_SLOTS.map(s=>
-    `<button type="button" class="nb-slot${rsState&&rsState.slot===s.key?' on':''}" data-key="${s.key}">${esc(s.label)}</button>`).join('');
+  const list=document.getElementById('rsSlots'); const open=(rsState&&rsState.open)||[];
+  if(!open.length){ list.innerHTML='<div class="sub" style="font-size:13px;">No open times for this tech on this date. Try another date or tech.</div>'; return; }
+  list.innerHTML=open.map(s=>
+    `<button type="button" class="nb-slot${rsState.slot===s.slot_key?' on':''}" data-key="${esc(s.slot_key)}">${esc(s.label)}</button>`).join('');
 }
 function closeRsModal(){ document.getElementById('rsModal').classList.add('hidden'); rsState=null; }
-document.getElementById('rsDate').addEventListener('change',e=>{ if(rsState) rsState.date=e.target.value; });
+document.getElementById('rsDate').addEventListener('change',e=>{ if(rsState){ rsState.date=e.target.value; loadRsSlots(); } });
+document.getElementById('rsTech').addEventListener('change',()=>{ if(rsState) loadRsSlots(); });
 document.getElementById('rsSlots').addEventListener('click',e=>{
   const btn=e.target.closest('.nb-slot'); if(!btn||!rsState) return;
   rsState.slot=btn.dataset.key; renderRsSlots();
