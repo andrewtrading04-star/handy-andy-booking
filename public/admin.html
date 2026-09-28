@@ -2635,7 +2635,7 @@
           <div class="es-total-row"><span>Estimated total</span><span class="amt" id="esTotal">$0.00</span></div>
         </div>
 
-        <div class="es-sec">
+        <div class="es-sec" id="esUpsSec">
           <div class="es-h">Recommended add-ons <span class="es-opt">(optional, the customer taps to accept or decline each one)</span></div>
           <div class="es-ups-presets" id="esUpsPresets"></div>
           <div class="es-ups-head"><span>Add-on</span><span>Price</span><span>Pre-select</span><span></span></div>
@@ -16816,6 +16816,24 @@ function renderUpsellPresets(){
     esAddUpsRow({ description:p.description, unit_price:p.unit_price });
   }));
 }
+// Owner, 2026-09-29: the TV add-ons (soundbar, hide wires, LED, dismount...)
+// only belong on TV estimates, never on handyman/furniture/art/smart-home work.
+// The section still shows if the estimate already carries add-ons, so nothing
+// saved is ever hidden from the office.
+function esIsTvEstimate(){
+  const label=(document.getElementById('esService').value||'').trim();
+  if(/^(tv\b|tv mounting|home theater|samsung frame|frame tv)/i.test(label)) return true;
+  if(/handyman|furniture|art mounting|smart home|electrical|repair|drywall|doorbell|painting|gutter/i.test(label)) return false;
+  const text=(document.getElementById('esDesc').value||'')+' '+[...document.querySelectorAll('#esLines input')].map(i=>i.value).join(' ');
+  return /\btvs?\b|television|tv mount|home theater|soundbar/i.test(text);
+}
+function esToggleUpsells(){
+  const sec=document.getElementById('esUpsSec'); if(!sec) return;
+  const hasUps=!!document.querySelector('#esUpsells [data-ups]');
+  sec.style.display=(esIsTvEstimate()||hasUps)?'':'none';
+}
+['esService','esDesc'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',esToggleUpsells); });
+
 function openEstimateEdit(id){
   const e=estCache[id]; if(!e) return;
   document.getElementById('esId').value=e.id;
@@ -16841,6 +16859,7 @@ function openEstimateEdit(id){
   renderUpsellPresets();
   const upsWrap=document.getElementById('esUpsells'); upsWrap.innerHTML='';
   (Array.isArray(e.upsells)?e.upsells:[]).forEach(u=>esAddUpsRow(u));
+  esToggleUpsells();
   esRecalcTotal();
   esLoadTechs(e.technician_id || '');
   esRenderPreview();
@@ -24263,6 +24282,12 @@ async function refreshSessionCache(){
     // password was typed.
     if(d && typeof d.token==='string' && d.token && d.token!==token){ token=d.token; lsSet('ha_admin_token',token); }
     if(d && Array.isArray(d.businesses) && d.businesses.length){
+      // Did the set of brands this login may use change (access granted or
+      // removed server-side)? The switcher was drawn from the cached list at
+      // boot, so redraw it now; otherwise a new brand only appeared after a
+      // SECOND reload (Joey + Handy Andy, 2026-09-29).
+      const slugKey=l=>(l||[]).map(b=>b.slug).sort().join(',');
+      const brandsChanged=slugKey(d.businesses)!==slugKey(businesses);
       businesses=d.businesses;
       appConfig=d.config||appConfig;
       // Re-point `current` at the refreshed row (same slug) so it also carries
@@ -24270,6 +24295,7 @@ async function refreshSessionCache(){
       if(current){ const cur=businesses.find(b=>b.slug===current.slug); if(cur) current=cur; }
       lsSet('ha_admin_biz',JSON.stringify(businesses));
       lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
+      if(brandsChanged && document.getElementById('switcher')) renderSwitcher();
     }
   }catch(e){
     // A dead cached token: the boot path enters the app before this runs, so
