@@ -20,6 +20,7 @@ import { signToken, verifyToken, getBearer, applyCors, safeEqual, refreshToken, 
 import { verifyTwilioSignature, xml, xmlEsc } from './analytics.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
 import { estimateApproveLink } from './_lib/estimate-code.js';
+import { estimatePrefill } from './_lib/estimate-prefill.js';
 import { emailNotificationsOn, smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutState, logAutomatedMessage, textConsentFor } from './_lib/sms.js';
@@ -547,6 +548,11 @@ export default async function handler(req, res) {
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
       case 'estimate_link':     return await estimateLink(req, res, db, auth);
+      case 'estimate_prefill': {
+        let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+        try { return res.status(200).json(await estimatePrefill(db, biz.id, body.phone)); }
+        catch (e) { console.error('[estimate_prefill]', e.message); return res.status(200).json({ error: 'AI could not read this call' }); }
+      }
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);

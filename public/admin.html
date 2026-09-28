@@ -10352,6 +10352,46 @@ function plHasPhone(c){ return String(c&&c.phone||'').replace(/\D/g,'').length>=
 // The brand to act as for a card: the one it shows, else any other brand on
 // it that this login can use. null = none (a card that reached a secretary's
 // board only through a brand she can't book for).
+// New Estimate for a Pipeline card, pre-filled from the customer's last call
+// (owner 2026-09-28): the AI picks options from this business's own price list
+// and they go in exactly like the phone script's answers (_keepOptions).
+async function plBuildEstimate(c, btn){
+  if(!plUseBusiness(c)) return;
+  const base={ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'', _estimateOnly:true };
+  const slug=current.slug;
+  let p=null;
+  if(plHasPhone(c)){
+    if(btn){ btn.disabled=true; btn.textContent='Reading the call…'; } else toast('Reading the call…');
+    try{ p=await api('estimate_prefill',{ method:'POST', body:{ business:slug, phone:c.phone }, timeoutMs:60000 }); }catch(_){ p=null; }
+    if(btn){ btn.disabled=false; btn.textContent='Send estimate'; }
+    if(current?.slug!==slug) return;
+  }
+  let filled=false;
+  if(p && Array.isArray(p.selections) && p.selections.length){
+    try{
+      const svc=await nbEnsureServicesCached(slug,{timeoutMs:12000});
+      const tv=(svc.services||[]).find(s=>s.category==='TV Mounting');
+      const groups=tv?await nbLoadTvOptions(tv.id,slug,{timeoutMs:12000}):null;
+      if(groups && current?.slug===slug){
+        resetNbSteps();
+        nbServices=svc.services||[]; nbOptionGroups=groups; nbServiceId=tv.id;
+        for(const s of p.selections){
+          const g=groups.find(x=>x.options.some(o=>o.id===s.option_id)); if(!g) continue;
+          const m=nbQty[g.id]||(nbQty[g.id]={}); m[s.option_id]=(m[s.option_id]||0)+Math.max(1,Number(s.count)||1);
+        }
+        const sg=groups.find(g=>g.key==='size');
+        nbFrameTvQty={ regular:sg?nbGroupCount(sg.id):0, frame:0 };
+        nbClampTvBound();
+        filled=nbFrameTvQty.regular>0;
+        if(filled) base._keepOptions=true; else resetNbSteps();
+      }
+    }catch(_){ filled=false; }
+  }
+  if(p && p.zip) base.postal_code=p.zip;
+  openNewBooking(base);
+  if(filled) toast('Filled in from the call. Check it before sending.');
+  else if(p && p.error && plHasPhone(c)) toast('Could not fill it from the call: '+p.error);
+}
 function plBizSlug(c){
   const want=[c&&c.business&&c.business.slug, ...((c&&Array.isArray(c.businesses))?c.businesses.map(x=>typeof x==='string'?x:x&&x.slug):[])].filter(Boolean);
   return want.find(s=>businesses.some(b=>b.slug===s)) || null;
@@ -10862,7 +10902,7 @@ function plClick(e){
       // thread (our line + their number) on the Messages screen.
       // Estimate link or "Build an estimate" above the text box (owner 2026-09-28).
       openCallTexts(c.our_phone, c.phone, { send:true, estId:(c.estimate&&c.estimate.id)||null, estBiz:plBizSlug(c),
-        buildEst:()=>{ if(!plUseBusiness(c)) return; openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'', _estimateOnly:true }); } });
+        buildEst:()=>plBuildEstimate(c) });
       return;   // stays on the Pipeline (owner, 2026-09-26)
     case 'script': {
       const slug=plBizSlug(c);
@@ -10870,10 +10910,7 @@ function plClick(e){
       openTakeCall({ phone:plHasPhone(c)?c.phone:'', name:plRealName(c), business:slug, inbound_call_id:c.inbound_call_id||null });
       return;
     }
-    case 'estimate':
-      if(!plUseBusiness(c)) return;
-      openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'', _estimateOnly:true });
-      return;
+    case 'estimate': plBuildEstimate(c, b); return;
     case 'book':
       if(!plUseBusiness(c)) return;
       openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'' });
