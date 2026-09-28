@@ -95,11 +95,13 @@ export async function sendTomorrowDigest(db, { dryRun = false } = {}) {
   const now = Date.now();
   // Tomorrow in Denver/Central is inside this window whenever the cron runs
   // in the evening US time; each job is then checked against its own day.
-  const jobs = (await db.from('bookings').select(`id, scheduled_at, technician_id, secondary_technician_id, city,
+  const q = await db.from('bookings').select(`id, scheduled_at, technician_id, secondary_technician_id, city,
       customer:customers ( name ), business:businesses ( name, timezone ), service_area:service_areas ( timezone )`)
     .not('status', 'in', '(cancelled,no_show,completed)')
     .gte('scheduled_at', new Date(now).toISOString()).lt('scheduled_at', new Date(now + 48 * 3600000).toISOString())
-    .order('scheduled_at', { ascending: true })).data || [];
+    .order('scheduled_at', { ascending: true });
+  if (q.error) throw q.error;   // a failed lookup must be loud, never "no jobs tomorrow"
+  const jobs = q.data || [];
   const byTech = new Map();
   for (const j of jobs) {
     const tz = j.service_area?.timezone || j.business?.timezone || 'America/Denver';
