@@ -1774,6 +1774,38 @@ async function openMsgThread(k){
 // Reads the CRM's OWN call handlers (api/admin.js: calls, call_recording) with
 // the auditor token -- the admin API lets that token in for call actions only
 // (AUDITOR_ADMIN_ACTIONS). No second copy of the call logic to drift.
+// Same side-by-side as the owner's Calls card (2026-09-28): when a caller
+// rang more than one of our companies, or the owner reviewed the call, show
+// what each secretary priced, the wrong lines, and the right price.
+function jiyahCompare(r){
+  var h=r.history||{}, rv=h.review||null, qs=h.script_quotes||[];
+  var brands=[];
+  (rv&&rv.right||[]).forEach(function(x){ if(brands.indexOf(x.brand)<0) brands.push(x.brand); });
+  qs.forEach(function(q){ if(q.brand&&brands.indexOf(q.brand)<0) brands.push(q.brand); });
+  if(brands.length<2) return '';
+  var COL=['#FF6B35','#2563EB','#16a34a','#7c3aed'];
+  var cols=brands.map(function(b,k){
+    var flags=(rv&&rv.flags||[]).filter(function(f){ return f.brand===b; });
+    var q=qs.filter(function(x){ return x.brand===b; })[0];
+    var lines=q?String(q.notes||'').split(' \u00b7 ').map(function(x){ return x.match(/^(.*?)\s+\u2014\s+\$(\d[\d,.]*)$/); }).filter(Boolean).map(function(m){ return [m[1].replace(/^[^:]+:\s*/,''), Number(m[2].replace(/,/g,''))]; }):[];
+    var tot=lines.reduce(function(t,l){ return t+l[1]; },0);
+    var html='<div style="flex:1;min-width:230px;border:2px solid '+COL[k%4]+';border-radius:12px;overflow:hidden;background:#fff;">'+
+      '<div style="background:'+COL[k%4]+';color:#fff;padding:7px 11px;font-weight:800;">'+esc(b)+(q&&q.by?' \u00b7 '+esc(q.by):'')+'</div><div style="padding:8px 11px;font-size:13px;">';
+    if(lines.length){
+      html+=lines.map(function(l){ var f=flags.filter(function(x){ return l[0].indexOf(x.match)>=0; })[0];
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:6px;'+(f?'background:#fee2e2;':'')+'"><span>'+(f?'\u274c ':'')+esc(l[0])+(f?'<div style="font-size:11.5px;color:#991b1b;font-weight:700;">'+esc(f.note)+'</div>':'')+'</span><b>$'+Math.round(l[1])+'</b></div>'; }).join('')+
+        '<div style="display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:4px;padding:4px 6px;font-weight:800;"><span>Quoted</span><span>$'+Math.round(tot)+'</span></div>';
+    } else html+='<div class="sub">No script pricing saved.</div>';
+    (rv&&rv.after||[]).filter(function(a){ return a.brand===b; }).forEach(function(a){ html+='<div style="margin-top:6px;background:#fff7ed;border-radius:6px;padding:5px 7px;font-size:12.5px;">'+esc(a.text)+'</div>'; });
+    var right=(rv&&rv.right||[]).filter(function(x){ return x.brand===b; })[0];
+    if(right) html+='<div style="margin-top:6px;background:#ecfdf5;border-radius:6px;padding:5px 7px;font-weight:800;color:#15803d;">\u2705 Should have been $'+right.total+'</div>';
+    return html+'</div></div>';
+  }).join('');
+  return '<div class="card" style="border:2px solid #111;">'+
+    '<h3>\u26a0 This customer called '+brands.length+' of our companies</h3>'+
+    (rv&&rv.job?'<div style="background:#111418;color:#fff;border-radius:10px;padding:7px 11px;margin-bottom:8px;font-weight:700;">'+esc(rv.job)+'</div>':'')+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+cols+'</div></div>';
+}
 async function crm(action, params, opts){
   const o=opts||{};
   const qs=new URLSearchParams({action, ...(params||{})});
@@ -2138,6 +2170,7 @@ function qShow(){
   const rec='<audio controls preload="auto" src="/api/admin?action=call_recording&id='+encodeURIComponent(r.id)+'&token='+encodeURIComponent(token)+'"></audio>';
   ov.innerHTML='<div class="qw">'+
     '<div class="qw-top"><button class="btn ghost sm" id="qExit">✕ Exit</button><div class="qw-prog"><i style="width:'+pct+'%"></i></div><span class="sub"><b>'+left+'</b> left</span></div>'+
+    jiyahCompare(r)+
     '<div class="card"><h3>📞 '+esc(r.caller_display||r.caller_pretty||'Unknown caller')+'</h3>'+
       '<dl class="qw-facts">'+
         '<dt>Secretary</dt><dd>'+esc(who||'Unknown')+'</dd>'+
