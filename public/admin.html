@@ -23911,8 +23911,10 @@ async function sendEstimateFromBooking(upsells){
       alert('⚠ Estimate saved, but it was NOT delivered: '+res.warning+'\n\nSend it from the Estimates tab once the issue is fixed.');
     } else {
       const n=(Array.isArray(upsells)?upsells:[]).length;
-      const via=res&&res.texted?'emailed + texted':'emailed';
+      const via=res&&res.texted?(email?'emailed + texted':'texted'):'emailed';
       toast(n?`Estimate ${via} with ${n} recommendation${n>1?'s':''} ✓`:`Estimate ${via} to customer ✓`);
+      // Sent: close the builder so it can't look like nothing happened (owner 2026-09-29).
+      document.getElementById('modal').classList.add('hidden');
     }
     document.getElementById('nbUpsellPanel').classList.add('hidden');
   }catch(e){
