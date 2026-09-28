@@ -15190,6 +15190,7 @@ function paintReviewCalls(){
   view.querySelectorAll('[data-rc-tag]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'tag',null,b.dataset.rcTag)));
   view.querySelectorAll('[data-rc-chan]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'chan',null,b.dataset.rcChan)));
   view.querySelectorAll('[data-rc-send]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'send')));
+  view.querySelectorAll('[data-rc-sendnow]').forEach(b=>b.addEventListener('click',()=>{ rcWork(b.dataset.rcId).channel=b.dataset.rcSendnow; rcAction(b.dataset.rcId,'send'); }));
   view.querySelectorAll('[data-rc-done]').forEach(b=>b.addEventListener('click',()=>rcAction(b.dataset.rcId,'done',null,b.dataset.rcDone)));
   // The note is NOT re-rendered on every keystroke — that would steal focus
   // mid-sentence. It updates the working copy and, on a complaint, releases the
@@ -15396,14 +15397,13 @@ function rcCard(r){
       h+=`<div class="rc-banner warn">${r.review_sms_used?'The review text already went out once and there is no email on file, so there is nothing more to send.':'No mobile with consent and no email on file, so there is nothing to send to right now.'}</div>
         <div class="rc-gorow"><button type="button" class="rc-go" data-rc-done="great" data-rc-id="${r.id}">Log the call</button></div>`;
     }else{
-      h+=`${chan('both','Send Customer SMS and Email review links',canBoth,canBoth?'text and email · default':(r.review_sms_used?'review text already sent':'needs a mobile and an email'),'main')}
-        <div class="rc-chans">
-          ${chan('sms','Text',canSms,canSms?'':(r.review_sms_used?'review text already sent':'no mobile on file'))}
-          ${chan('email','Email',canEmail,canEmail?'':'no email on file')}
-        </div>
-        <div class="rc-gorow">
-          <button type="button" class="rc-go" data-rc-send="1" data-rc-id="${r.id}"${w.busy?' disabled':''}>${w.busy?'Sending…':w.sentOk?'Log the call':'Send and log call'}</button>
-          <button type="button" class="rc-go ghost" data-rc-done="declined" data-rc-id="${r.id}"${w.busy?' disabled':''}>They said no</button>
+      // Owner 2026-09-28: compact options; tapping one sends and logs the call.
+      const opt=(v,label,ok)=>`<button type="button" data-rc-sendnow="${v}" data-rc-id="${r.id}"${ok&&!w.busy?'':' disabled'}
+        style="border:1.5px solid ${ok?'#2563eb':'var(--line)'};background:#fff;color:${ok?'#1d4ed8':'var(--mute)'};border-radius:999px;padding:8px 14px;font:inherit;font-size:13.5px;font-weight:700;cursor:${ok?'pointer':'default'};">${label}</button>`;
+      h+=`<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px;">
+          ${w.busy?'<span style="font-weight:700;">Sending…</span>':`${opt('both','Send SMS + Email',canBoth)}${opt('sms','Text',canSms)}${opt('email','Email',canEmail)}`}
+          <button type="button" data-rc-done="declined" data-rc-id="${r.id}"${w.busy?' disabled':''}
+            style="margin-left:auto;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:999px;padding:5px 11px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;">They said no</button>
         </div>`;
     }
   }else if(w.outcome){
