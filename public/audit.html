@@ -1686,13 +1686,21 @@ async function enter(){
 // ── Pages ───────────────────────────────────────────────────────────────────
 // Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
 let page='audit';
+function embedOwnerScreen(which, callId){
+  const sec=$(which==='calls'?'pageCalls':'pageMessages'); if(!sec) return;
+  const src='/admin.html?embed=auditor&view='+which+(callId?'&call='+encodeURIComponent(callId):'');
+  const cur=sec.querySelector('iframe[data-embed]');
+  if(cur && !callId) return;
+  sec.innerHTML='<iframe data-embed src="'+src+'" style="width:100%;height:calc(100vh - 110px);min-height:600px;border:0;border-radius:12px;background:#fff;"></iframe>';
+}
 function showPage(p){
   page=p;
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
-  if(p==='calls') loadCalls();
-  if(p==='messages') loadMessages();
+  // Owner 2026-09-28: Calls and Messages are the owner's own screens, read-only.
+  if(p==='calls') embedOwnerScreen('calls');
+  if(p==='messages') embedOwnerScreen('messages');
   if(p==='notes') loadNotesSent();
 }
 $('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'); if(b) showPage(b.dataset.nav); });
@@ -1821,7 +1829,7 @@ async function loadMyNotes(){
     ' <button class="btn ghost sm" data-jread="'+esc(n.id)+'">Got it</button></div>').join('');
   document.body.insertBefore(bar, document.body.firstChild);
   bar.querySelectorAll('[data-jread]').forEach(b=>b.onclick=async()=>{ try{ await crm('notes_read',{},{ method:'POST', body:{ id:b.dataset.jread } }); }catch(_){} loadMyNotes(); });
-  bar.querySelectorAll('[data-jcall]').forEach(a=>a.onclick=e=>{ e.preventDefault(); openCallView(a.dataset.jcall); });
+  bar.querySelectorAll('[data-jcall]').forEach(a=>a.onclick=e=>{ e.preventDefault(); showPage('calls'); embedOwnerScreen('calls', a.dataset.jcall); });
 }
 async function openCallView(id){
   let d; try{ d=await crm('calls',{ limit:300, from:new Date(Date.now()-14*86400000).toISOString() }); }catch(e){ alert(e.message); return; }

@@ -479,6 +479,11 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
+  /* Jiyah's read-only copy of Calls/Messages inside her audit portal (owner 2026-09-28). */
+  body.ro-embed #sidebar, body.ro-embed .mobilebar, body.ro-embed #navScrim, body.ro-embed #takeCallBtn{display:none !important;}
+  body.ro-embed .rc-btn, body.ro-embed .rc-btn-row, body.ro-embed .rc-actions, body.ro-embed .msg-reply, body.ro-embed [data-bkc],
+  body.ro-embed [data-callresolve], body.ro-embed [data-callact], body.ro-embed [data-calldelete], body.ro-embed [data-msgcall], body.ro-embed [data-rc-offer]{display:none !important;}
+  body.ro-embed .main{margin-left:0 !important;}
   body.sec-nav.pl-on #navPipeline{display:flex !important;}
   .cv-item{flex-direction:row!important;align-items:center;gap:13px!important;padding:14px 14px!important;}
   .cv-av{flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
@@ -12265,7 +12270,7 @@ const CALL_TABS=[
   // everyone, not just the owner: claiming and dialing a voicemail back is
   // exactly what Joey/Heather already do here.
   { id:'log',         label:'Incoming Calls',      screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
-  { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
+  { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy'&&role!=='auditor', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
   { id:'numbers',     label:'Numbers',      screen:'callnumbers',   show:()=>role==='owner',       render:()=>renderCallNumbers() },
@@ -24102,8 +24107,23 @@ async function refreshSessionCache(){
 
 // Never paint a cached owner list for a secretary or View As session. The live
 // session check applies the current assignment map before any business appears.
-if(token && businesses.length && role==='owner'){ enterApp(); refreshSessionCache(); }
-else tryAutoLogin();
+// Jiyah's portal embeds this page read-only: admin.html?embed=auditor&view=calls|messages
+// using her own audit token (same site, so it's in localStorage). The server
+// already lets that token only READ calls and messages.
+function embedAuditorBoot(q){
+  const t=lsGet('ha_audit_token');
+  if(!t){ document.body.innerHTML='<p style="padding:20px;font:15px sans-serif;">Sign in to the audit portal first.</p>'; return; }
+  token=t; role='auditor'; userName='Jiyah'; scope='all'; businesses=[]; current=null;
+  document.body.classList.add('ro-embed');
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  const cid=q.get('call'); if(cid){ _callFocusId=cid; _callsPeriod='7d'; }
+  if(q.get('view')==='messages') navTo('messages'); else { callHubTab='log'; navTo('callhub'); }
+}
+{ let _q=null; try{ _q=new URLSearchParams(location.search); }catch(_){}
+  if(_q && _q.get('embed')==='auditor') embedAuditorBoot(_q);
+  else if(token && businesses.length && role==='owner'){ enterApp(); refreshSessionCache(); }
+  else tryAutoLogin(); }
 </script>
 </body>
 </html>
