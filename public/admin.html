@@ -20602,7 +20602,10 @@ async function renderCallWiz(){
       optsHtml=cwWireOverlapOptionsHtml();
     } else if(card.kind==='frame'){
       // Owner 2026-09-28: a plain Yes / No, one tap and on to the next question.
-      optsHtml=callWizChoiceRow([{value:'yes',label:`Yes (+$${FRAME_TV_PRICE})`},{value:'no',label:'No'}]);
+      // Yes on a job with 2+ TVs opens a count (they may have 2 or 3 Frames).
+      optsHtml=(callWiz.frameYes && tvCount>1)
+        ? `<div class="nb-opts">${cwFrameRowHtml().replace('Samsung Frame TV or LG Gallery TV','How many Samsung Frame TVs?')}</div>`
+        : callWizChoiceRow([{value:'yes',label:`Yes (+$${FRAME_TV_PRICE} each)`},{value:'no',label:'No'}]);
     } else if(card.g.key==='size'){
       // Size is the count: uncapped, one + per TV on the job.
       const gCount=nbGroupCount(card.g.id);
@@ -20636,7 +20639,7 @@ async function renderCallWiz(){
     // The gate replaces Back/Continue with its own Yes/No — neither answer
     // needs a second tap to confirm, and Continue would be meaningless before
     // the question is even answered.
-    const isExtrasGate = (card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0) || card.kind==='frame';
+    const isExtrasGate = (card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0) || (card.kind==='frame' && !(callWiz.frameYes && nbTotalTvs()>1));
     // Reaching "anything else" is what makes a call count toward conversion (owner, 2026-09-25).
     if(card.g && card.g.key==='extras' && !callWiz._extrasSeen){ callWiz._extrasSeen=true; cwTrack('extras_reached',{}); }
     const stepNo=callWiz.optStep+1;
@@ -20662,6 +20665,8 @@ async function renderCallWiz(){
         const yes=b.dataset.cwchoice==='yes';
         if(card.kind==='frame'){
           nbFrameTvQty.frame=yes?1:0; cwSyncTvCounts(); nbClampTvBound();
+          callWiz.frameYes=yes;
+          if(yes && nbTotalTvs()>1){ renderCallWiz(); return; }   // pick how many on the same card
           cwTrack('question_answered',{ question:'frame', tv_count:nbTotalTvs(), n:nbFrameTvQty.frame });
           callWiz.optStep++;
           if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
