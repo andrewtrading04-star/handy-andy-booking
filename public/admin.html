@@ -2384,7 +2384,7 @@
       <div class="nb-progress-track"><div id="nbProgressFill" class="nb-progress-fill"></div></div>
       <div id="nbProgressLabel" class="nb-progress-label">Step 1 of 7 · ZIP code</div>
     </div>
-    <form id="nbForm" style="display:grid;gap:10px;">
+    <form id="nbForm" style="display:grid;gap:18px;">
       <!-- ① Qualify the caller by ZIP first — check the service area & price before collecting any details. -->
       <div class="nb-ziplead">
         <div class="nb-lead-q">What's the customer's <b>ZIP Code</b>?</div>
@@ -2425,8 +2425,8 @@
         <div class="nb-cal-hint">Only dates with available technician can be selected.</div>
       </div>
       <div id="nbSlotsWrap" style="display:none;">
-        <div style="font-size:12px;font-weight:700;color:#eef2f7;margin-bottom:6px;text-transform:uppercase;">Available Times</div>
-        <div id="nbSlots" style="display:grid;gap:6px;"></div>
+        <div style="font-size:12px;font-weight:700;color:#eef2f7;margin-bottom:8px;text-transform:uppercase;">Available Times</div>
+        <div id="nbSlots" style="display:grid;gap:8px;"></div>
       </div>
       <!-- ③ Customer details — comes right after the time slot picker. -->
       <details id="nbCustDetails" class="nb-cust">
@@ -22712,6 +22712,12 @@ document.getElementById('nbSlots').addEventListener('click',e=>{
   btn.classList.add('on');
   nbSelectedSlot={key:btn.dataset.key,label:btn.dataset.label};
   updateNbTotal();
+  const cd=document.getElementById('nbCustDetails');
+  if(cd && !cd.open){
+    cd.open=true;
+    cd.scrollIntoView({behavior:'smooth',block:'start'});
+    const nm=document.getElementById('nbName'); if(nm && !nm.value) setTimeout(()=>nm.focus({preventScroll:true}),350);
+  }
 });
 
 // ── Option-step engine (TV Mounting walk-through) ───────────────────────────
