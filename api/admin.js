@@ -9011,14 +9011,18 @@ async function calls(req, res, db, auth) {
       const custIds = [...digitsByCust.keys()];
       const h = d => { let x = historyBy.get(d); if (!x) { x = { jobs: 0, completed: 0, spent: 0, last_job: null, upcoming: null, estimates: 0, last_estimate: null }; historyBy.set(d, x); } return x; };
       if (custIds.length) {
-        const { data: bks } = await db.from('bookings').select('customer_id, scheduled_at, status, price, services(name)')
+        const { data: bks } = await db.from('bookings').select('customer_id, scheduled_at, created_at, status, price, metadata, services(name), business:businesses(name, slug)')
           .in('customer_id', custIds).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(2000);
         const nowIso = new Date().toISOString();
         for (const b of (bks || [])) {
           const x = h(digitsByCust.get(b.customer_id)); if (!x) continue;
           x.jobs++;
           if (b.status === 'completed') { x.completed++; x.spent += Number(b.price) || 0; }
-          const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null };
+          const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null,
+            brand: b.business?.name || null, brand_slug: b.business?.slug || null, created_at: b.created_at || null, booked_by: b.metadata?.booked_by || null };
+          // Which brand they most recently booked with (owner 2026-09-28: a
+          // caller who rang Dom's and Handy Andy must show where they booked).
+          if (!x.latest_booking || (b.created_at || '') > (x.latest_booking.created_at || '')) x.latest_booking = j;
           if (b.scheduled_at > nowIso && b.status !== 'completed') { if (!x.upcoming || b.scheduled_at < x.upcoming.at) x.upcoming = j; }
           else if (!x.last_job) x.last_job = j;   // rows arrive newest first
         }

@@ -13595,7 +13595,7 @@ function callEarlierRow(r){
   const audio=r.recording_url
     ? `<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>${txBrief(r)}`:'';
   const tx=r.transcript?txView(r):'';
-  return `<div class="cg-earlier"><div class="cg-top"><span>${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
+  return `<div class="cg-earlier"><div class="cg-top"><span>${r.business&&r.business.name?`<b style="background:#111418;color:#fff;border-radius:6px;padding:1px 7px;margin-right:6px;">${esc(r.business.name)}</b>`:''}${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
     <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
 }
 // What this caller has done with us before (owner, 2026-09-24): jobs and
@@ -13924,6 +13924,29 @@ let _callsMobOpen=null;
 // name (red when missed, "(3)" for repeat callers), one gray line, time and
 // an (i) on the right. Tap a row to open that caller's full card right under
 // it; tap again to close. Same detail content as the desktop right pane.
+// Which companies this caller rang, and which one they booked with
+// (owner 2026-09-28: Chris called Handy Andy AND Dom's, then booked Handy Andy
+// -- that has to be obvious, not buried in one merged card).
+function callBrandsStrip(g){
+  const rows=(g&&g.rows||[]).filter(r=>r.kind!=='live'&&r.kind!=='sms');
+  const tz=CALL_TZ[(g&&g.latest&&g.latest.market)]||'America/Denver';
+  const t=r=>{ try{ return new Date(r.occurred_at).toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
+  const by=new Map();
+  rows.slice().sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at))).forEach(r=>{ const n=(r.business&&r.business.name)||'Unknown line'; (by.get(n)||by.set(n,[]).get(n)).push(r); });
+  const lb=g&&g.latest&&g.latest.history&&g.latest.history.latest_booking;
+  const firstCall=rows.length?rows.reduce((m,r)=>r.occurred_at<m?r.occurred_at:m,rows[0].occurred_at):null;
+  const bookedNow=lb&&lb.created_at&&firstCall&&lb.created_at>=firstCall;
+  if(by.size<2&&!bookedNow) return '';
+  const chips=[...by.entries()].map(([n,rs])=>`<span style="display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;margin:3px 4px 0 0;font-size:12.5px;"><b>${esc(n)}</b> · ${rs.map(t).map(esc).join(', ')}${rs.length>1?` (${rs.length} calls)`:''}</span>`).join('');
+  let out='';
+  if(bookedNow){
+    const when=lb.at?new Date(lb.at).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    const others=[...by.keys()].filter(n=>n!==lb.brand);
+    out=`<div style="margin-top:8px;font-size:14px;"><b style="color:#15803d;">✅ Booked with ${esc(lb.brand||'us')}</b>${when?' · '+esc(when):''}${lb.price?' · $'+Math.round(lb.price):''}${lb.booked_by?' · by '+esc(lb.booked_by):''}${others.length?`<br><b style="color:#b91c1c;">Did not book with ${others.map(esc).join(' or ')}</b>`:''}</div>`;
+  }
+  return `<div style="border:2px solid #111418;border-radius:12px;padding:10px 12px;margin-bottom:12px;background:#f8fafc;">
+    <div style="font-weight:800;font-size:14px;">${by.size>1?`📞 Called ${by.size} companies`:'📞 Called'}</div><div>${chips}</div>${out}</div>`;
+}
 function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
     const missed=r.answered===false;
@@ -13938,6 +13961,7 @@ function callInboxPhone(groups){
       </button>
       ${on?`<div class="cm-body">
         ${g.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped.</div>`:''}
+        ${callBrandsStrip(g)}
         ${callHaveBoxes(g)}
         ${callCard(r, !g.open, g)}
         ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
@@ -13952,7 +13976,7 @@ function callInbox(groups){
   const later=selected.rows.filter(x=>x!==selected.latest);
   return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
     ${groups.map(g=>{ const r=g.latest; const missed=r.answered===false&&r.kind!=='live';
-      const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); { const qe=r.history&&r.history.last_estimate; if(qe) bits.push(qe.approved_at?'quote approved':qe.sent_at?'quote sent':'quote not sent'); } if(g.rows.length>1) bits.push(g.rows.length+' calls');
+      const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); { const qe=r.history&&r.history.last_estimate; if(qe) bits.push(qe.approved_at?'quote approved':qe.sent_at?'quote sent':'quote not sent'); } if(g.rows.length>1) bits.push(g.rows.length+' calls'); { const nb=new Set(g.rows.filter(x=>x.kind!=='live'&&x.kind!=='sms').map(x=>x.business&&x.business.name).filter(Boolean)).size; if(nb>1) bits.push(nb+' companies'); }
       return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       ${cvAvatar(g,42)}
       <span class="cv-mid">
@@ -13966,6 +13990,7 @@ function callInbox(groups){
     </button>`; }).join('')}
   </div><section class="ci-detail cv-detail" aria-label="Selected caller details">
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
+    ${callBrandsStrip(selected)}
     ${callCard(selected.latest, !selected.open, selected, true)}
     ${later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
   </section></div>`;
