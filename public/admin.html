@@ -21300,7 +21300,8 @@ async function renderCallWiz(){
       <div style="display:flex;gap:8px;">
         <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
         <button type="button" id="cwYes" class="btn" style="flex:1;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;">${esc(yesLabel||'They said yes')}</button>
-      </div>`;
+      </div>
+      <button type="button" class="btn ghost" id="cwGoEstimate" style="margin-top:8px;width:100%;">Send quote</button>`;
 
     // Always available, on every rung, below a hairline. A customer who says
     // "just email it to me" must never be trapped behind an uncommitted draft.
