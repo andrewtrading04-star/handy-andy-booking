@@ -1067,9 +1067,18 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     // In range if it started in range OR was booked in range (owner 2026-09-27:
     // a lead from Sep 25 that booked yesterday counts in Yesterday's Booked).
     const inRange = (ms) => ms >= fromMs && ms < toMs;
-    if (!inRange(c.openedMs) && !c.touches.some((t) => t.type === 'booking' && !t.timelineOnly && inRange(t.atMs))) continue;
+    const inR = inRange(c.openedMs) || c.touches.some((t) => t.type === 'booking' && !t.timelineOnly && inRange(t.atMs));
+    // Owner 2026-09-29: "Needs review collection" always shows the last 3 days
+    // of finished jobs, whatever day is picked.
+    const recentDone = c.touches.some((t) => t.type === 'booking' && t.bk && t.bk.completedMs != null && t.bk.completedMs >= nowMs - 3 * DAY);
+    if (!inR && !recentDone) continue;
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
-    shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
+    const sc = shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null });
+    if (sc.stage === 'completed') {
+      const doneMs = Date.parse((sc.review && sc.review.completed_at) || '');
+      if (!inR && !(doneMs >= nowMs - 3 * DAY)) continue;
+    } else if (!inR) continue;
+    shaped.push(sc);
   }
   // Owner 2026-09-28: a finished review call (no answer, said no, do not contact,
   // reviewed) means nobody chases this customer again -- off "Needs review collection".
