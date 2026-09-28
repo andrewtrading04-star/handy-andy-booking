@@ -9011,7 +9011,7 @@ async function calls(req, res, db, auth) {
       const custIds = [...digitsByCust.keys()];
       const h = d => { let x = historyBy.get(d); if (!x) { x = { jobs: 0, completed: 0, spent: 0, last_job: null, upcoming: null, estimates: 0, last_estimate: null }; historyBy.set(d, x); } return x; };
       if (custIds.length) {
-        const { data: bks } = await db.from('bookings').select('customer_id, scheduled_at, created_at, status, price, metadata, services(name), business:businesses(name, slug)')
+        const { data: bks } = await db.from('bookings').select('id, customer_id, scheduled_at, created_at, status, price, metadata, services(name), business:businesses(name, slug), customer:customers(name)')
           .in('customer_id', custIds).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(2000);
         const nowIso = new Date().toISOString();
         for (const b of (bks || [])) {
@@ -9019,7 +9019,10 @@ async function calls(req, res, db, auth) {
           x.jobs++;
           if (b.status === 'completed') { x.completed++; x.spent += Number(b.price) || 0; }
           const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null,
-            brand: b.business?.name || null, brand_slug: b.business?.slug || null, created_at: b.created_at || null, booked_by: b.metadata?.booked_by || null };
+            brand: b.business?.name || null, brand_slug: b.business?.slug || null, created_at: b.created_at || null, booked_by: b.metadata?.booked_by || null,
+            id: b.id, customer_name: b.customer?.name || null };
+          (x.booking_list || (x.booking_list = [])).length < 15 && x.booking_list.push(j);
+          if (b.customer?.name && !x.name) x.name = b.customer.name;
           // Which brand they most recently booked with (owner 2026-09-28: a
           // caller who rang Dom's and Handy Andy must show where they booked).
           if (!x.latest_booking || (b.created_at || '') > (x.latest_booking.created_at || '')) x.latest_booking = j;
@@ -9027,13 +9030,23 @@ async function calls(req, res, db, auth) {
           else if (!x.last_job) x.last_job = j;   // rows arrive newest first
         }
       }
-      let eq = db.from('estimates').select('customer_phone, created_at, status, approved_at, service_label, texted_at, emailed_at, text_opened_at, email_opened_at, line_items').in('customer_phone', forms)
+      let eq = db.from('estimates').select('id, customer_phone, customer_name, created_at, status, approved_at, service_label, texted_at, emailed_at, text_opened_at, email_opened_at, line_items, tax_rate, business:businesses(name)').in('customer_phone', forms)
         .order('created_at', { ascending: false }).limit(2000);
       if (vids) eq = eq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
       const { data: ests } = await eq;
       for (const e of (ests || [])) {
         const x = h(callerDigits(e.customer_phone));
         x.estimates++;
+        // Every quote per company, openable on the call card (owner 2026-09-28).
+        if (!x.estimate_list) x.estimate_list = [];
+        if (x.estimate_list.length < 15) {
+          const items = (Array.isArray(e.line_items) ? e.line_items : []).map((li) => ({ name: String((li && (li.description || li.name)) || 'Item'), qty: Number(li && (li.qty ?? li.quantity)) || 1, price: Number(li && li.unit_price) || 0 }));
+          const sub = items.reduce((t, i) => t + i.qty * i.price, 0);
+          x.estimate_list.push({ id: e.id, brand: e.business?.name || null, created_at: e.created_at, service: e.service_label || null,
+            items, total: Math.round((sub * (1 + (Number(e.tax_rate) || 0))) * 100) / 100, sent_at: e.texted_at || e.emailed_at || null,
+            opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null });
+        }
+        if (e.customer_name && !/^\+?\d[\d\s().-]+$/.test(e.customer_name) && !/@/.test(e.customer_name) && !x.name) x.name = e.customer_name;
         if (!x.last_estimate) {
           // Quote sent / opened / approved for the call card (owner, 2026-09-26).
           const total = (Array.isArray(e.line_items) ? e.line_items : []).reduce((t, li) => t + (Number(li && li.unit_price) || 0) * (Number(li && li.qty) || 1), 0);
@@ -9042,6 +9055,18 @@ async function calls(req, res, db, auth) {
             opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null };
         }
       }
+      // Texts per caller, with the company each one belongs to (owner 2026-09-28).
+      try {
+        let mq = db.from('messages').select('customer_phone, created_at, direction, body, sent_by, business:businesses(name)')
+          .in('customer_phone', forms).order('created_at', { ascending: false }).limit(1500);
+        if (vids) mq = mq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
+        const { data: msgs } = await mq;
+        for (const m of (msgs || [])) {
+          const x = h(callerDigits(m.customer_phone));
+          if (!x.texts_list) x.texts_list = [];
+          if (x.texts_list.length < 40) x.texts_list.push({ at: m.created_at, dir: m.direction, body: String(m.body || '').slice(0, 600), by: m.sent_by || null, brand: m.business?.name || null });
+        }
+      } catch (_) {}
       for (const x of historyBy.values()) x.spent = Math.round(x.spent * 100) / 100;
     } catch (e) { /* history is a nicety; never fail the call list over it */ }
   }

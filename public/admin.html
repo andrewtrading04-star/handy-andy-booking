@@ -13947,7 +13947,8 @@ function callSplitView(g){
   // price per company: booked price, else the last quoted $ in its calls
   const price={}; brands.forEach(n=>{ if(booked&&booked.brand===n&&booked.price){ price[n]=Math.round(booked.price); return; }
     const q=rows.filter(r=>bn(r)===n).map(r=>money(pick(r,'price'))).filter(v=>v!=null).pop(); if(q!=null) price[n]=q; });
-  const name=(g.latest.customer&&g.latest.customer.name)||'';
+  const hist=(g.latest&&g.latest.history)||{};
+  const name=(g.latest.customer&&g.latest.customer.name)||hist.name||(booked&&booked.customer_name)||'';
   const phone=g.latest.caller_pretty||g.latest.caller_phone||'';
   // journey chips
   const steps=rows.map(r=>({ at:r.occurred_at, brand:bn(r), label:r.answered===false?'No answer':`${r.routed_to_name||'Answered'}${r.duration_sec?' · '+callDuration(r.duration_sec):''}` }));
@@ -13971,6 +13972,7 @@ function callSplitView(g){
         ${r.recording_url?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:''}
         ${r.transcript&&/^(Staff|Customer):/m.test(r.transcript)?`<details style="margin-top:4px;"><summary style="font-size:12px;cursor:pointer;color:var(--accent);">Show conversation</summary>${txView(r)}</details>`:''}
       </div>`).join('')}
+      ${splitExtras(hist, n, tz)}
     </div>`;
   };
   return `<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;background:#f8fafc;">
@@ -13984,6 +13986,24 @@ function callSplitView(g){
   </div>`;
 }
 function callBrandsStrip(g){ return ''; }
+// Quotes, bookings and texts for ONE company, each tappable to open.
+function splitExtras(hist, brand, tz){
+  const W=iso=>{ try{ return new Date(iso).toLocaleString('en-US',{timeZone:tz,month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
+  const $=v=>'$'+Math.round(Number(v)||0);
+  const ests=(hist.estimate_list||[]).filter(e=>e.brand===brand);
+  const bks=(hist.booking_list||[]).filter(b=>b.brand===brand);
+  const txs=(hist.texts_list||[]).filter(m=>m.brand===brand).slice().reverse();
+  const box=(title,inner)=>`<div style="padding:9px 12px;border-bottom:1px solid var(--line2);"><div style="font-size:12px;font-weight:800;color:var(--mute);text-transform:uppercase;margin-bottom:4px;">${title}</div>${inner}</div>`;
+  let h='';
+  h+=box('Quotes', ests.length?ests.map(e=>`<details style="margin:3px 0;"><summary style="cursor:pointer;font-size:13px;"><b>${$(e.total)}</b> · ${esc(e.service||'Estimate')} · ${esc(W(e.created_at))}${e.approved_at?' · <b style="color:#15803d;">approved</b>':e.opened?' · opened':e.sent_at?' · sent, not opened':' · not sent'}</summary>
+      <div style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin-top:4px;font-size:12.5px;">${(e.items||[]).map(i=>`<div style="display:flex;justify-content:space-between;gap:8px;"><span>${esc(i.name)}${i.qty>1?' × '+i.qty:''}</span><span>${$(i.qty*i.price)}</span></div>`).join('')||'No line items'}
+      <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--line);margin-top:4px;padding-top:3px;"><span>Total</span><span>${$(e.total)}</span></div></div></details>`).join('')
+    :'<div style="font-size:12.5px;color:var(--mute);">No written quote. Any price was said on the call only.</div>');
+  if(bks.length) h+=box('Bookings', bks.map(b=>`<details style="margin:3px 0;"><summary style="cursor:pointer;font-size:13px;"><b>${$(b.price)}</b> · ${esc(W(b.at))} · ${esc(b.status||'')}</summary>
+      <div style="font-size:12.5px;padding:4px 2px;">${esc(b.service||'Job')}${b.booked_by?' · booked by '+esc(b.booked_by):''} · booked ${esc(W(b.created_at))}</div></details>`).join(''));
+  h+=box(`Texts (${txs.length})`, txs.length?`<details><summary style="cursor:pointer;font-size:13px;">Show texts</summary><div style="display:flex;flex-direction:column;gap:5px;margin-top:6px;">${txs.map(m=>`<div style="align-self:${m.dir==='in'?'flex-start':'flex-end'};max-width:88%;background:${m.dir==='in'?'#eef1f5':'#0B84FF'};color:${m.dir==='in'?'var(--ink)':'#fff'};border-radius:12px;padding:6px 9px;font-size:12.5px;white-space:pre-wrap;">${esc(m.body)}<div style="font-size:10.5px;opacity:.75;margin-top:2px;">${esc(W(m.at))}${m.dir==='in'?' · customer':m.by&&m.by!=='automated'?' · '+esc(m.by):' · automated'}</div></div>`).join('')}</div></details>`:'<div style="font-size:12.5px;color:var(--mute);">No texts.</div>');
+  return h;
+}
 function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
     const missed=r.answered===false;
@@ -13992,7 +14012,7 @@ function callInboxPhone(groups){
     return `<div class="cm-row${on?' open':''}" id="cm-${esc(g.key)}">
       <button type="button" class="cm-head" data-callmob="${esc(g.key)}" aria-expanded="${on}">
         <span class="cm-dir" aria-hidden="true">${missed?'':'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2"/></svg>'}</span>
-        <span class="cm-line"><strong class="${missed?'missed':''}">${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}${g.rows.length>1?` (${g.rows.length})`:''}</strong><span>${esc(sub)}</span></span>
+        <span class="cm-line"><strong class="${missed?'missed':''}">${esc(r.customer?.name || (r.history&&r.history.name) || r.caller_pretty || 'Unknown caller')}${g.rows.length>1?` (${g.rows.length})`:''}</strong><span>${esc(sub)}</span></span>
         <span class="cm-when">${esc(callShortWhen(r))}</span>
         <span class="cm-info" aria-hidden="true">i</span>
       </button>
@@ -14017,7 +14037,7 @@ function callInbox(groups){
       return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       ${cvAvatar(g,42)}
       <span class="cv-mid">
-        <strong>${esc(r.customer?.name || r.caller_pretty || 'Unknown caller')}</strong>
+        <strong>${esc(r.customer?.name || (r.history&&r.history.name) || r.caller_pretty || 'Unknown caller')}</strong>
         <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
         <span class="cv-when">${CV_ICON.cal} ${esc(callShortWhen(r))}</span>
         <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss:CV_ICON.ok)+' '+bits.join(' • ')}</span>
