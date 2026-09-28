@@ -24,10 +24,12 @@ Skip kinds that are not in the call. The transcript is machine-made; fix obvious
 
 let _client;
 export async function callSummary(db, callId) {
-  const { data: c, error } = await db.from('calls').select('id, transcript, transcript_summary').eq('id', callId).maybeSingle();
+  const { data: c, error } = await db.from('calls').select('id, transcript, transcript_summary, duration_sec').eq('id', callId).maybeSingle();
   if (error) throw error;
   if (!c) return null;
   if (c.transcript_summary) return c.transcript_summary;
+  // Owner 2026-09-28: never summarize a call under 10 seconds.
+  if (c.duration_sec != null && Number(c.duration_sec) < 10) return null;
   if (!c.transcript || !/^(Staff|Customer):/m.test(c.transcript) || c.transcript.length < 120) return null;
   if (!process.env.ANTHROPIC_API_KEY) return null;
   _client ||= new Anthropic();
