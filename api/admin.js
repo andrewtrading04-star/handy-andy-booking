@@ -517,6 +517,7 @@ export default async function handler(req, res) {
       case 'review_requests':   return await reviewRequests(req, res, db, auth);
       case 'review_resend':     return await reviewResend(req, res, db, auth, body);
       case 'review_offer_send': return await reviewOfferSend(req, res, db, auth, body);
+      case 'vip_phones': { const { data } = await db.from('vip_phones').select('phone'); return res.status(200).json({ phones: (data || []).map((r) => r.phone) }); }
       case 'notification_resend': return await notificationResend(req, res, db, auth, body);
       case 'receipt_send':      return await receiptSend(req, res, db, auth, body);
       case 'invoice_send':      return await invoiceSend(req, res, db, auth, body);
@@ -8861,7 +8862,7 @@ const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary'
   // jiyahs portal"). Deliberately NOT messages_send/messages_block/
   // messages_read -- she reads what was said, the office still owns replying
   // to customers and clearing unread.
-  'messages_list', 'messages_thread', 'notes_active']);
+  'messages_list', 'messages_thread', 'notes_active', 'vip_phones']);
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list

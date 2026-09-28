@@ -3191,6 +3191,7 @@ function enterApp(){
   // her work is her own company. Owner (scope 'all') keeps the old behaviour:
   // no match, so it falls through to the handy-andy-first sort above.
   current = (scope && scope!=='all' && businesses.find(b=>b.slug===scope)) || businesses[0] || null;
+  loadVip();
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
   applyIconTheme();
@@ -3882,7 +3883,7 @@ function evtCard(b){
   </span>`;
   return `<div class="evt s-${b.status}${xcoSecondary?' xco-secondary':''}${overdue?' overdue':''}" data-id="${b.id}">
     <div class="evt-t"><span class="evt-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}</span>${(b.extra_slots&&b.extra_slots.length)?`<span class="evt-multi" title="Big job — reserves ${b.extra_slots.length+1} time slots">⧉ ${b.extra_slots.length+1} slots</span>`:''}${lightsHtml}</div>
-    <div class="evt-n">${esc(b.customer?.name||'Customer')}</div>
+    <div class="evt-n">${esc(b.customer?.name||'Customer')}${vipStar(b.customer?.phone)}</div>
     <div class="evt-b">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician)}${avatar(b.secondary_technician)}</span>`:avatar(b.technician)}${b.price?`<span class="evt-price"${(Number(b.tip)||0)>0?` title="Service ${money(b.price)} + tip ${money(b.tip)}"`:''}>${money((Number(b.price)||0)+(Number(b.tip)||0))}</span>`:''}${(b.econ&&b.econ.tech_payout!=null)?(b.econ.net_tech_pay!=null
       ? `<span class="evt-techpay${b.econ.net_tech_pay<0?' neg':''}" title="CASH job — tech earned ${money(b.econ.tech_payout)} but kept ${money(b.econ.cash_collected)} in cash, so payroll pays ${money(b.econ.net_tech_pay)}">${money(b.econ.net_tech_pay)}</span>`
       : `<span class="evt-techpay" title="Total tech pay incl. tip (admin only)">${money(b.econ.tech_payout)}</span>`):''}${(b.econ&&b.econ.assigned&&b.econ.profit!=null)?`<span class="evt-profit${b.econ.profit<0?' neg':''}" title="Job profit (admin only)">${money(b.econ.profit)}</span>`:''}</div>
@@ -4052,7 +4053,7 @@ function renderListView(dates){
       const who=techs.length?techs.map(t=>esc(String(t.name||'').split(' ')[0])).join(' + '):'Unassigned';
       return `<div class="job evt-row ag${xcoSecondary?' xco-secondary':''}" data-id="${b.id}" style="--tc:${b.technician?techColor(b.technician):'#cbd3dd'}"><div class="ag-row">
         <div class="ag-time">${esc(b.slot_time||fmtClock(b.scheduled_at))}${dur?`<span>${esc(dur)}</span>`:''}</div>
-        <div class="ag-main"><div class="name">${esc(b.customer?.name||'Customer')} ${statusBadge(b.status)}</div>
+        <div class="ag-main"><div class="name">${esc(b.customer?.name||'Customer')}${vipStar(b.customer?.phone)} ${statusBadge(b.status)}</div>
         <div class="meta">${b.secondary_technician?`<span class="av-stack">${avatar(b.technician,true)}${avatar(b.secondary_technician,true)}</span>`:avatar(b.technician,true)} ${who}${b.service?.name?' · '+esc(b.service.name):''}${b.address?' · '+esc(b.address):''}</div></div>
         ${total>0?`<div class="ag-price">${money(total)}</div>`:''}</div>${listEcon(b)}</div>`;
     }).join('');
@@ -4190,7 +4191,7 @@ function availTimeline(dates, techs, slots, slotState){
       if(isBooked){
         booked++;
         blocks+=`<div class="tl-blk bk" style="${style};background:${techColor(t)}"${job?` data-id="${job.id}"`:''} title="${esc(s.label)}${job?' · '+esc(job.customer?.name||'Customer'):' · booked (another company)'}">`+
-          `${job?esc(job.customer?.name||'Customer'):'Booked'}<small>${job?esc(job.service?.name||shortSlot(s)):'another company'}</small></div>`;
+          `${job?esc(job.customer?.name||'Customer')+vipStar(job.customer?.phone):'Booked'}<small>${job?esc(job.service?.name||shortSlot(s)):'another company'}</small></div>`;
       } else if(slotState(t,day,s.key).on){
         open++;
         blocks+=`<div class="tl-blk open" style="${style}" title="${esc(s.label)} · open">Open<small>${shortSlot(s)}</small></div>`;
@@ -4592,7 +4593,7 @@ function openBooking(b){
   // e.g. "Dom's TV Mounting for David Cardenas"; the service/business context is
   // already visible below in the body, so the header no longer repeats it).
   document.getElementById('bkTitle').innerHTML=`
-    <div class="bk-svc">${esc(b.customer?.name||'Customer')}</div>
+    <div class="bk-svc">${esc(b.customer?.name||'Customer')}${vipStar(b.customer?.phone)}</div>
     ${b.zenbooker_job_number?`<div class="bk-jobno">JOB #${esc(b.zenbooker_job_number)}</div>`:''}
     ${bkStatusRail(b)}`;
   document.getElementById('bkBody').innerHTML=`
@@ -10514,7 +10515,7 @@ function paintPipeline(){
   const openC=_plOpen&&plCard(_plOpen);
   const modal=openC?`<div class="plv-pop" data-plkey="${esc(openC.key)}"><div class="plv-pop-bg" data-pl="toggle"></div>
       <div class="plv-pop-card" role="dialog" aria-label="${esc(plTitle(openC))}">
-        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}</b>${plPhoneSub(openC)?`<small style="display:block;">${esc(plPhoneSub(openC))}</small>`:''}<small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
+        <div class="plv-pop-h st-${openC.stage}"><div><b>${esc(plTitle(openC))}${vipStar(openC.phone)}</b>${plPhoneSub(openC)?`<small style="display:block;">${esc(plPhoneSub(openC))}</small>`:''}<small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
@@ -10553,7 +10554,7 @@ function plTileHtml(c){
     :kind==='Text'?'M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z'
     :'M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z')}</span>`;
   return `<button type="button" class="plv-tile${c.leak?' leak':''}" data-plkey="${esc(c.key)}" data-pl="toggle" title="${esc(next.text||'')}">
-    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}${plPhoneSub(c)?`<small style="display:block;font-weight:600;font-size:11.5px;opacity:.8;">${esc(plPhoneSub(c))}</small>`:''}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
+    <span class="plv-tile-h st-${c.stage}"><b>${esc(plTitle(c))}${vipStar(c.phone)}${plPhoneSub(c)?`<small style="display:block;font-weight:600;font-size:11.5px;opacity:.8;">${esc(plPhoneSub(c))}</small>`:''}</b>${c.voicemail?'<em class="plv-vm">Voicemail</em>':''}</span>
     <span class="plv-tile-b"><span><small>VALUE</small><b>${plMoney(c.amount)||'$0'}</b>${sub?`<i>${esc(sub)}</i>`:''}</span><span class="plv-ic ${c.leak||tone==='danger'?'danger':'plain'}">${ic}</span></span>
     ${next.text&&!src.startsWith(next.text)?`<span class="plv-tile-n ${c.leak?'danger':tone}">${esc(next.text)}</span>`:''}
   </button>`;
@@ -10569,7 +10570,7 @@ function plCardHtml(c){
   ].filter(Boolean).join(' · ');
   return `<div class="pl-card${c.leak?' leak':''}${open?' open':''}" data-plkey="${esc(c.key)}">
     <button type="button" class="pl-row" data-pl="toggle" aria-expanded="${open}">
-      <span class="pl-row-top"><span class="pl-name">${esc(plTitle(c))}</span>${c.source?`<span class="pl-chip">${esc(c.source)}</span>`:''}${returning?'<span class="pl-chip ret">Returning</span>':''}${amt?`<span class="pl-amt">${amt}</span>`:''}</span>
+      <span class="pl-row-top"><span class="pl-name">${esc(plTitle(c))}${vipStar(c.phone)}</span>${c.source?`<span class="pl-chip">${esc(c.source)}</span>`:''}${returning?'<span class="pl-chip ret">Returning</span>':''}${amt?`<span class="pl-amt">${amt}</span>`:''}</span>
       ${next.text?`<span class="pl-next ${tone}">${tone==='danger'?PL_ALERT:''}<span>${esc(next.text)}</span></span>`:''}
       ${meta?`<span class="pl-meta">${meta}</span>`:''}
     </button>
@@ -13861,7 +13862,7 @@ function callCard(r,handled,g,v2){
       <div class="cv-head">
         ${cvAvatar(g,64)}
         <div class="cv-head-main">
-          <div class="cv-title">${who}${r.customer?` <span class="cv-sub-num">${esc(r.caller_pretty)}</span>`:''}</div>
+          <div class="cv-title">${who}${vipStar(r.caller_phone)}${r.customer?` <span class="cv-sub-num">${esc(r.caller_pretty)}</span>`:''}</div>
           <div class="cv-sub">${esc(r.market||'Unrouted')} · ${esc(callWhen(r))}</div>
           <div class="cv-pills">${pills.join('')}</div>
         </div>
@@ -14007,7 +14008,7 @@ function callSplitView(g){
   };
   return `<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;background:#f8fafc;">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
-      <div><div style="font-size:20px;font-weight:800;">${esc(name||phone)}</div>${name?`<div style="color:var(--mute);">${esc(phone)}</div>`:''}</div>
+      <div><div style="font-size:20px;font-weight:800;">${esc(name||phone)}${vipStar(g.latest.caller_phone)}</div>${name?`<div style="color:var(--mute);">${esc(phone)}</div>`:''}</div>
       <div style="font-weight:800;color:#b45309;">Called ${brands.length} of your companies</div>
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:10px 0;">${journey}</div>
@@ -14084,8 +14085,8 @@ function callInbox(groups){
         ${(()=>{ // Owner 2026-09-28: Name / Phone / Secretary / Answered - Quote.
           const nm=r.customer?.name || (r.history&&r.history.name) || '';
           const qe=r.history&&r.history.last_estimate;
-          const quote=qe&&qe.approved_at?'Quote approved':qe&&qe.sent_at?'Quote sent':'Quote not sent';
-          return `<strong style="font-size:15px;">${esc(nm||'No name')}</strong>
+          const quote=(r.booking||callOutcome(r)==='Booked'||(r.history&&r.history.upcoming))?'Booked':qe&&qe.approved_at?'Quote approved':qe&&qe.sent_at?'Quote sent':'Quote not sent';
+          return `<strong style="font-size:15px;">${esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
         <span style="font-size:15px;color:var(--ink);font-weight:400;">${esc(r.caller_pretty||r.caller_phone||'Unknown number')}</span>
         <span style="font-size:12.5px;color:var(--mute);">${esc(r.routed_to_name || 'Not assigned')}</span>
         <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss+' Not answered':CV_ICON.ok+' Answered')+' - '+quote}</span>`; })()}
@@ -14336,6 +14337,10 @@ function paintCalls(){
 // only the collapsed one exists, open its folder first.
 let _callFocusId=null;
 // Open Calls straight on one caller (note links, owner 2026-09-28).
+// Gold star: 3+ paid jobs (owner 2026-09-28). Cached so it shows instantly.
+let _vip=new Set(); try{ _vip=new Set(JSON.parse(localStorage.getItem('ha_vip')||'[]')); }catch(_){}
+function vipStar(phone){ const d=String(phone||'').replace(/\D/g,'').slice(-10); return d&&_vip.has(d)?'<span title="3+ paid jobs" style="color:#f5a524;margin-left:4px;">★</span>':''; }
+function loadVip(){ api('vip_phones').then(d=>{ const a=(d&&d.phones)||[]; _vip=new Set(a); try{ localStorage.setItem('ha_vip',JSON.stringify(a)); }catch(_){} }).catch(()=>{}); }
 function openCallLink(id){
   if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
   _callFocusId=id; _callsPeriod='7d'; _callsView='all'; callHubTab='log'; navTo('callhub');
@@ -14638,7 +14643,7 @@ function paintMessages(){
       listHtml+='<div class="msg-row'+(isSel?' sel':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
         +msgAvatar(t)
         +'<div class="msg-row-main">'
-        +'<div class="msg-row-top"><strong style="font-size:13.5px;">'+esc(who)+'</strong>'
+        +'<div class="msg-row-top"><strong style="font-size:13.5px;">'+esc(who)+vipStar(t.customer_phone)+'</strong>'
         +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
         +'<span class="msg-row-time">'+esc(msgWhen(t.last_at))+'</span>'
         +'</div>'
@@ -14796,7 +14801,7 @@ function msgDetailHtml(t){
     +'<button class="msg-back-arrow" data-msgback="1" title="Back to all messages" aria-label="Back to all messages">‹</button>'
     +'<button class="msg-iblock" data-msgblock="1" title="Block this number on every tracking line — no more calls or texts">Block</button>'
     +msgAvatar(t)
-    +'<div class="msg-iname">'+esc(who)+'</div>'
+    +'<div class="msg-iname">'+esc(who)+vipStar(t.customer_phone)+'</div>'
     +(sub?'<div class="msg-isub">'+sub+'</div>':'')
     +'</div>';
 
@@ -24119,6 +24124,7 @@ function embedAuditorBoot(q){
   if(!t){ document.body.innerHTML='<p style="padding:20px;font:15px sans-serif;">Sign in to the audit portal first.</p>'; return; }
   token=t; role='auditor'; userName='Jiyah'; scope='all'; businesses=[]; current=null;
   document.body.classList.add('ro-embed');
+  loadVip();
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   const cid=q.get('call'); if(cid){ _callFocusId=cid; _callsPeriod='7d'; }
