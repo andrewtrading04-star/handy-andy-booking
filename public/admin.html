@@ -16461,6 +16461,13 @@ function paintEstimates(){
       sendEstimateMessage(b.dataset.estEmail,'email',b);
     }));
     document.querySelectorAll('#estWrap [data-est-coupon]').forEach(b=>b.addEventListener('click',()=>sendEstimateCoupon(b.dataset.estCoupon,b)));
+    document.querySelectorAll('#estWrap [data-est-note-add]').forEach(b=>b.addEventListener('click',async()=>{
+      const id=b.dataset.estNoteAdd, ta=document.querySelector(`#estWrap [data-est-note-in="${CSS.escape(id)}"]`);
+      const text=(ta&&ta.value||'').trim(); if(!text){ toast('Write a note first.'); return; }
+      b.disabled=true;
+      try{ await api('estimate_note_add',{ method:'POST', body:{ business:current.slug, id, body:text } }); toast('Note saved'); renderEstimates(); }
+      catch(err){ toast(err.message||'Could not save the note'); b.disabled=false; }
+    }));
     document.querySelectorAll('#estWrap [data-est-del]').forEach(b=>b.addEventListener('click',()=>{
       if(confirm('Delete this estimate request? This cannot be undone.')) setEstimate(b.dataset.estDel,{ op:'delete' });
     }));
@@ -16720,6 +16727,15 @@ function estCard(e){
         ${sentTimer}
         ${approved}
         ${sentLine}
+        ${(()=>{ // Office notes: staff only, never shown to the customer (owner 2026-09-29).
+          const ns=Array.isArray(e.office_notes)?e.office_notes:[];
+          return `<div style="margin-top:10px;">
+            <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:5px;">Office notes</div>
+            ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(fmtDateTime(n.at))}</div></div>`).join('')}
+            <div style="display:flex;gap:6px;align-items:flex-end;">
+              <textarea data-est-note-in="${e.id}" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
+              <button type="button" class="btn ghost sm" data-est-note-add="${e.id}">Save</button>
+            </div></div>`; })()}
       </div>
       ${photo}
     </div>

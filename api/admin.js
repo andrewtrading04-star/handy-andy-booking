@@ -559,6 +559,17 @@ export default async function handler(req, res) {
       case 'gsc_queries':       return await gscQueries(req, res, db, auth);
       case 'city_pages_analytics': return await cityPagesAnalytics(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
+      case 'estimate_note_add': {
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
+        const text = String(body.body || '').trim().slice(0, 1000);
+        if (!text) return res.status(400).json({ error: 'Write a note first.' });
+        const { data: est } = await db.from('estimates').select('id').eq('id', String(body.id || '')).eq('business_id', biz.id).maybeSingle();
+        if (!est) return res.status(404).json({ error: 'Estimate not found' });
+        const { error } = await db.from('estimate_office_notes').insert({ estimate_id: est.id, body: text, created_by: auth.name || adminAuthorName(auth) });
+        if (error) throw error;
+        return res.status(200).json({ ok: true });
+      }
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
@@ -11034,6 +11045,19 @@ async function estimates(req, res, db, auth) {
     ({ data, error } = await runQuery());
   }
   if (error) throw error;
+
+  // Office notes (owner 2026-09-29): staff-only notes on an estimate. The
+  // customer never sees them -- nothing that renders for the customer reads
+  // this table.
+  try {
+    const ids = (data || []).map((e) => e.id);
+    if (ids.length) {
+      const { data: ns } = await db.from('estimate_office_notes').select('estimate_id, body, created_by, created_at').in('estimate_id', ids).order('created_at');
+      const by = new Map();
+      for (const n of ns || []) (by.get(n.estimate_id) || by.set(n.estimate_id, []).get(n.estimate_id)).push({ body: n.body, by: n.created_by, at: n.created_at });
+      for (const e of data || []) e.office_notes = by.get(e.id) || [];
+    }
+  } catch (e) { console.warn('[admin] estimates: office notes failed:', e.message); }
 
   // Flag which rows get the "Get this estimate filled" button. Keyed off
   // service_areas.unstaffed (DFW / Los Angeles / Phoenix / San Antonio today),
