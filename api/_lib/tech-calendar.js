@@ -91,8 +91,13 @@ export async function techIcs(db, techId) {
  * timezone) gets ONE text listing them. Once per tech per day (tech_sms_log
  * kind 'tomorrow' is the guard), so a re-run never texts twice.
  */
-export async function sendTomorrowDigest(db, { dryRun = false } = {}) {
+export async function sendTomorrowDigest(db, { dryRun = false, force = false } = {}) {
   const now = Date.now();
+  // Owner 2026-09-29: goes out at 8:30 PM Denver time. The cron fires at both
+  // 02:30 and 03:30 UTC so daylight saving never moves it; only the run that
+  // lands in the 8 PM Denver hour sends.
+  const denverHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hourCycle: 'h23', hour: '2-digit' }).format(now));
+  if (!force && !dryRun && denverHour !== 20) return { sent: [], skipped: [], note: `not 8 PM in Denver (hour ${denverHour})` };
   // Tomorrow in Denver/Central is inside this window whenever the cron runs
   // in the evening US time; each job is then checked against its own day.
   const q = await db.from('bookings').select(`id, scheduled_at, technician_id, secondary_technician_id, city,
@@ -119,10 +124,8 @@ export async function sendTomorrowDigest(db, { dryRun = false } = {}) {
     const { data: already } = await db.from('tech_sms_log').select('id').eq('technician_id', techId).eq('kind', 'tomorrow')
       .gte('created_at', new Date(now - 20 * 3600000).toISOString()).limit(1);
     if (already && already.length) { skipped.push({ techId, why: 'already sent' }); continue; }
-    const when = (j) => new Date(j.scheduled_at).toLocaleTimeString('en-US', { timeZone: j.tz, hour: 'numeric', minute: '2-digit' });
-    const dayName = new Date(list[0].scheduled_at).toLocaleDateString('en-US', { timeZone: list[0].tz, weekday: 'long', month: 'short', day: 'numeric' });
-    const rows = list.slice(0, 6).map(j => `• ${when(j)} ${j.customer?.name || 'Customer'}${j.city ? ', ' + j.city : ''}${j.business?.name ? ' (' + j.business.name + ')' : ''}`);
-    const msg = `Your jobs tomorrow, ${dayName}:\n${rows.join('\n')}${list.length > 6 ? `\n+${list.length - 6} more` : ''}\nDetails: ${baseUrl()}/tech.html`;
+    // Owner's wording (2026-09-29).
+    const msg = `You have ${list.length} job${list.length === 1 ? '' : 's'} tomorrow.\n\nDetails: ${baseUrl()}/tech.html`;
     if (dryRun) { sent.push({ tech: tech.name, jobs: list.length, msg }); continue; }
     const { data: log } = await db.from('tech_sms_log').insert({ technician_id: techId, booking_id: list[0].id, kind: 'tomorrow', status: 'pending', to_phone: tech.phone }).select('id').maybeSingle();
     const statusCallback = log ? `${baseUrl()}/api/analytics?action=sms_status&token=${encodeURIComponent(signToken({ kind: 'tech_sms', tech_sms_log_id: log.id }, 86400))}` : undefined;

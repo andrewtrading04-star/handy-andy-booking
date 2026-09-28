@@ -74,6 +74,11 @@ export async function askWhy(db, auth, body, allowed) {
   });
   const answer = JSON.parse((msg.content || []).find((b) => b.type === 'text')?.text || '{}');
   if (!answer.holding_back) return { status: 502, json: { error: 'Could not get an answer. Try again.' } };
-  await db.from('pipeline_ask_why').upsert({ card_key: key, fingerprint: fp, answer, asked_by: auth.name || auth.role || null, created_at: new Date().toISOString() });
+  // Owner 2026-09-29: when the OWNER asks, that company's secretary gets a
+  // quiet note that clears the moment she opens the card (migration 0159).
+  // Matched by company, not name: Joey's login is "Joe", the card says "Joey".
+  const forSlug = isOwner && card.business && card.business.slug ? card.business.slug : null;
+  await db.from('pipeline_ask_why').upsert({ card_key: key, fingerprint: fp, answer, asked_by: auth.name || auth.role || null, created_at: new Date().toISOString(),
+    for_slug: forSlug, seen_at: forSlug ? null : new Date().toISOString() });
   return { status: 200, json: { ...answer, cached: false, at: new Date().toISOString() } };
 }
