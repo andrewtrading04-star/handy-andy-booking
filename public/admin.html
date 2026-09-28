@@ -10498,6 +10498,11 @@ async function plBuildEstimate(c, btn){
   if(filled) toast('Filled in from the call. Check it before sending.');
   else if(p && p.error && plHasPhone(c)) toast('Could not fill it from the call: '+p.error);
 }
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-callquote]'); if(!b) return;
+  e.preventDefault();
+  plBuildEstimate({ business:{ slug:b.dataset.slug, name:b.dataset.bname }, phone:b.dataset.phone, name:b.dataset.name, email:'' });
+});
 function plBizSlug(c){
   const want=[c&&c.business&&c.business.slug, ...((c&&Array.isArray(c.businesses))?c.businesses.map(x=>typeof x==='string'?x:x&&x.slug):[])].filter(Boolean);
   return want.find(s=>businesses.some(b=>b.slug===s)) || null;
@@ -13904,6 +13909,10 @@ function callCard(r,handled,g,v2){
   // FROM; if that number ever guesses to a brand this viewer can't see, the
   // Messages screen's own "could not open conversation" error handles it —
   // this never needs its own access check.
+  // Owner 2026-09-29: build a quote straight from the call, no phone script.
+  const quoteBtn = (hasPhone && r.business && r.business.slug && role!=='auditor')
+    ? `<button class="rc-btn ghost" data-callquote="1" data-slug="${esc(r.business.slug)}" data-bname="${esc(r.business.name||'')}" data-phone="${esc(r.caller_phone)}" data-name="${esc(r.customer?.name||(r.history&&r.history.name)||'')}">📝 Build a quote</button>`
+    : '';
   const msgBtn = (hasPhone && r.grasshopper_number)
     ? `<button class="rc-btn ghost" data-callmsg="1" data-msgour="${esc(r.grasshopper_number)}" data-msgcust="${esc(r.caller_phone)}">💬 Send a message</button>`
     : '';
@@ -14023,7 +14032,7 @@ function callCard(r,handled,g,v2){
     if(qe){ const amt=qe.total?' $'+Math.round(qe.total).toLocaleString():'';
       pills.push(`<span class="cv-pill" title="${esc(qe.sent_at?'Sent '+fmtDateTime(qe.sent_at):'')}">📄 ${qe.approved_at?'Quote approved'+amt:qe.sent_at?'Quote sent'+amt+(qe.opened?' · opened':''):'Quote not sent yet'+amt}</span>`); }
     if(g.rows.length>1) pills.push(`<span class="cv-pill">${g.rows.length} calls</span>`);
-    const headBtns = blockedNow ? '' : `${claimBtn.replace('class="rc-call','class="rc-call cv-callbtn')}${msgBtn.replace('rc-btn ghost','rc-btn ghost cv-textbtn').replace('💬 Send a message','💬 Send text')}`;
+    const headBtns = blockedNow ? '' : `${claimBtn.replace('class="rc-call','class="rc-call cv-callbtn')}${msgBtn.replace('rc-btn ghost','rc-btn ghost cv-textbtn').replace('💬 Send a message','💬 Send text')}${quoteBtn}`;
     const footActions = blockedActions || actions.replace(claimBtn+msgBtn,'');
     return `<div class="cv" data-call="${esc(r.id)}">
       <div class="cv-head">
@@ -14056,7 +14065,7 @@ function callCard(r,handled,g,v2){
     </div>
     <div class="rc-actions">
       <div class="rc-meta" style="text-align:right;font-weight:700;margin-top:0;">${esc(callWhen(r))}</div>
-      ${blockedActions||((handled&&!blockedNow?claimBtn+msgBtn:'')+actions)}
+      ${blockedActions||((handled&&!blockedNow?claimBtn+msgBtn:'')+actions+(blockedNow?'':quoteBtn))}
     </div>
   </div>`;
 }
