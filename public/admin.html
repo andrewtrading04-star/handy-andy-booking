@@ -14074,10 +14074,14 @@ function callInbox(groups){
       return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
       ${cvAvatar(g,42)}
       <span class="cv-mid">
-        <strong>${esc(r.customer?.name || (r.history&&r.history.name) || r.caller_pretty || 'Unknown caller')}</strong>
-        <span>${esc(r.market || 'Unrouted')} · ${esc(r.routed_to_name || 'Not assigned')}</span>
-        <span class="cv-when">${CV_ICON.cal} ${esc(callShortWhen(r))}</span>
-        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss:CV_ICON.ok)+' '+bits.join(' • ')}</span>
+        ${(()=>{ // Owner 2026-09-28: Name / Phone / Secretary / Answered - Quote.
+          const nm=r.customer?.name || (r.history&&r.history.name) || '';
+          const qe=r.history&&r.history.last_estimate;
+          const quote=qe&&qe.approved_at?'Quote approved':qe&&qe.sent_at?'Quote sent':'Quote not sent';
+          return `<strong style="font-size:15px;">${esc(nm||'No name')}</strong>
+        <span style="font-size:15px;color:var(--ink);font-weight:400;">${esc(r.caller_pretty||r.caller_phone||'Unknown number')}</span>
+        <span style="font-size:12.5px;color:var(--mute);">${esc(r.routed_to_name || 'Not assigned')}</span>
+        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.miss+' Not answered':CV_ICON.ok+' Answered')+' - '+quote}</span>`; })()}
         ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
       </span>
       <span class="cv-right"><b>${r.duration_sec?esc(callDuration(r.duration_sec)):'—'}</b><span class="cv-chev">›</span></span>
