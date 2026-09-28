@@ -20029,7 +20029,9 @@ function cwWireLadderCommon(scope){
     // Same rule as cwYes: an unapplied draft never rides onto the written
     // estimate. The customer must receive the number they were actually quoted.
     cwSetDiscountLabel();
-    callWiz.step='estimate'; renderCallWiz();
+    // Owner 2026-09-29: straight into the quote builder, already filled in, so
+    // the quote can be checked or changed and sent from there.
+    cwOpenQuoteBuilder();
   });
   // Two-tap. This sits a few pixels under "They said no", which advances a rung,
   // and a mis-tap here ends a live call and PATCHes the row to refused.
@@ -20192,6 +20194,19 @@ async function cwLoadEconomics(priced, travelFee, ahFee){
 // Hand the whole call — answers, chosen slot, and any discount — into the real
 // New Booking form. The discount rides along as a negative custom line so it
 // lands in the booking's own line items and the office can see (and edit) it.
+// The full quote builder, filled from the call: TV answers, ZIP (+ travel),
+// the discount given on the call, and whatever contact details we have.
+function cwOpenQuoteBuilder(){
+  const draft=callWiz; if(!draft) return;
+  // The discount actually on the quote (what the price card shows), not the
+  // running total of drafts.
+  let d=0; try{ d=Number(cwBuildQuote().discount)||0; }catch(_){ d=0; }
+  const c={ ...(draft.cust||{}), ...Object.fromEntries(Object.entries(draft.estimateContact||{}).filter(([,v])=>v)) };
+  openNewBooking({ _estimateOnly:true, _keepOptions:draft.service==='TV Mounting',
+    _linkCallId:draft.id||null, _linkCallDraft:draft,
+    name:c.name||'', phone:c.phone||'', email:c.email||'', postal_code:draft.zip||'',
+    ...(d>0?{ _discount:{ amount:d, label:NB_CALL_DISCOUNT } }:{}) });
+}
 async function cwGoToBooking(){
   // Neither button that lands here is disabled on click, and this awaits a
   // round-trip when a discount applies — a double-click used to log the
@@ -21305,11 +21320,11 @@ async function renderCallWiz(){
     // rung books the job, so the secretary is never asked to choose between two
     // controls that mean the same thing.
     const answers=(nextLabel,yesLabel,noLabel)=>`${cwWaitBar()}
+      <button type="button" class="btn ghost" id="cwGoEstimate" style="margin-bottom:8px;width:100%;">Send quote</button>
       <div style="display:flex;gap:8px;">
         <button type="button" id="cwNo" style="flex:1;font-family:inherit;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-2);">${esc(noLabel||'They said no')}</button>
         <button type="button" id="cwYes" class="btn" style="flex:1;border-radius:10px;padding:13px 10px;font-size:15px;font-weight:700;">${esc(yesLabel||'They said yes')}</button>
-      </div>
-      <button type="button" class="btn ghost" id="cwGoEstimate" style="margin-top:8px;width:100%;">Send quote</button>`;
+      </div>`;
 
     // Always available, on every rung, below a hairline. A customer who says
     // "just email it to me" must never be trapped behind an uncommitted draft.
@@ -21638,14 +21653,7 @@ async function renderCallWiz(){
     // Owner 2026-09-29: open the full estimate builder with everything from the
     // call (TV answers, ZIP + travel, discount, contact) to check or change
     // any line before it goes out. It is sent from there.
-    document.getElementById('cwEstEdit').addEventListener('click',()=>{
-      if(!isHere()) return;
-      const d=cwDiscountApplied(), c=draft.estimateContact;
-      openNewBooking({ _estimateOnly:true, _keepOptions:callWiz.service==='TV Mounting',
-        _linkCallId:draft.id||null, _linkCallDraft:draft,
-        name:c.name||'', phone:c.phone||'', email:c.email||'', postal_code:callWiz.zip||'',
-        ...(d>0?{ _discount:{ amount:d, label:callWiz.discountLabel||'Discount' } }:{}) });
-    });
+    document.getElementById('cwEstEdit').addEventListener('click',()=>{ if(isHere()) cwOpenQuoteBuilder(); });
     if(draft._estimateAttempt){
       body.querySelectorAll('input,select,textarea').forEach(node=>node.disabled=true);
       document.getElementById('cwEstBack').disabled=true;
@@ -23607,10 +23615,11 @@ function nbCurrentMinimum(){ return NB_MINIMUM; }
 // Top-up needed to reach the $139 floor for a set of raw (pre-top-up)
 // selections. GDS / Assurion / No Charge / Handyman are exempt — see the
 // matching server-side exemptions in bookingCreate.
+const NB_CALL_DISCOUNT='Discount (from call)';
 function nbMinimumTopUp(rawSelections){
   if(nbGdsActive || nbAssurionActive || nbHandymanActive || nbNoChargeActive) return 0;
   const min=nbCurrentMinimum(); if(!(min>0)) return 0;
-  const sum=(rawSelections||[]).reduce((s,x)=>s+x.price*x.quantity,0);
+  const sum=(rawSelections||[]).filter(x=>x.label!==NB_CALL_DISCOUNT).reduce((s,x)=>s+x.price*x.quantity,0);
   if(!(sum>0) || sum>=min) return 0;
   return Math.round((min-sum)*100)/100;
 }
@@ -23723,7 +23732,7 @@ function updateNbTotal(){
 function renderNbMinWarn(selections){
   const warn=document.getElementById('nbMinWarn'); if(!warn) return;
   const min=nbCurrentMinimum();
-  const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum'&&!/^multi-tv discount$|^multi-tv price discount/i.test(s.label||'')).reduce((s,x)=>s+x.price*x.quantity,0);
+  const rawSum=(selections||nbCollectSelections()).filter(s=>s.label!=='Service minimum'&&s.label!==NB_CALL_DISCOUNT&&!/^multi-tv discount$|^multi-tv price discount/i.test(s.label||'')).reduce((s,x)=>s+x.price*x.quantity,0);
   const applies=!nbGdsActive && !nbAssurionActive && !nbHandymanActive && !nbNoChargeActive && rawSum>0 && min>0;
   if(!applies || rawSum>=min){ warn.style.display='none'; warn.innerHTML=''; return; }
   const topup=Math.round((min-rawSum)*100)/100;
