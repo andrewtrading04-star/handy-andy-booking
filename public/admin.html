@@ -5700,14 +5700,47 @@ function _acSessionToken(){
   // Cheap random session token to group keystrokes + the details call (billing).
   return 'xxxxxxxxyxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);});
 }
+// Owner 2026-09-28 ("as fast as freaking possible"): lookups go to /api/places,
+// an edge function that runs next to whoever is typing (~100 ms instead of a
+// ~500 ms trip to the US region). If it fails for any reason the old admin.js
+// proxy answers instead, so the box never goes dead.
+async function acEdge(params, signal){
+  const r=await fetch('/api/places?'+new URLSearchParams(params), { headers:{ Authorization:'Bearer '+token }, signal });
+  if(!r.ok) throw new Error('places '+r.status);
+  return r.json();
+}
+async function acPredict(q, zip, session, signal){
+  try{ return ((await acEdge({ q, zip, session }, signal)).predictions)||[]; }
+  catch(e){
+    if(e.name==='AbortError') throw e;
+    const d=await api('places_autocomplete',{ params:{ input:zip&&!/\b\d{5}\b/.test(q)?`${q} ${zip}`:q, session } });
+    return (d&&d.predictions)||[];
+  }
+}
+async function acDetails(place_id, session){
+  try{ return (await acEdge({ place_id, session })).address||null; }
+  catch(_){ const d=await api('place_details',{ params:{ place_id, session } }); return (d&&d.address)||null; }
+}
+// City + state for a ZIP (the call script fills them before anyone types).
+const _acZipPlace=new Map();
+function acZipPlace(zip){
+  if(!/^\d{5}$/.test(String(zip||''))) return Promise.resolve(null);
+  if(!_acZipPlace.has(zip)) _acZipPlace.set(zip, acEdge({ zip }).then(d=>(d&&d.state)?d:null).catch(()=>{ _acZipPlace.delete(zip); return null; }));
+  return _acZipPlace.get(zip);
+}
+// fields: { city, state, zip } element ids to fill; biasZip() -> the ZIP to rank
+// results by (default: the zip field's own value); onPick(address) after a pick.
 function attachAddressAutocomplete(input, fields){
   fields=fields||{};
   if(!input || input.dataset.acOn) return;
   input.dataset.acOn='1';
   input.setAttribute('autocomplete','off');
-  let box=null, items=[], active=-1, session=_acSessionToken(), seq=0, lastQ='';
+  let box=null, items=[], active=-1, session=_acSessionToken(), seq=0, lastQ='', ctl=null;
+  const cache=new Map();
+  const biasZip=()=>{ const z=String((typeof fields.biasZip==='function'?fields.biasZip():(fields.zip&&document.getElementById(fields.zip)?.value))||'').trim(); return /^\d{5}$/.test(z)?z:''; };
   const close=()=>{ if(box){ box.remove(); box=null; } items=[]; active=-1; };
-  const place=()=>{ if(!box) return; const r=input.getBoundingClientRect();
+  const place=()=>{ if(!input.isConnected){ window.removeEventListener('scroll',place,true); window.removeEventListener('resize',place); close(); return; }
+    if(!box) return; const r=input.getBoundingClientRect();
     box.style.left=r.left+'px'; box.style.top=(r.bottom+2)+'px'; box.style.width=r.width+'px'; };
   const open=()=>{ if(box) return; box=document.createElement('div'); box.className='addr-ac';
     document.body.appendChild(box); place(); };
@@ -5717,51 +5750,64 @@ function attachAddressAutocomplete(input, fields){
       el.addEventListener('mousedown',ev=>{ ev.preventDefault(); choose(parseInt(el.dataset.i,10)); });
     });
   };
+  // Programmatic fills fire 'input' too, so screens that save on every keystroke
+  // (the call script) keep what was filled. Our own listener ignores them.
+  const set=(id,v)=>{ if(!id||!v) return; const el=document.getElementById(id); if(el && el.value!==v){ el.value=v; el.dispatchEvent(new Event('input',{bubbles:true})); } };
+  const setZip=v=>{ if(!fields.zip||!v) return; const z=document.getElementById(fields.zip); if(z && z.value!==v){ z.value=v; z.dispatchEvent(new Event('change')); } };
+  const setStreet=v=>{ if(!v||input.value===v) return; input.value=v; input.dispatchEvent(new Event('input',{bubbles:true})); };
   async function choose(i){ const p=items[i]; if(!p) return; close();
     if(p.__zip){
       // Bare-ZIP pick: clear the street, set the ZIP field, and resolve its area
       // (fires the nbZip 'change' handler → service area + travel fee + techs).
       input.value='';
-      const z=fields.zip && document.getElementById(fields.zip);
-      if(z){ z.value=p.__zip; z.dispatchEvent(new Event('change')); }
+      setZip(p.__zip);
       return;
     }
-    input.value=p.description;
+    // Fill from the suggestion itself: no second round trip before the form is done.
+    lastQ=p.street||p.description;
+    setStreet(p.street||p.description); set(fields.city,p.city); set(fields.state,p.state); setZip(p.zip);
+    if(typeof fields.onPick==='function') fields.onPick(p);
+    // The details call only confirms the ZIP (and closes the billing session).
+    const mySession=session; session=_acSessionToken();
     try{
-      const d=await api('place_details',{ params:{ place_id:p.place_id, session } });
-      const a=d&&d.address; if(a){
-        if(a.street) input.value=a.street;
-        const set=(id,v)=>{ if(!id||v==null||v==='') return; const el=document.getElementById(id); if(el) el.value=v; };
-        set(fields.city,a.city); set(fields.state,a.state); set(fields.zip,a.zip);
-        if(fields.zip){ const z=document.getElementById(fields.zip); if(z) z.dispatchEvent(new Event('change')); }
+      const a=await acDetails(p.place_id, mySession);
+      if(a && input.value===(p.street||p.description)){
+        if(a.street){ lastQ=a.street; setStreet(a.street); }
+        if(!p.city) set(fields.city,a.city); if(!p.state) set(fields.state,a.state); if(!p.zip) setZip(a.zip);
+        if(typeof fields.onPick==='function') fields.onPick({ ...p, ...a });
       }
-    }catch(e){/* leave the typed/description text as-is */}
-    session=_acSessionToken();   // new billing session after a completed pick
+    }catch(e){/* the suggestion's own street/city/state stay */}
   }
   let timer=null;
+  const show=(preds,zipItem)=>{ items=preds.slice(); if(zipItem) items=[zipItem, ...items]; active=-1;
+    if(!items.length){ close(); return; } open(); render(); };
   const query=()=>{ const q=input.value.trim();
     if(q.length<3){ close(); return; }
     if(q===lastQ) return; lastQ=q;
     // A bare 5-digit ZIP gets a "use ZIP only" option so a caller can be qualified
     // by ZIP without a street address (offered even if Places returns nothing).
     const zipItem = /^\d{5}$/.test(q) ? { __zip:q, description:`Use ZIP ${q} only (no street address)` } : null;
+    const zip=biasZip(), ck=q.toLowerCase()+'|'+zip;
     const mine=++seq;
-    api('places_autocomplete',{ params:{ input:q, session } }).then(d=>{
-      if(mine!==seq) return;                       // a newer keystroke already fired
-      items=(d&&d.predictions)||[]; if(zipItem) items=[zipItem, ...items]; active=-1;
-      if(!items.length){ close(); return; }
-      open(); render();
-    }).catch(()=>{
+    if(cache.has(ck)){ show(cache.get(ck),zipItem); return; }
+    if(ctl) ctl.abort();                         // a newer keystroke: drop the old request
+    ctl=new AbortController();
+    acPredict(q, zip, session, ctl.signal).then(preds=>{
+      cache.set(ck,preds);
       if(mine!==seq) return;
-      if(zipItem){ items=[zipItem]; active=-1; open(); render(); } else close();
+      show(preds,zipItem);
+    }).catch(e=>{
+      if(e.name==='AbortError' || mine!==seq) return;
+      if(zipItem) show([],zipItem); else close();
     });
   };
-  input.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(query,180); });
+  input.addEventListener('input',e=>{ if(!e.isTrusted) return; clearTimeout(timer); timer=setTimeout(query,90); });
   input.addEventListener('keydown',e=>{
     if(!box||!items.length){ if(e.key==='Enter'&&box) e.preventDefault(); return; }
     if(e.key==='ArrowDown'){ e.preventDefault(); active=(active+1)%items.length; render(); }
     else if(e.key==='ArrowUp'){ e.preventDefault(); active=(active-1+items.length)%items.length; render(); }
     else if(e.key==='Enter'){ e.preventDefault(); choose(active>=0?active:0); }
+    else if(e.key==='Tab' && active>=0){ e.preventDefault(); choose(active); }
     else if(e.key==='Escape'){ close(); }
   });
   input.addEventListener('blur',()=>setTimeout(close,150));
@@ -20456,6 +20502,7 @@ async function renderCallWiz(){
         if(!valid()) return false;
         if(draft.areaName!==d.name || draft.surcharge!==d.surcharge) cwInvalidatePrice(draft);
         draft.areaName=d.name; draft.otherBiz=d.other_business; draft.surcharge=d.surcharge;
+        acZipPlace(z);   // city + state ready before the address question
         nbAreaName=d.name||''; nbZipAreaId=d.service_area_id||null;
         document.getElementById('nbTravelFee').value=d.surcharge||'';
         nextBtn.textContent='Continue';
@@ -21351,6 +21398,7 @@ async function renderCallWiz(){
         <input class="search" id="cwCustState" style="margin:0;max-width:80px;" placeholder="ST" value="${esc(c.state)}">
         <input class="search" style="margin:0;max-width:90px;background:var(--line2);" value="${esc(callWiz.zip||'')}" disabled>
       </div>
+      <div id="cwAddrZipWarn" role="status" style="font-size:12.5px;color:#b45309;margin:-8px 0 12px;"></div>
       ${callWizScript(isTv?'Great, I just need to get a card to hold the appointment. It is not charged until the job is complete.':'How will you be paying?')}
       <select class="search" id="cwPayMethod" style="margin:0 0 8px;width:100%;">
         <option value="">Select payment method</option>
@@ -21397,6 +21445,20 @@ async function renderCallWiz(){
     });
     document.getElementById('cwBookNow').addEventListener('click', cwSubmitBooking);
     document.getElementById('cwCustBack').addEventListener('click', ()=>{ cwSaveCust(); callWiz.step='recap'; renderCallWiz(); });
+    // Address autofill (owner 2026-09-28): suggestions ranked by the ZIP quoted on
+    // this call; a pick fills street, city and state at once.
+    attachAddressAutocomplete(document.getElementById('cwCustAddr'), { city:'cwCustCity', state:'cwCustState',
+      biasZip:()=>callWiz&&callWiz.zip,
+      onPick:a=>{ if(!isHere()) return; cwSaveCust();
+        const w=document.getElementById('cwAddrZipWarn');
+        if(w) w.textContent=(a&&a.zip&&callWiz.zip&&a.zip!==callWiz.zip)?`This address is in ZIP ${a.zip}, but the price was for ${callWiz.zip}. Check the ZIP with the customer.`:''; } });
+    if(!c.city || !c.state) acZipPlace(callWiz.zip).then(z=>{
+      if(!z || !isHere()) return;
+      const ci=document.getElementById('cwCustCity'), st=document.getElementById('cwCustState');
+      if(ci && !ci.value.trim() && z.city) ci.value=z.city;
+      if(st && !st.value.trim() && z.state) st.value=z.state;
+      cwSaveCust();
+    });
     if(draft._bookingAttempt){
       body.querySelectorAll('input,select,textarea').forEach(node=>node.disabled=true);
       document.getElementById('cwCustBack').disabled=true;
