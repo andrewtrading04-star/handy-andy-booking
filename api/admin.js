@@ -546,6 +546,7 @@ export default async function handler(req, res) {
       case 'estimate_update':   return await estimateUpdate(req, res, db, auth, body);
       case 'estimate_create':   return await estimateCreate(req, res, db, auth, body);
       case 'estimate_send_sms': return await estimateSendSms(req, res, db, auth, body);
+      case 'estimate_link':     return await estimateLink(req, res, db, auth);
       case 'estimate_send_email': return await estimateSendEmail(req, res, db, auth, body);
       case 'estimate_followups': return await estimateFollowups(req, res, db, auth);
       case 'estimate_remind':    return await estimateRemind(req, res, db, auth, body);
@@ -11494,6 +11495,21 @@ async function estimateCreate(req, res, db, auth, body) {
 }
 
 // Send quote SMS to customer
+// Pipeline Text box (owner 2026-09-28): the customer's own estimate link, to
+// drop into a custom text. Same signed 90-day link the estimate texts carry.
+async function estimateLink(req, res, db, auth) {
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  const id = String(req.query.id || '').slice(0, 64);
+  const est = id ? await fetchEstimate(db, id, biz.id, 'id') : null;
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  const baseUrl = process.env.PUBLIC_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const approveToken = signToken({ kind: 'estimate_approve', estimate_id: est.id }, 7776000);
+  const approveUrl = baseUrl ? `${baseUrl}/estimate-approve.html?token=${encodeURIComponent(approveToken)}` : '';
+  const url = estimateApproveLink({ slug: biz.slug, token: approveToken, fallbackUrl: approveUrl });
+  if (!url) return res.status(500).json({ error: 'Could not make the link' });
+  return res.status(200).json({ url });
+}
+
 async function estimateSendSms(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }

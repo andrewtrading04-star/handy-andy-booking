@@ -10860,7 +10860,10 @@ function plClick(e){
     case 'text':
       // Same hand-off as the Calls tab's "Send a message": open that exact
       // thread (our line + their number) on the Messages screen.
-      openCallTexts(c.our_phone, c.phone, { send:true }); return;   // stays on the Pipeline (owner, 2026-09-26)
+      // Estimate link or "Build an estimate" above the text box (owner 2026-09-28).
+      openCallTexts(c.our_phone, c.phone, { send:true, estId:(c.estimate&&c.estimate.id)||null, estBiz:plBizSlug(c),
+        buildEst:()=>{ if(!plUseBusiness(c)) return; openNewBooking({ name:plRealName(c), phone:plHasPhone(c)?fmtPhone(c.phone):'', email:c.email||'', _estimateOnly:true }); } });
+      return;   // stays on the Pipeline (owner, 2026-09-26)
     case 'script': {
       const slug=plBizSlug(c);
       if(!slug){ toast(`This login can't take calls for ${(c.business&&c.business.name)||'that brand'}.`); return; }
@@ -14130,6 +14133,20 @@ async function openCallTexts(our,customer,opts){
     const ta=box.querySelector('textarea'), go=box.querySelector('button');
     setTimeout(()=>ta.focus(),0);
     ta.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); go.click(); } };
+    if(opts.estId||opts.buildEst){
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;gap:8px;align-items:center;padding:8px 12px 0;font-size:12.5px;color:var(--mute);';
+      row.innerHTML=opts.estId?'<button type="button" class="pl-btn">📎 Add estimate link</button>':'<span>No estimate yet.</span><button type="button" class="pl-btn">Build an estimate</button>';
+      box.parentNode.insertBefore(row,box);
+      const eb=row.querySelector('button');
+      eb.onclick=async()=>{
+        // No estimate: the builder texts the customer the estimate and its link itself.
+        if(!opts.estId){ close(); opts.buildEst(); return; }
+        eb.disabled=true; eb.textContent='Getting link…';
+        try{ const d=await api('estimate_link',{ params:{ id:opts.estId, business:opts.estBiz||'' }}); ta.value=(ta.value.trim()?ta.value.trim()+' ':'')+d.url; ta.focus(); eb.textContent='📎 Link added'; }
+        catch(e){ toast(e.message||'Could not get the link'); eb.disabled=false; eb.textContent='📎 Add estimate link'; }
+      };
+    }
     go.onclick=async()=>{
       const text=ta.value.trim(); if(!text) return;
       go.disabled=true; go.textContent='Sending…';
