@@ -14344,7 +14344,10 @@ function vipN(p){ const d=String(p||'').replace(/\D/g,'').slice(-10); return d?(
 function vipStars(n){ return n>=8?'★★★':n>=5?'★★':n>=3?'★':''; }
 function vipStar(phone){ const n=vipN(phone), s=vipStars(n); return s?'<span title="'+n+' paid jobs" style="color:#f5a524;margin-left:4px;">'+s+'</span>':''; }
 function vipPre(phone){ return vipN(phone)>=8?'<span title="'+vipN(phone)+' paid jobs" style="color:#f5a524;margin-right:4px;">★★★</span>':''; }
-function loadVip(){ api('vip_phones').then(d=>{ _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){} }).catch(()=>{}); }
+function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN); _vipN=(d&&d.counts)||{}; try{ localStorage.setItem('ha_vipn',JSON.stringify(_vipN)); }catch(_){}
+  // Repaint once the stars arrive, so they show without a refresh.
+  if(was!==JSON.stringify(_vipN)){ try{ if(section==='schedule') renderSchedule(); else if(section==='messages') paintMessages(); else if(section==='callhub'||section==='pipeline') navTo(section); }catch(_){} }
+}).catch(()=>{}); }
 function openCallLink(id){
   if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
   _callFocusId=id; _callsPeriod='7d'; _callsView='all'; callHubTab='log'; navTo('callhub');
@@ -15139,7 +15142,7 @@ function paintReviewCalls(){
       <strong>${esc(r.customer_name)}</strong><span>${esc(bizShort(r.business_slug))} · ${esc(r.phone||'No phone on file')}</span>
       <span>${esc(r.service_name)} · ${esc(r.technician_name)}</span>
       <span>${esc(rcRel(r.when,r.business_timezone))}</span>
-      <span class="ci-status">${esc(r.call_status?rcStatusLabel(r.call_status):'Ready to call')}</span>
+      <span class="ci-status">${esc(r.call_status?rcStatusLabel(r.call_status):(rcCallBand(r.call_timezone||r.business_timezone).band==='red'?'Too early or late to call now':'Ready to call'))}</span>
     </button>`).join('')}</div><section class="ch-review-detail" aria-label="Selected customer review call">${(isToCall?rcCard:rcFolderCard)(selected)}</section></div>`
     : `<div class="empty" style="padding:34px 12px;">${isToCall?'🎉 Nobody to call for this window — everyone has left a review or been handled.':'Nothing logged in this folder that week.'}</div>`;
   const rangeControl = isToCall
