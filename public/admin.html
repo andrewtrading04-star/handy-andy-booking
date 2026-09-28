@@ -13928,24 +13928,40 @@ let _callsMobOpen=null;
 // (owner 2026-09-28: Chris called Handy Andy AND Dom's, then booked Handy Andy
 // -- that has to be obvious, not buried in one merged card).
 function callBrandsStrip(g){
-  const rows=(g&&g.rows||[]).filter(r=>r.kind!=='live'&&r.kind!=='sms');
+  const all=(g&&g.rows||[]).slice().sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at)));
+  const rows=all.filter(r=>r.kind!=='live'&&r.kind!=='sms');
   const tz=CALL_TZ[(g&&g.latest&&g.latest.market)]||'America/Denver';
-  const t=r=>{ try{ return new Date(r.occurred_at).toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
-  const by=new Map();
-  rows.slice().sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at))).forEach(r=>{ const n=(r.business&&r.business.name)||'Unknown line'; (by.get(n)||by.set(n,[]).get(n)).push(r); });
+  const t=iso=>{ try{ return new Date(iso).toLocaleTimeString('en-US',{timeZone:tz,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } };
+  const brands=[...new Set(rows.map(r=>(r.business&&r.business.name)||'Unknown line'))];
   const lb=g&&g.latest&&g.latest.history&&g.latest.history.latest_booking;
-  const firstCall=rows.length?rows.reduce((m,r)=>r.occurred_at<m?r.occurred_at:m,rows[0].occurred_at):null;
-  const bookedNow=lb&&lb.created_at&&firstCall&&lb.created_at>=firstCall;
-  if(by.size<2&&!bookedNow) return '';
-  const chips=[...by.entries()].map(([n,rs])=>`<span style="display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;margin:3px 4px 0 0;font-size:12.5px;"><b>${esc(n)}</b> · ${rs.map(t).map(esc).join(', ')}${rs.length>1?` (${rs.length} calls)`:''}</span>`).join('');
-  let out='';
-  if(bookedNow){
-    const when=lb.at?new Date(lb.at).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
-    const others=[...by.keys()].filter(n=>n!==lb.brand);
-    out=`<div style="margin-top:8px;font-size:14px;"><b style="color:#15803d;">✅ Booked with ${esc(lb.brand||'us')}</b>${when?' · '+esc(when):''}${lb.price?' · $'+Math.round(lb.price):''}${lb.booked_by?' · by '+esc(lb.booked_by):''}${others.length?`<br><b style="color:#b91c1c;">Did not book with ${others.map(esc).join(' or ')}</b>`:''}</div>`;
-  }
+  const firstCall=rows.length?rows[0].occurred_at:null;
+  const bookedNow=!!(lb&&lb.created_at&&firstCall&&lb.created_at>=firstCall);
+  if(brands.length<2&&!bookedNow) return '';
+  const sumPick=(r,k)=>{ const it=(r.transcript_summary&&r.transcript_summary.items)||[]; return (it.find(i=>i.kind===k)||{}).text||''; };
+  // Call flow: every call and the booking, in time order.
+  const steps=rows.map(r=>{
+    const who=r.answered===false?'Missed':(r.routed_to_name||r.handled_by||'Answered');
+    const brief=[sumPick(r,'price'), sumPick(r,'booked')||sumPick(r,'not_booked')].filter(Boolean).join(' · ');
+    return { at:r.occurred_at, html:`<b>${esc((r.business&&r.business.name)||'Unknown line')}</b> · ${esc(who)}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}${brief?`<div style="color:var(--ink-2);font-size:12.5px;">${esc(brief)}</div>`:''}` };
+  });
+  if(bookedNow) steps.push({ at:lb.created_at, html:`<b style="color:#15803d;">Booked with ${esc(lb.brand||'us')}</b>${lb.booked_by?' · by '+esc(lb.booked_by):''}${lb.price?' · $'+Math.round(lb.price):''}` });
+  steps.sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+  const flow=steps.map((st,k)=>`<div style="display:flex;gap:10px;padding:5px 0;${k?'border-top:1px solid var(--line2);':''}font-size:13px;"><span style="flex:none;width:62px;color:var(--mute);">${esc(t(st.at))}</span><span style="flex:1;">${st.html}</span></div>`).join('');
+  // What each company offered.
+  const per=brands.map(n=>{
+    if(bookedNow&&lb.brand===n){
+      const when=lb.at?new Date(lb.at).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+      return `<div style="font-size:13.5px;"><b style="color:#15803d;">✅ ${esc(n)}: booked</b>${lb.price?' $'+Math.round(lb.price):''}${when?' · '+esc(when):''}</div>`;
+    }
+    const mine=rows.filter(r=>((r.business&&r.business.name)||'Unknown line')===n);
+    const price=mine.map(r=>sumPick(r,'price')).filter(Boolean).pop();
+    const liveQ=all.filter(r=>r.kind==='live'&&r.quoted_total&&mine.some(m=>m.id===r.inbound_call_id)).map(r=>'$'+Math.round(r.quoted_total)).pop();
+    return `<div style="font-size:13.5px;"><b style="color:#b91c1c;">❌ ${esc(n)}: not booked</b>${price?' · '+esc(price):liveQ?' · quoted '+esc(liveQ):''}</div>`;
+  }).join('');
   return `<div style="border:2px solid #111418;border-radius:12px;padding:10px 12px;margin-bottom:12px;background:#f8fafc;">
-    <div style="font-weight:800;font-size:14px;">${by.size>1?`📞 Called ${by.size} companies`:'📞 Called'}</div><div>${chips}</div>${out}</div>`;
+    <div style="font-weight:800;font-size:14px;margin-bottom:4px;">📞 Called ${brands.length} compan${brands.length===1?'y':'ies'}</div>
+    ${per}
+    <div style="font-weight:800;font-size:13px;margin:10px 0 2px;">Call flow</div>${flow}</div>`;
 }
 function callInboxPhone(groups){
   return `<div class="cm-list">${groups.map(g=>{ const r=g.latest, on=g.key===_callsMobOpen;
