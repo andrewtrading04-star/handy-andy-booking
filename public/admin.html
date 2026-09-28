@@ -13551,11 +13551,7 @@ function zipMetro(z){
   return '';
 }
 function txSumHtml(sum, r){
-  let items=(sum.items||[]).slice().map(i=>{
-    if(i.kind!=='place') return i;
-    const z=(String(i.text||'').match(/\b\d{5}\b/)||[])[0], m=z&&zipMetro(z);
-    return m?{...i,text:`${m} (${z})`}:i;
-  });
+  let items=(sum.items||[]).filter(i=>i.kind!=='place');   // location shows under Contact information only
   const qe=r&&r.history&&r.history.last_estimate;
   const callMs=r&&Date.parse(r.occurred_at||'');
   const sentAfter=qe&&qe.sent_at&&(!callMs||Date.parse(qe.sent_at)>=callMs-10*60000);
@@ -13634,7 +13630,7 @@ function callCard(r,handled,g,v2){
     <dt>Routed to</dt><dd>${esc(r.routed_to_name || 'Not assigned')}</dd>
     <dt>Call outcome</dt><dd>${esc(callOutcome(r))}</dd>
     ${callFollowUp(r)?`<dt>Follow-up</dt><dd>${esc(callFollowUp(r))}</dd>`:''}
-    <dt>Location</dt><dd>${esc(r.market || 'Unrouted')}</dd>
+    <dt>Location</dt><dd>${esc((()=>{ const it=(r.transcript_summary&&r.transcript_summary.items)||[]; const z=((it.find(i=>i.kind==='place')||{}).text||'').match(/\b\d{5}\b/); const zz=z?z[0]:''; const m=zipMetro(zz)||r.market||'Unrouted'; return zz?`${m} (${zz})`:m; })())}</dd>
   </dl>`;
 
   // Live-wizard outcome and a not-yet-booked callback marker don't fit the 4
