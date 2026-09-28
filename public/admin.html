@@ -16663,8 +16663,8 @@ function estCard(e){
           ? (e.booking_id?`<button class="btn sm" data-est-openjob="${esc(e.booking_id)}" title="This approval booked the job automatically — open it on the schedule">Open job →</button>`:`<span class="est-booked-tag">✓ Job booked</span>`)
           : canSend?`<button class="btn ${isApproved?'':'ghost'} sm" data-est-convert="${e.id}" title="${isApproved?'Create a booking from this approved estimate':'The customer has not approved this quote online yet — converting will ask you to confirm they approved it by phone'}">→ Convert to job${isApproved?'':' (unapproved)'}</button>`:''}
         ${e.broker_eligible?`<button class="btn ghost sm" data-est-broker="${e.id}" title="No techs in this market. Collect subcontractor bids and set what we sell it for.">🤝 ${e.broker_company_name?'Brokering':'Get this estimate filled'}</button>`:''}
-        ${(!engaged&&e.status!=='declined')?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
-        ${!engaged?`<button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>`:''}
+        ${/* Owner 2026-09-29: hidden once a quote is built -- the next step is sending it */''}${(!engaged&&!hasQuote&&e.status!=='declined')?`<button class="btn ghost sm" data-est-decline="${e.id}" style="color:#b91c1c;" title="Tell the customer this is outside what we do, and send a list of what we handle">🚫 Not a fit</button>`:''}
+        ${(!engaged&&!hasQuote)?`<button class="btn ghost sm" data-est-del="${e.id}" title="Delete">Delete</button>`:''}
       </span>
     </div>
   </div>`;
