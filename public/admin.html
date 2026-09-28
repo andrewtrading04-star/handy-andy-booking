@@ -15142,7 +15142,7 @@ function paintReviewCalls(){
       <strong>${esc(r.customer_name)}</strong><span>${esc(bizShort(r.business_slug))} · ${esc(r.phone||'No phone on file')}</span>
       <span>${esc(r.service_name)} · ${esc(r.technician_name)}</span>
       <span>${esc(rcRel(r.when,r.business_timezone))}</span>
-      <span class="ci-status">${esc(r.call_status?rcStatusLabel(r.call_status):(rcCallBand(r.call_timezone||r.business_timezone).band==='red'?'Too early or late to call now':'Ready to call'))}</span>
+      <span class="ci-status">${esc(r.call_status?rcStatusLabel(r.call_status):(rcCallBand(r.call_timezone||r.business_timezone).band==='red'?'':'Ready to call'))}</span>
     </button>`).join('')}</div><section class="ch-review-detail" aria-label="Selected customer review call">${(isToCall?rcCard:rcFolderCard)(selected)}</section></div>`
     : `<div class="empty" style="padding:34px 12px;">${isToCall?'🎉 Nobody to call for this window — everyone has left a review or been handled.':'Nothing logged in this folder that week.'}</div>`;
   const rangeControl = isToCall
