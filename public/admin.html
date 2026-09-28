@@ -19372,7 +19372,7 @@ const CW_SCRIPTS={
   wires:     'Would you like to hide the wires?',
   lifting:   'Since it is a larger TV, will you be able to help lift it?',
   extras:    'Is there anything else you would like added?',
-  frame:     'Is any of them a Samsung Frame or LG Gallery TV?',
+  frame:     'Does the customer have a Samsung Frame TV?',
 };
 function callWizGroupScript(card){
   if(card.kind==='wire-overlap'){
@@ -19380,7 +19380,7 @@ function callWizGroupScript(card){
     const surfaces=g.options.filter(o=>(nbQty[g.id]?.[o.id]||0)>0 && !/drywall/i.test(o.label)).map(o=>o.label.toLowerCase());
     return `Of the TVs above a fireplace, how many are mounted on ${surfaces.join(' or ')}?`;
   }
-  if(card.kind==='frame') return nbTotalTvs()===1 ? 'Is it a Samsung Frame or LG Gallery TV?' : CW_SCRIPTS.frame;
+  if(card.kind==='frame') return CW_SCRIPTS.frame;
   if(card.g.key==='lifting' && nbSelectedSizeMaxList().some(n=>n>=86)) return 'Let me confirm the lifting help for the larger TV.';
   // Read out loud, so a two-TV job should not say "this TV".
   if(card.g.key==='bracket' && nbTotalTvs()>1) return 'Do you have brackets for these TVs?';
@@ -20601,7 +20601,8 @@ async function renderCallWiz(){
     if(card.kind==='wire-overlap'){
       optsHtml=cwWireOverlapOptionsHtml();
     } else if(card.kind==='frame'){
-      optsHtml=`<div class="nb-opts">${cwFrameRowHtml()}</div><div class="nb-hint">${nbFrameTvQty.frame?`${nbFrameTvQty.frame} of ${tvCount} TVs are Frame or Gallery.`:'Leave at 0 if none of the TVs are Frame or Gallery.'}</div>`;
+      // Owner 2026-09-28: a plain Yes / No, one tap and on to the next question.
+      optsHtml=callWizChoiceRow([{value:'yes',label:`Yes (+$${FRAME_TV_PRICE})`},{value:'no',label:'No'}]);
     } else if(card.g.key==='size'){
       // Size is the count: uncapped, one + per TV on the job.
       const gCount=nbGroupCount(card.g.id);
@@ -20635,7 +20636,7 @@ async function renderCallWiz(){
     // The gate replaces Back/Continue with its own Yes/No — neither answer
     // needs a second tap to confirm, and Continue would be meaningless before
     // the question is even answered.
-    const isExtrasGate = card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0;
+    const isExtrasGate = (card.g && card.g.key==='extras' && callWiz.extrasGate!=='yes' && nbGroupCount(card.g.id)===0) || card.kind==='frame';
     // Reaching "anything else" is what makes a call count toward conversion (owner, 2026-09-25).
     if(card.g && card.g.key==='extras' && !callWiz._extrasSeen){ callWiz._extrasSeen=true; cwTrack('extras_reached',{}); }
     const stepNo=callWiz.optStep+1;
@@ -20659,6 +20660,13 @@ async function renderCallWiz(){
       body.querySelectorAll('[data-cwchoice]').forEach(b=>b.addEventListener('click', ()=>{
         if(!isHere()) return;
         const yes=b.dataset.cwchoice==='yes';
+        if(card.kind==='frame'){
+          nbFrameTvQty.frame=yes?1:0; cwSyncTvCounts(); nbClampTvBound();
+          cwTrack('question_answered',{ question:'frame', tv_count:nbTotalTvs(), n:nbFrameTvQty.frame });
+          callWiz.optStep++;
+          if(callWiz.optStep>=cards.length) cwTrack('options_done',{ tv_count:nbTotalTvs() });
+          renderCallWiz(); return;
+        }
         callWiz.extrasGate=yes?'yes':'no';
         if(yes){ renderCallWiz(); return; }   // reveals the add-on list, same card
         // "No" needs nothing further picked, so it advances immediately —
