@@ -11652,8 +11652,24 @@ async function estimateFollowups(req, res, db, auth) {
     .order('created_at', { ascending: false }).limit(300);
   if (error) throw error;
   const ms = (t) => (t ? Date.parse(t) : 0) || 0;
+  // Owner 2026-09-29: a customer who BOOKED after the quote (by phone, without
+  // tapping approve) is done -- not someone to chase.
+  const bookedAt = new Map();   // phone10 -> latest booking created_at
+  try {
+    const phones = [...new Set((data || []).map((e) => String(e.customer_phone || '').replace(/\D/g, '').slice(-10)).filter((p) => p.length === 10))];
+    if (phones.length) {
+      const { data: cs } = await db.from('customers').select('id, phone').in('phone', phones);
+      const byId = new Map((cs || []).map((c) => [c.id, String(c.phone || '').replace(/\D/g, '').slice(-10)]));
+      if (byId.size) {
+        const { data: bs } = await db.from('bookings').select('customer_id, created_at').in('customer_id', [...byId.keys()]).neq('status', 'cancelled')
+          .gte('created_at', new Date(now - 30 * 86400000).toISOString());
+        for (const b of bs || []) { const p = byId.get(b.customer_id); if (p && ms(b.created_at) > (bookedAt.get(p) || 0)) bookedAt.set(p, ms(b.created_at)); }
+      }
+    }
+  } catch (err) { console.warn('[estimate_followups] booking check failed:', err.message); }
   const opened = [], unopened = [];
   for (const e of (data || [])) {
+    if ((bookedAt.get(String(e.customer_phone || '').replace(/\D/g, '').slice(-10)) || 0) >= ms(e.created_at)) continue;
     const items = Array.isArray(e.line_items) ? e.line_items : [];
     const sub = items.reduce((t, it) => t + (Number(it.qty != null ? it.qty : it.quantity) || 1) * (Number(it.unit_price) || 0), 0);
     const total = Math.round(sub * (1 + (Number(e.tax_rate) || 0)) * 100) / 100;
