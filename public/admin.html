@@ -3271,7 +3271,9 @@ function enterApp(){
   // Estimates tab straight away instead of the schedule, then focusPendingEstimate()
   // scrolls to that exact card once the list renders.
   pendingEstimateId=estimateIdFromUrl();
+  let _urlCall=null; try{ _urlCall=new URLSearchParams(location.search).get('call'); }catch(_){}
   if(pendingEstimateId){ estFilter='all'; navTo('estimates'); }
+  else if(_urlCall){ openCallLink(_urlCall); }
   else navTo('schedule');
   // navTo('schedule') already runs renderGreeting(), which itself calls
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
@@ -9943,7 +9945,7 @@ async function noteBanner(){
         <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:5px;">
           From ${esc(n.created_by||'Owner')} · ${esc(noteWhen(n.created_at))}
         </div>
-        <div style="font-size:14.5px;line-height:1.5;white-space:pre-wrap;">${esc(n.body)}</div>
+        <div style="font-size:14.5px;line-height:1.5;white-space:pre-wrap;">${noteLinkify(n.body)}</div>
         ${notePhotosHtml(n.photo_urls)}
         <div class="note-replybox" style="display:none;margin-top:10px;">
           <textarea rows="2" maxlength="1000" placeholder="Optional — write back to ${esc(n.created_by||'Owner')}…"
@@ -11038,7 +11040,7 @@ async function loadNotesRecent(){
           <div style="white-space:pre-wrap;margin-top:3px;">${esc(r.reply)}</div></div>`).join('');
       return `<div class="note-row">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
+          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${noteLinkify(n.body)}</div>
           ${notePhotosHtml(n.photo_urls)}
           <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${role==='owner'?esc(n.created_by||'Office')+' → ':''}${esc(who)} · ${esc(NOTE_MODE_LABEL[n.mode]||n.mode)} · ${esc(noteWhen(n.created_at))}</div>
           ${replies}
@@ -11170,7 +11172,7 @@ async function loadTechNotesRecent(){
       const pill=n.scheduled ? noteScheduledPill(n) : (!n.live && !seen.length ? '<span class="note-pill done">Expired</span>' : '');
       return `<div class="note-row">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${esc(n.body)}</div>
+          <div style="font-size:13.5px;line-height:1.45;white-space:pre-wrap;">${noteLinkify(n.body)}</div>
           ${notePhotosHtml(n.photo_urls)}
           ${chips}
           <div style="color:var(--mute);font-size:11.5px;margin-top:5px;">${esc(n.target_label)} · ${esc((NOTE_MODE_LABEL[n.mode]||n.mode).replace('ticked off','they tap X'))} · ${esc(noteWhen(n.created_at))}</div>
@@ -14298,6 +14300,19 @@ function paintCalls(){
 // once in the queue — so prefer whichever copy is actually visible, and if
 // only the collapsed one exists, open its folder first.
 let _callFocusId=null;
+// Open Calls straight on one caller (note links, owner 2026-09-28).
+function openCallLink(id){
+  if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
+  _callFocusId=id; _callsPeriod='7d'; _callsView='all'; callHubTab='log'; navTo('callhub');
+}
+// Note text with clickable links. CRM call links open in place.
+function noteLinkify(t){
+  return esc(t).replace(/https?:\/\/[^\s<]+/g, u=>{
+    const m=u.match(/[?&]call=([0-9a-f-]{36})/i);
+    return m?`<a href="#" data-call-link="${m[1]}" style="color:var(--accent);font-weight:700;">Open the call →</a>`:`<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+  });
+}
+document.addEventListener('click',e=>{ const a=e.target.closest&&e.target.closest('[data-call-link]'); if(!a) return; e.preventDefault(); openCallLink(a.dataset.callLink); });
 function focusPendingCall(view){
   if(!_callFocusId) return;
   const id=_callFocusId; _callFocusId=null;
