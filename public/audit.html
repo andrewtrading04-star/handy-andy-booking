@@ -1565,6 +1565,7 @@ function renderConversion(d){
 async function loadConversion(){ try{ renderConversion(await api('conversion')); }catch(_){ const w=$('convWrap'); if(w) w.innerHTML=''; } }
 
 async function load(){
+  loadMyNotes();
   const date=$('date').value;
   if(!date) return;
   try{
@@ -1805,6 +1806,40 @@ function jiyahCompare(r){
     '<h3>\u26a0 This customer called '+brands.length+' of our companies</h3>'+
     (rv&&rv.job?'<div style="background:#111418;color:#fff;border-radius:10px;padding:7px 11px;margin-bottom:8px;font-weight:700;">'+esc(rv.job)+'</div>':'')+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;">'+cols+'</div></div>';
+}
+// Notes the owner addressed to Jiyah (owner 2026-09-28). Shown as a banner;
+// a CRM call link opens that caller's side-by-side view right here.
+async function loadMyNotes(){
+  let d; try{ d=await crm('notes_active',{}); }catch(_){ return; }
+  const ns=(d&&d.notes)||[];
+  let bar=document.getElementById('myNotesBar'); if(bar) bar.remove();
+  if(!ns.length) return;
+  bar=document.createElement('div'); bar.id='myNotesBar';
+  bar.style.cssText='position:sticky;top:0;z-index:50;background:#fffbeb;border-bottom:2px solid #f59e0b;padding:10px 14px;';
+  bar.innerHTML=ns.map(n=>'<div style="max-width:900px;margin:0 auto 6px;font-size:14.5px;line-height:1.5;white-space:pre-wrap;"><b>Note from '+esc(n.created_by||'Andrew')+':</b> '+
+    esc(n.body).replace(/https?:\/\/[^\s<]+/g,u=>{ const m=u.match(/[?&]call=([0-9a-f-]{36})/i); return m?'<a href="#" data-jcall="'+m[1]+'" style="font-weight:800;">Open the call \u2192</a>':'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>'; })+
+    ' <button class="btn ghost sm" data-jread="'+esc(n.id)+'">Got it</button></div>').join('');
+  document.body.insertBefore(bar, document.body.firstChild);
+  bar.querySelectorAll('[data-jread]').forEach(b=>b.onclick=async()=>{ try{ await crm('notes_read',{},{ method:'POST', body:{ id:b.dataset.jread } }); }catch(_){} loadMyNotes(); });
+  bar.querySelectorAll('[data-jcall]').forEach(a=>a.onclick=e=>{ e.preventDefault(); openCallView(a.dataset.jcall); });
+}
+async function openCallView(id){
+  let d; try{ d=await crm('calls',{ limit:300, from:new Date(Date.now()-14*86400000).toISOString() }); }catch(e){ alert(e.message); return; }
+  const rows=(d.calls||d.rows||[]).concat(d.open||[]);
+  const r=rows.find(x=>x.id===id);
+  if(!r){ alert('That call is not in the last 14 days.'); return; }
+  const same=rows.filter(x=>x.caller_phone&&x.caller_phone===r.caller_phone&&x.kind!=='live').sort((a,b)=>String(a.occurred_at).localeCompare(String(b.occurred_at)));
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:100;background:rgba(15,23,42,.55);overflow:auto;padding:20px 12px;';
+  ov.innerHTML='<div style="max-width:980px;margin:0 auto;background:#fff;border-radius:14px;padding:14px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><h2 style="margin:0;">'+esc(r.caller_display||r.caller_pretty||'Caller')+'</h2><button class="btn ghost sm" id="cvClose">Close</button></div>'+
+    jiyahCompare(r)+
+    same.map(x=>'<div class="card"><b>'+esc((x.business&&x.business.name)||'')+'</b> \u00b7 '+esc(fmtSentAt(x.occurred_at))+' CT \u00b7 '+esc(x.answered===false?'No answer':(x.routed_to_name||'Answered'))+(x.duration_sec?' \u00b7 '+fmtDur(x.duration_sec):'')+
+      (x.recording_url?'<audio controls preload="none" style="width:100%;margin-top:6px;" src="/api/admin?action=call_recording&id='+encodeURIComponent(x.id)+'&token='+encodeURIComponent(token)+'"></audio>':'')+'</div>').join('')+
+    '</div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#cvClose').onclick=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
 }
 async function crm(action, params, opts){
   const o=opts||{};

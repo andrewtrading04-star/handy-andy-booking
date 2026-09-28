@@ -8857,12 +8857,12 @@ const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary'
   // jiyahs portal"). Deliberately NOT messages_send/messages_block/
   // messages_read -- she reads what was said, the office still owns replying
   // to customers and clearing unread.
-  'messages_list', 'messages_thread']);
+  'messages_list', 'messages_thread', 'notes_active']);
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
 // at all, so her token never even reaches it.
-const AUDITOR_WRITE_ACTIONS = new Set(['call_block', 'auditor_note_send', 'notes_photo']);
+const AUDITOR_WRITE_ACTIONS = new Set(['call_block', 'auditor_note_send', 'notes_photo', 'notes_read']);
 // How long a claim ("I am ringing this person now") stays hot. Long enough to
 // cover dialing, a conversation and writing a note; short enough that a claim
 // someone forgot to close does not hide a customer forever. After this the card
@@ -15106,7 +15106,8 @@ async function notesActive(req, res, db, auth) {
   const notes = (data || [])
     .filter(n => !seen.has(n.id))
     .filter(n => (n.created_by || '') !== reader)
-    .filter(n => isOwner ? !!n.to_owner : (!n.to_owner && (!n.target_slug || n.target_slug === auth.scope)))
+    // Jiyah (auditor) only gets notes addressed to her (target_slug 'auditor', owner 2026-09-28).
+    .filter(n => auth.auditor ? n.target_slug === 'auditor' : isOwner ? !!n.to_owner : (!n.to_owner && n.target_slug !== 'auditor' && (!n.target_slug || n.target_slug === auth.scope)))
     .filter(n => noteIsLive(n, today));
 
   return res.status(200).json({ notes, count: notes.length });
