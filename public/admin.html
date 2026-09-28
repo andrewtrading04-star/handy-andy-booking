@@ -13977,7 +13977,7 @@ function callCard(r,handled,g,v2){
     </div>
     <div class="rc-actions">
       <div class="rc-meta" style="text-align:right;font-weight:700;margin-top:0;">${esc(callWhen(r))}</div>
-      ${blockedActions||actions}
+      ${blockedActions||((handled&&!blockedNow?claimBtn+msgBtn:'')+actions)}
     </div>
   </div>`;
 }
