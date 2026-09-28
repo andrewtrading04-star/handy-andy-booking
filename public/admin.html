@@ -2386,7 +2386,7 @@
     </div>
     <form id="nbForm" style="display:grid;gap:18px;">
       <!-- ① Qualify the caller by ZIP first — check the service area & price before collecting any details. -->
-      <div class="nb-ziplead">
+      <div class="nb-ziplead" style="margin-bottom:44px;">
         <div class="nb-lead-q">What's the customer's <b>ZIP Code</b>?</div>
         <div class="nb-ziprow">
           <input class="search" id="nbZip" placeholder="ZIP" inputmode="numeric" maxlength="5" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)">
@@ -2429,7 +2429,7 @@
         <div id="nbSlots" style="display:grid;gap:8px;"></div>
       </div>
       <!-- ③ Customer details — comes right after the time slot picker. -->
-      <details id="nbCustDetails" class="nb-cust" style="margin-top:22px;">
+      <details id="nbCustDetails" class="nb-cust" style="margin-top:44px;">
         <summary class="nb-cust-sum">Enter Customer's Information</summary>
         <div class="nb-cust-body">
           <input class="search" style="margin:0" id="nbName" placeholder="Customer name *">
