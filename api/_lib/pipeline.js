@@ -41,7 +41,7 @@ import { localDayStartUTC } from './time.js';
 
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
 // Exact list and order are the owner's (2026-09-24) -- do not reword.
-export const LOST_REASONS = ['Too expensive', 'Went with someone else', 'Just shopping', 'Out of area', "We don't do that", 'No reply after estimate', 'Spam'];
+export const LOST_REASONS = ['Too expensive', 'Went with someone else', 'Just shopping', 'Out of area', "We don't do that", 'No reply after estimate', 'Never reached', 'Spam', 'Other'];
 export const STAGES = ['new', 'talked', 'quoted', 'booked', 'completed', 'paid', 'lost'];   // 'done' folded into Booked (owner, 2026-09-26)
 
 const TOLL_FREE = '8889159967';          // the notification sender: every brand's automated texts
