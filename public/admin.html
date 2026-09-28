@@ -21619,6 +21619,7 @@ async function renderCallWiz(){
       <input class="search" id="cwName" style="margin:0 0 8px;" placeholder="Name" value="${esc(draft.estimateContact.name)}">
       <input type="checkbox" id="cwEstSmsConsent" hidden${(callWiz.cust&&callWiz.cust.sms===false)?'':' checked'}>
       <button type="button" class="btn" id="cwEstSend">Send estimate</button>
+      <button type="button" class="btn ghost" id="cwEstEdit" style="margin-top:8px;">Review / edit the quote first</button>
       <button type="button" class="btn ghost" id="cwEstBack" style="margin-top:8px;">Back</button>`;
     document.getElementById('cwEstBack').addEventListener('click', ()=>{ callWiz.step='recap'; renderCallWiz(); });
     for(const [key,id] of [['name','cwName'],['phone','cwPhone'],['email','cwEmail']]){
@@ -21626,6 +21627,17 @@ async function renderCallWiz(){
     }
     document.getElementById('cwEstSmsConsent').addEventListener('change',e=>{ if(isHere()) draft.cust.sms=e.target.checked; });
     document.getElementById('cwEstSend').addEventListener('click',cwSubmitEstimate);
+    // Owner 2026-09-29: open the full estimate builder with everything from the
+    // call (TV answers, ZIP + travel, discount, contact) to check or change
+    // any line before it goes out. It is sent from there.
+    document.getElementById('cwEstEdit').addEventListener('click',()=>{
+      if(!isHere()) return;
+      const d=cwDiscountApplied(), c=draft.estimateContact;
+      openNewBooking({ _estimateOnly:true, _keepOptions:callWiz.service==='TV Mounting',
+        _linkCallId:draft.id||null, _linkCallDraft:draft,
+        name:c.name||'', phone:c.phone||'', email:c.email||'', postal_code:callWiz.zip||'',
+        ...(d>0?{ _discount:{ amount:d, label:callWiz.discountLabel||'Discount' } }:{}) });
+    });
     if(draft._estimateAttempt){
       body.querySelectorAll('input,select,textarea').forEach(node=>node.disabled=true);
       document.getElementById('cwEstBack').disabled=true;
