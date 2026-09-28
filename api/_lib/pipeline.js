@@ -1214,11 +1214,8 @@ export async function pipelineHandler(req, res, db, auth, body) {
   if (!auth || auth.role === 'auditor' || auth.auditor) return res.status(403).json({ error: 'Not available for this login' });
   // The owner's "Ask why" notes waiting for this secretary (cheap: polled for the nav badge).
   if (req.method === 'GET' && req.query.why_unseen === '1') {
-    if (auth.role === 'owner') return res.status(200).json({ notes: [] });
-    const allowed = allowedSlugsFor(auth);
-    let q = db.from('pipeline_ask_why').select('card_key, answer, created_at, asked_by').not('for_slug', 'is', null).is('seen_at', null).limit(50);
-    if (allowed) q = q.in('for_slug', allowed);
-    const { data } = await q;
+    if (auth.role === 'owner' || !auth.name) return res.status(200).json({ notes: [] });
+    const { data } = await db.from('pipeline_ask_why').select('card_key, answer, created_at, asked_by').eq('for_name', auth.name).is('seen_at', null).limit(50);
     return res.status(200).json({ notes: (data || []).map((n) => ({ card_key: n.card_key, at: n.created_at, by: n.asked_by, ...n.answer })) });
   }
   if (req.method === 'GET') {
@@ -1242,10 +1239,7 @@ export async function pipelineHandler(req, res, db, auth, body) {
   if (body && body.op === 'why_seen') {
     const key = String(body.card_key || '');
     if (!/^c_[0-9a-f-]{36}$/i.test(key)) return res.status(400).json({ error: 'card_key is required' });
-    const allowed = allowedSlugsFor(auth);
-    let q = db.from('pipeline_ask_why').update({ seen_at: new Date().toISOString() }).eq('card_key', key);
-    if (allowed) q = q.in('for_slug', allowed);
-    await q;
+    await db.from('pipeline_ask_why').update({ seen_at: new Date().toISOString() }).eq('card_key', key).eq('for_name', auth.name || '');
     return res.status(200).json({ ok: true });
   }
   if (body && body.op === 'ask_why') {
