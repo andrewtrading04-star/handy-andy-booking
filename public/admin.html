@@ -611,6 +611,17 @@
   .plv-pop .pl-card.plv-in>.pl-row{display:none;} .plv-pop .pl-card.plv-in .pl-detail{border-top:none;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
   .pl-card.leak{border:2px solid #dc2626;}
+  .ps-list{position:relative;display:flex;flex-direction:column;gap:8px;}
+  .ps-list:before{content:'';position:absolute;left:17px;top:18px;bottom:18px;border-left:2px solid #e5e7eb;}
+  .ps-row{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr);gap:10px;align-items:start;}
+  .ps-ic{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;position:relative;z-index:1;}
+  .ps-box{border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:9px 12px;display:flex;gap:10px;justify-content:space-between;min-width:0;}
+  .ps-main{min-width:0;flex:1;overflow-wrap:anywhere;}
+  .ps-t{font-size:13.5px;font-weight:700;color:#1f2937;line-height:1.35;}
+  .ps-s{font-size:12.5px;color:#4b5563;margin-top:2px;line-height:1.4;}
+  .ps-when{font-size:11.5px;color:#6b7280;text-align:right;white-space:nowrap;line-height:1.35;}
+  .ps-link{display:inline-block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:700;}
+  .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
   .pl-card.owes{background:#fff5f5;border-color:#fca5a5;box-shadow:0 0 0 1px #fecaca,0 0 14px rgba(248,113,113,.45);}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
   .pl-row{display:block;width:100%;background:transparent;border:none;text-align:left;font:inherit;color:var(--ink);padding:11px 14px;min-height:44px;}
@@ -11068,7 +11079,6 @@ function plStoryHtml(c){
   const fromCust=t=>t.icon==='missed'||(t.icon==='text'&&/^(Text:|Texted a photo)/.test(t.text||''));
   const fromUs=t=>(t.icon==='phone'&&t.tone==='ok')||t.icon==='callout'||t.icon==='script'||(t.icon==='text'&&/^Text reply/.test(t.text||''))||(t.icon==='estimate'&&/^Estimate sent/.test(t.text||''))||t.icon==='booking';
   const hrs=ms=>ms>=36e5*48?Math.floor(ms/864e5)+' days':Math.max(1,Math.floor(ms/36e5))+'h';
-  // Prices: call script quotes, dollar amounts said on calls, estimates, booking.
   const prices=[];
   for(const t of tl){
     if(t.price) prices.push({ label:(t.icon==='script'?'Call quote':'Estimate')+(t.who?' · '+t.who:''), v:Math.round(Number(t.price)), at:t.at });
@@ -11077,22 +11087,36 @@ function plStoryHtml(c){
   if(c.booking&&Number(c.booking.price)) prices.push({ label:'Booked', v:Math.round(Number(c.booking.price)), at:c.booking.created_at });
   // Same price twice in a row shows once (owner 2026-09-30).
   for(let i=prices.length-1;i>0;i--) if(prices[i].v===prices[i-1].v) prices.splice(i,1);
-  const vals=[...new Set(prices.map(p=>p.v))];
-  const priceBox=prices.length?`<div style="border:1px solid ${vals.length>1?'#fde68a':'var(--line)'};background:${vals.length>1?'#fffbeb':'#f8fafc'};border-radius:10px;padding:8px 11px;margin:4px 0 10px;font-size:13px;line-height:1.5;">
-    <b>${vals.length>1?'⚠ Prices don\'t match':'Price quoted'}</b><br>${prices.map(p=>`${esc(p.label)}: <b>$${p.v}</b> <span style="color:var(--mute);font-size:11.5px;">${esc(plWhen(p.at,c.tz))}</span>`).join('<br>')}</div>`:'';
-  const rows=[]; let waitFrom=null;
-  const gap=(from,to,open)=>`<div style="margin:2px 0 2px 26px;padding:5px 9px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;">⏳ ${open?'Still waiting':'Customer waited'} ${hrs(to-from)} for a reply</div>`;
+  // Paid = customer and staff agreed on the price (owner 2026-09-30): no warning.
+  const paid=!!(c.booking&&c.booking.paid_at);
+  const mismatch=!paid&&new Set(prices.map(p=>p.v)).size>1;
+  // Layout (owner 2026-09-30, from his mockup): icon circles on a line, each
+  // event in its own box, date over time on the right.
+  const COL={ phone:['#fde8ec','#e11d48'], missed:['#fde8ec','#e11d48'], callout:['#fde8ec','#e11d48'], text:['#ede9fe','#7c3aed'], auto:['#ede9fe','#7c3aed'],
+    booking:['#e0ecff','#2563eb'], done:['#e0ecff','#2563eb'], paid:['#e0ecff','#2563eb'], estimate:['#eef2f6','#475569'], script:['#fef3c7','#b45309'], audit:['#fef3c7','#b45309'] };
+  const when=iso=>{ const w=plWhen(iso,c.tz), m=w.match(/^(.*?)\s(\d{1,2}:\d\d\s?[AP]M)$/i); return m?`${esc(m[1])}<br>${esc(m[2])}`:esc(w); };
+  const circle=(bg,fg,inner)=>`<div class="ps-ic" style="background:${bg};color:${fg};">${inner}</div>`;
+  const rows=[];
+  if(prices.length) rows.push(`<div class="ps-row">${circle(mismatch?'#fef3c7':'#eef2f6',mismatch?'#b45309':'#475569',mismatch?'⚠':'$')}<div class="ps-box"${mismatch?' style="border-color:#fde68a;background:#fffdf5;"':''}><div class="ps-main"><div class="ps-t">${mismatch?'⚠ Price mismatch':'Price'}</div>${prices.map(p=>`<div class="ps-s">${esc(p.label)}: <b>$${p.v}</b></div>`).join('')}</div><div class="ps-when">${when(prices[0].at)}</div></div></div>`);
+  let waitFrom=null;
+  const gap=(from,to,open)=>`<div class="ps-gap">⏳ ${open?'Still waiting':'Customer waited'} ${hrs(to-from)} for a reply</div>`;
+  const link=(t)=>isText(t)&&c.phone?`<a href="javascript:void(0)" data-pl="tl-text" class="ps-link">Open texts ›</a>`:t.call_id?`<a href="javascript:void(0)" data-pl="tl-call" data-call-id="${esc(t.call_id)}" class="ps-link">Open call ›</a>`:'';
   for(const t of tl){
     const at=Date.parse(t.at);
     if(fromUs(t)&&waitFrom!=null){ if(at-waitFrom>=2*36e5) rows.push(gap(waitFrom,at,false)); waitFrom=null; }
     if(fromCust(t)&&waitFrom==null) waitFrom=at;
-    const tone=PL_TONES.includes(t.tone)?t.tone:'';
-    const who=t.who?`<b style="font-weight:800;">${esc(t.who)}</b> · `:(fromCust(t)?'<b style="font-weight:800;">Customer</b> · ':'');
-    const link=isText(t)&&c.phone?' <a href="javascript:void(0)" data-pl="tl-text" style="color:var(--accent);font-size:12px;font-weight:700;white-space:nowrap;">Open texts ›</a>':t.call_id?` <a href="javascript:void(0)" data-pl="tl-call" data-call-id="${esc(t.call_id)}" style="color:var(--accent);font-size:12px;font-weight:700;white-space:nowrap;">Open call ›</a>`:'';
-    rows.push(`<div class="pl-tl-i ${tone}"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${who}${esc(t.text||'')}${t.summary&&t.summary.length?`<div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${t.summary.map(esc).join(' · ')}</div>`:''}${t.media&&t.msg_id?smsMediaHtml({ id:t.msg_id, media:true },160):''}${plAudio(t)}${link}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`);
+    const [bg,fg]=COL[t.icon]||['#eef2f6','#475569'];
+    const bad=t.tone==='danger';
+    const who=t.who||(fromCust(t)?'Customer':'');
+    rows.push(`<div class="ps-row">${circle(bg,fg,ic(PL_TL_ICON[t.icon]||'')||'•')}<div class="ps-box"><div class="ps-main">
+      <div class="ps-t"${bad?' style="color:#b91c1c;"':t.tone==='mute'?' style="color:#6b7280;font-weight:600;"':''}>${esc(t.text||'')}</div>
+      ${who?`<div class="ps-s">${esc(who)}</div>`:''}
+      ${t.summary&&t.summary.length?`<div class="ps-s">${t.summary.map(esc).join(' · ')}</div>`:''}
+      ${t.media&&t.msg_id?smsMediaHtml({ id:t.msg_id, media:true },160):''}${plAudio(t)}${link(t)}
+    </div><div class="ps-when">${when(t.at)}</div></div></div>`);
   }
   if(waitFrom!=null&&Date.now()-waitFrom>=2*36e5&&!['booked','completed','lost'].includes(c.stage)) rows.push(gap(waitFrom,Date.now(),true));
-  return `<div class="rc-count" style="margin:22px 0 8px;font-size:15px;font-weight:800;">What happened</div>${priceBox}<div class="pl-tl">${rows.join('')}</div>`;
+  return `<div class="rc-count" style="margin:22px 0 10px;font-size:15px;font-weight:800;">What happened</div><div class="ps-list">${rows.join('')}</div>`;
 }
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
