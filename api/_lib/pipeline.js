@@ -305,7 +305,9 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
       endMs: x.atMs + (dur || 0) * 1000, wizard: wizardLinked.has(x.id), rec: !!c.recording_url,
       // Left a voicemail (owner, 2026-09-26): a missed call we recorded, or an
       // answered call the office/auditor marked as voicemail.
-      vm: (c.answered === false && !!c.recording_url) || why === 'marked_voicemail' || why === 'audit_voicemail' });
+      vm: (c.answered === false && !!c.recording_url) || why === 'marked_voicemail' || why === 'audit_voicemail',
+      // Short call summary for the card's story (owner 2026-09-30).
+      summary: c.transcript_summary && Array.isArray(c.transcript_summary.items) ? c.transcript_summary.items.map((i) => String(i && i.text || '')).filter(Boolean).slice(0, 4) : null });
   }
 
   for (const m of raw.messages || []) {
@@ -846,6 +848,7 @@ function timelineFor(card, st, mark, audits) {
         // Owner 2026-09-27: voicemails + recordings playable right on the card.
         if (t.vm && t.why === 'missed') out[out.length - 1].text = `Voicemail left${line}`;
         if (t.rec) { out[out.length - 1].call_id = t.id; out[out.length - 1].rec = true; }
+        if (t.summary && t.summary.length) out[out.length - 1].summary = t.summary;
         break;
       case 'wizard': {
         const r = t.live.resolution;
@@ -853,7 +856,7 @@ function timelineFor(card, st, mark, audits) {
         const how = r === 'booked' ? ' · booked' : r === 'estimate_sent' ? (card.touches.some((x) => x.type === 'estimate' && x.est.sentMs != null) ? ' · estimate sent' : ' · marked estimate sent, but none was sent') : r === 'refused' ? ' · customer declined'
           : r === 'other' ? ' · other outcome' : t.live.step ? ` · stopped at ${t.live.step}` : '';
         const q = t.live.quoted ? ` · quoted ${dollars(t.live.quoted)}` : '';
-        out.push(item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'));
+        out.push({ ...item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'), price: t.live.quoted || null });
         break;
       }
       case 'text_in': out.push({ ...item(t.atMs, 'text', t.body ? `Text: ${clip(t.body, 600)}` : 'Texted a photo', null, 'ok'), msg_id: t.id, media: !t.body }); break;
@@ -881,7 +884,7 @@ function timelineFor(card, st, mark, audits) {
         const amt = e.total ? ` · ${dollars(e.total)}` : '';
         if (t.archivedUnsent) { out.push(item(t.atMs, 'estimate', `${e.source === 'manual' ? 'Estimate saved' : 'Website estimate request'}${e.label ? ' · ' + e.label : ''} · archived, never sent`, null, 'mute')); break; }
         if (e.webRequest) out.push(item(t.atMs, 'estimate', `Website estimate request${e.label ? ' · ' + e.label : ''}`, null, 'danger'));
-        else if (e.sentMs != null) out.push(item(e.sentMs, 'estimate', `Estimate sent${amt}`, null, 'ok'));
+        else if (e.sentMs != null) out.push({ ...item(e.sentMs, 'estimate', `Estimate sent${amt}`, null, 'ok'), price: e.total || null });
         else out.push(item(t.atMs, 'estimate', `Estimate saved, not sent${amt}`, null, 'warn'));
         if (e.bounced) out.push(item(e.sentMs ?? t.atMs, 'estimate', 'Estimate email bounced — wrong address?', null, 'danger'));
         if (e.openedMs) out.push(item(e.openedMs, 'estimate', 'Customer opened the estimate', null, 'ok'));
@@ -1162,7 +1165,7 @@ async function inChunks(values, size, run) {
   return (await Promise.all(chunks.map(run))).flat();
 }
 
-const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_number, forwarded_to, occurred_at, answered, duration_sec, recording_url, status, handled_by, booking_id, resolution, reached_step, quoted_total, inbound_call_id';
+const CALL_COLS = 'id, business_id, kind, source, caller_phone, grasshopper_number, forwarded_to, occurred_at, answered, duration_sec, recording_url, status, handled_by, booking_id, resolution, reached_step, quoted_total, inbound_call_id, transcript_summary';
 const MESSAGE_COLS = 'id, business_id, customer_phone, our_phone, direction, body, sent_by, status, created_at';
 const ESTIMATE_COLS = 'id, business_id, source, status, customer_name, customer_phone, created_at, updated_at, texted_at, emailed_at, contacted_at, approved_at, approved_total, line_items, tax_rate, text_opened_at, email_opened_at, followup_emailed_at, call_id, service_label, email_status';
 const BOOKING_COLS = `id, business_id, customer_id, status, source, scheduled_at, created_at, updated_at, completed_at, paid_at, cancelled_at,
