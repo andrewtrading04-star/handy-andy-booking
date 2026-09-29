@@ -1236,6 +1236,11 @@ export async function pipelineHandler(req, res, db, auth, body) {
     const { data } = await db.from('pipeline_ask_why').select('card_key, answer, created_at, asked_by').eq('for_name', auth.name).is('seen_at', null).limit(50);
     return res.status(200).json({ notes: (data || []).map((n) => ({ card_key: n.card_key, at: n.created_at, by: n.asked_by, ...n.answer })) });
   }
+  // The saved Ask why answer for one card (owner 2026-09-30: it must stay).
+  if (req.method === 'GET' && req.query.why_for) {
+    const { data } = await db.from('pipeline_ask_why').select('answer, created_at, for_name, seen_at').eq('card_key', String(req.query.why_for)).maybeSingle();
+    return res.status(200).json(data && data.answer ? { ...data.answer, at: data.created_at, for_name: data.for_name, seen_at: data.seen_at } : {});
+  }
   if (req.method === 'GET') {
     const nowMs = Date.now();
     const isOwner = auth.role === 'owner';

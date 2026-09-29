@@ -81,5 +81,5 @@ export async function askWhy(db, auth, body, allowed) {
   const forSlug = forName && card.business ? card.business.slug || null : null;
   await db.from('pipeline_ask_why').upsert({ card_key: key, fingerprint: fp, answer, asked_by: auth.name || auth.role || null, created_at: new Date().toISOString(),
     for_name: forName, for_slug: forSlug, seen_at: forName ? null : new Date().toISOString() });
-  return { status: 200, json: { ...answer, cached: false, at: new Date().toISOString() } };
+  return { status: 200, json: { ...answer, cached: false, at: new Date().toISOString(), for_name: forName, seen_at: null } };
 }

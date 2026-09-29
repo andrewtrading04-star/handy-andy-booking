@@ -10936,6 +10936,7 @@ function plDetailHtml(c){
         <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
         <div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>
         <div style="margin-top:5px;"><b>Next step:</b> ${esc(W_.ans.next_step)}</div>
+        ${role==='owner'&&W_.ans.for_name?`<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#5b21b6;">📨 Sent to ${esc(W_.ans.for_name)} · ${W_.ans.seen_at?'seen '+esc(plWhen(W_.ans.seen_at,c.tz)):'not seen yet'}</div>`:''}
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
     :`<div style="margin:0 0 12px;"><button type="button" class="pl-btn" data-pl="askwhy"${W_&&W_.loading?' disabled':''}>${W_&&W_.loading?'Thinking…':(c.stage==='completed'?'Ask why no review':'Ask why')}</button>${W_&&W_.err?` <span class="danger" style="font-size:12.5px;">${esc(W_.err)}</span>`:''}</div>`);
   return `<div class="pl-detail">${top.join('')}${unBanner}${whyBox}${tabs}<div class="plt-body">${body}</div>
@@ -11147,6 +11148,9 @@ function plClick(e){
     case 'toggle':
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
       if(_plOpen===c.key) plWhySeen(c.key);
+      // Saved answers stay (owner 2026-09-30): load the last one on open.
+      if(_plOpen===c.key && !(_plWhy&&_plWhy.key===c.key)){ const key=c.key;
+        api('pipeline',{ params:{ why_for:key } }).then(a=>{ if(a&&a.holding_back&&_plOpen===key&&!(_plWhy&&_plWhy.key===key)){ _plWhy={ key, ans:a }; paintPipeline(); } }).catch(()=>{}); }
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
     case 'call': plCall(c,b); return;
@@ -15294,12 +15298,26 @@ async function refreshPlWhyBadge(){
     const d=await api('pipeline',{ params:{ why_unseen:'1' } });
     _plWhyUnseen=new Map((d.notes||[]).map(n=>[n.card_key,n]));
     const el=document.getElementById('plWhyBadge'); if(el){ el.textContent=_plWhyUnseen.size; el.style.display=_plWhyUnseen.size?'':'none'; }
+    plWhyPop();
   }catch(_){}
+}
+// A purple "lead for you" pop-up, bottom corner (owner 2026-09-30). Looks
+// different from the yellow staff notes at the top. Stays until opened.
+function plWhyPop(){
+  let box=document.getElementById('plWhyPop');
+  if(!_plWhyUnseen.size){ if(box) box.remove(); return; }
+  if(!box){ box=document.createElement('div'); box.id='plWhyPop';
+    box.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9000;width:min(340px,calc(100vw - 32px));background:#f5f3ff;border:2px solid #7c3aed;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:12px 14px;font-size:13.5px;line-height:1.45;color:#2e1065;max-height:60vh;overflow:auto;';
+    box.addEventListener('click',e=>{ const b=e.target.closest('[data-whykey]'); if(!b) return;
+      _plOpen=b.dataset.whykey; _plTab='ov'; plWhySeen(_plOpen); box.remove(); navTo('pipeline'); });
+    document.body.appendChild(box); }
+  box.innerHTML=`<div style="font-weight:800;margin-bottom:6px;">📌 ${_plWhyUnseen.size===1?'A lead needs you':_plWhyUnseen.size+' leads need you'}</div>`+[..._plWhyUnseen.values()].map(n=>
+    `<div style="border-top:1px solid #ddd6fe;padding:7px 0;"><div><b>Next step:</b> ${esc(n.next_step||'')}</div><button type="button" data-whykey="${esc(n.card_key)}" style="margin-top:6px;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;">Open the card</button></div>`).join('');
 }
 function plWhySeen(key){
   const n=_plWhyUnseen.get(key); if(!n) return;
   _plWhy={ key, ans:{ holding_back:n.holding_back, what_went_wrong:n.what_went_wrong, next_step:n.next_step, at:n.at } };
-  _plWhyUnseen.delete(key);
+  _plWhyUnseen.delete(key); plWhyPop();
   const el=document.getElementById('plWhyBadge'); if(el){ el.textContent=_plWhyUnseen.size; el.style.display=_plWhyUnseen.size?'':'none'; }
   api('pipeline',{ method:'POST', body:{ op:'why_seen', card_key:key } }).catch(()=>{});
 }
