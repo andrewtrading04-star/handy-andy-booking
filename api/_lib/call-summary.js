@@ -15,9 +15,9 @@ const SCHEMA = {
 };
 const SYSTEM = `Summarize a phone call between our office ("Staff:") and a customer ("Customer:") for a TV mounting / handyman company.
 Return 2-5 bullets, each under 12 words, only facts in the transcript:
-- job: what they want (TV size, soundbar, dismount, etc.)
+- job: what they want (TV size, soundbar, dismount, etc.). If the customer sent or will send a photo, say only that ("Customer sent a photo") -- skip receipts, wall details and other small stuff.
 - place: city / zip
-- price: prices quoted and any change (e.g. "Quoted $204, dropped to $174 (saw $75 online)")
+- price: the TOTAL price we quoted, and any change (e.g. "Quoted $339 total", "Quoted $204, dropped to $174"). Never list single fees or add-ons -- only the total.
 - booked or not_booked: the outcome (e.g. "Not booked, will call back")
 - other: anything else important
 Skip kinds that are not in the call. The transcript is machine-made; fix obvious mishearings ("1 2nd" in a price is a pause).`;

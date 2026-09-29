@@ -530,7 +530,7 @@
   .cv .ch-hist-h{color:var(--ink)!important;}
   .cv-rec>div{background:#fff!important;border:0!important;padding:0!important;} .cv-rec>div>div{color:var(--ink)!important;}
   .tx-t{display:block;font-size:10.5px;font-weight:700;opacity:.65;margin-bottom:2px;}
-  .tx-wrap{margin-top:8px;} .tx-sum{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13.5px;line-height:1.6;}
+  .tx-wrap{margin-top:8px;} .tx-sum{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13.5px;line-height:1.6;color:#374151;}
   .tx-sum-i{display:flex;gap:7px;} .tx-sum-i span{flex:none;width:18px;text-align:center;} .tx-no{color:#b91c1c;font-weight:600;} .tx-yes{color:#15803d;font-weight:600;}
   .tx-full summary{cursor:pointer;color:#2563eb;font-size:13px;font-weight:600;margin-top:7px;list-style:none;} .tx-full summary::-webkit-details-marker{display:none;}
   .tx-full summary::before{content:'▸ ';} .tx-full[open] summary::before{content:'▾ ';}
@@ -13774,7 +13774,7 @@ function callDuration(sec){
 // disappears.
 function shortTrackingLabel(label){
   if(!label) return '';
-  const stripped=label.replace(/^please be aware\.?\s*this call is from\s*/i,'').replace(/\.\s*$/,'').trim();
+  const stripped=label.replace(/^(please be aware\.?\s*)?this call is from\s*/i,'').replace(/\s+line$/i,'').replace(/\.\s*$/,'').trim();
   return stripped || label;
 }
 // Groups a flat list of call rows into market -> number -> calls, for the
@@ -13874,7 +13874,9 @@ function callHaveBoxes(g){
 // Transcript view (owner, 2026-09-25: "3 with bubbles inside"): a short AI
 // summary on top, the full call folded underneath as chat bubbles (customer
 // left, staff right). Voicemails / old plain transcripts show as before.
-const TXSUM_ICON={job:'📺',place:'📍',price:'💲',booked:'✅',not_booked:'❌',other:'•'};
+const TXSUM_ICON={job:'📺',place:'📍',price:'💲',booked:'✅',not_booked:'•',other:'•'};
+// Brand name as colored text (owner 2026-09-30): orange Handy Andy, blue Dom's.
+const BRAND_TEXT={ 'handy-andy':'#EA580C', doms:'#2563EB' };
 // The AI summary only hears the call ("quote to be sent"). Check the CRM for
 // what actually happened after it (owner, 2026-09-26).
 const TX_QUOTE_LATER=/\b(quote|estimate)\b[^.]*\b(to be|will|later|send|sent over|text)/i;
@@ -13884,7 +13886,7 @@ function txBrief(r){
   const it=(r&&r.transcript_summary&&Array.isArray(r.transcript_summary.items))?r.transcript_summary.items:[];
   const pick=k=>(it.find(i=>i.kind===k)||{}).text;
   const parts=[pick('job'), pick('booked')||pick('not_booked')].filter(Boolean);
-  return parts.length?`<div style="font-size:12.5px;color:var(--ink-2);margin-top:6px;line-height:1.4;">${esc(parts.join(' · '))}</div>`:'';
+  return parts.length?`<div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.45;">${esc(parts.join(' · '))}</div>`:'';
 }
 // "ZIP 80134" -> "Denver (80134)" (owner 2026-09-28): metro from the zip.
 function zipMetro(z){
@@ -13910,7 +13912,8 @@ function txSumHtml(sum, r){
   } else if(promised && r){
     items.push({ kind:'quote_no', text:'No quote sent yet' });
   }
-  return items.map(i=>`<div class="tx-sum-i${i.kind==='not_booked'||i.kind==='quote_no'?' tx-no':i.kind==='booked'||i.kind==='quote_ok'?' tx-yes':''}"><span>${i.kind==='quote_ok'?'✅':i.kind==='quote_no'?'⚠️':TXSUM_ICON[i.kind]||'•'}</span>${esc(i.text)}</div>`).join('');
+  // Red only for a broken promise (owner 2026-09-30); "not booked" is plain.
+  return items.map(i=>`<div class="tx-sum-i${i.kind==='quote_no'?' tx-no':i.kind==='booked'||i.kind==='quote_ok'?' tx-yes':''}"><span>${i.kind==='quote_ok'?'✅':i.kind==='quote_no'?'⚠️':TXSUM_ICON[i.kind]||'•'}</span>${esc(i.text)}</div>`).join('');
 }
 function txView(r){
   const t=String(r.transcript||'');
@@ -13934,12 +13937,13 @@ function txFillSums(){
 // A compact row for the older calls folded under the newest one.
 function callEarlierRow(r){
   const tz=r.tracking_label?shortTrackingLabel(r.tracking_label):'';
-  const line=[r.business?.name, tz?`${tz} line`:null].filter(Boolean).map(esc).join(' · ');
+  const line=esc(tz||'');
+  const bc=BRAND_TEXT[r.business&&r.business.slug]||'#374151';
   const audio=r.recording_url
     ? `<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>${txBrief(r)}`:'';
   const tx=r.transcript?txView(r):'';
-  return `<div class="cg-earlier"><div class="cg-top"><span>${r.business&&r.business.name?`<b style="background:#111418;color:#fff;border-radius:6px;padding:1px 7px;margin-right:6px;">${esc(r.business.name)}</b>`:''}${esc(callWhen(r))}</span><span>${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
-    <div class="rc-meta" style="margin-top:2px;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
+  return `<div class="cg-earlier"><div class="cg-top"><span>${r.business&&r.business.name?`<b style="color:${bc};margin-right:8px;">${esc(r.business.name)}</b>`:''}<span style="color:#374151;font-weight:600;">${esc(callWhen(r))}</span></span><span style="color:#374151;">${esc(callOutcome(r))}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}</span></div>
+    <div class="rc-meta" style="margin-top:2px;color:#4b5563;">${line}${r.blocked?' · <b style="color:#b91c1c;">blocked attempt</b>':''}</div>${audio}${tx}</div>`;
 }
 // What this caller has done with us before (owner, 2026-09-24): jobs and
 // estimates matched on their phone number (api/admin.js calls -> history).
