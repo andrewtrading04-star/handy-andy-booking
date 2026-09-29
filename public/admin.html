@@ -11052,6 +11052,8 @@ function plStoryHtml(c){
     else if(t.summary) for(const s of t.summary){ const m=String(s).match(/\$\s?(\d{2,5})/); if(m){ prices.push({ label:'Said on call'+(t.who?' · '+t.who:''), v:Number(m[1]), at:t.at }); break; } }
   }
   if(c.booking&&Number(c.booking.price)) prices.push({ label:'Booked', v:Math.round(Number(c.booking.price)), at:c.booking.created_at });
+  // Same price twice in a row shows once (owner 2026-09-30).
+  for(let i=prices.length-1;i>0;i--) if(prices[i].v===prices[i-1].v) prices.splice(i,1);
   const vals=[...new Set(prices.map(p=>p.v))];
   const priceBox=prices.length?`<div style="border:1px solid ${vals.length>1?'#fde68a':'var(--line)'};background:${vals.length>1?'#fffbeb':'#f8fafc'};border-radius:10px;padding:8px 11px;margin:4px 0 10px;font-size:13px;line-height:1.5;">
     <b>${vals.length>1?'⚠ Prices don\'t match':'Price quoted'}</b><br>${prices.map(p=>`${esc(p.label)}: <b>$${p.v}</b> <span style="color:var(--mute);font-size:11.5px;">${esc(plWhen(p.at,c.tz))}</span>`).join('<br>')}</div>`:'';
