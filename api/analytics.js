@@ -7,6 +7,7 @@ import { demoMode } from './_lib/demo.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
 import { pushRing } from './_lib/ring-push.js';
+import { isTollFree } from './_lib/blocked.js';
 
 // Screen pop payload: what the secretary's CRM needs to draw the card at once.
 function ringPayload(line, from, sid) {
@@ -535,6 +536,7 @@ async function isSilentNumber(db, phone) {
 // anyone (owner, 2026-09-18: "if someone calls and doesn't press 1 ... that
 // shouldn't even be tracked" — the row itself, not just its status).
 async function logCallRow(db, { line, from, to, sid, blocked }) {
+  if (isTollFree(from)) return;   // toll-free = spam, never logged (owner 2026-09-30)
   let business_id = null;
   if (line && line.business_slug) {
     const { data: biz } = await db.from('businesses').select('id').eq('slug', line.business_slug).maybeSingle();
@@ -617,7 +619,7 @@ async function handleVoiceInbound(req, res) {
     // logging throws the call must still connect. A customer reaching a human
     // matters more than the analytics row.
     // No gate on this line: it rings right after this, so pop the screen now.
-    const dest = !blocked && line && !line.ai_bot_enabled ? destinationFor(line) : null;
+    const dest = !blocked && line && !line.ai_bot_enabled && !isTollFree(from) ? destinationFor(line) : null;
     await Promise.all([logCallRow(db, { line, from, to, sid, blocked }), dest ? pushRing(dest, ringPayload(line, from, sid)) : null]);
   } catch (e) {
     console.error('[voice_inbound] log failed:', e.message);
@@ -680,7 +682,7 @@ async function handleVoiceGather(req, res) {
   // Silent-number test calls still skip the row, same as the non-gated path.
   try {
     // Passed the gate: the handset rings next. Log + screen pop together.
-    const dest = line ? destinationFor(line) : null;
+    const dest = line && !isTollFree(from) ? destinationFor(line) : null;
     await Promise.all([
       (async () => { if (!(await isSilentNumber(db, from))) await logCallRow(db, { line, from, to, sid, blocked: false }); })(),
       dest ? pushRing(dest, ringPayload(line, from, sid)) : null,
@@ -1760,6 +1762,7 @@ async function handleSmsInbound(req, res) {
   if (!params) return;
   const from = tenDigits(params.From);
   const to = tenDigits(params.To);
+  if (isTollFree(from)) return xml(res, '<Response/>');   // toll-free = spam: not stored, not relayed
   const body = (params.Body || '').toString().trim();
   let line = null;
   let blocked = false;

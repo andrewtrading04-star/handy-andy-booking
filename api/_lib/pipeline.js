@@ -195,7 +195,7 @@ export function makeContext(raw) {
   for (const r of raw.silent || []) { const p = phone10(r.phone); if (p) excluded.add(p); }
   for (const r of raw.blocked || []) { const p = phone10(r.phone); if (p) excluded.add(p); }
   const slugOf = (row) => (row && row.business && row.business.slug) || (row && bizById.get(row.business_id) && bizById.get(row.business_id).slug) || null;
-  const isExcluded = (p) => !p || excluded.has(p) || REPEATED.test(p);
+  const isExcluded = (p) => !p || excluded.has(p) || REPEATED.test(p) || /^(800|833|844|855|866|877|888)/.test(p);   // toll-free = spam (owner 2026-09-30)
   return { bizById, bizBySlug, lines, handsetName, handsetsOf, slugOf, isExcluded };
 }
 

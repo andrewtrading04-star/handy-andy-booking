@@ -9,6 +9,14 @@
 // never be turned away because of a database hiccup.
 import { serviceClient } from './supabase.js';
 
+// Owner rule 2026-09-30: a TOLL-FREE caller/texter (800 833 844 855 866 877
+// 888) is spam -- never logged anywhere, never on the Pipeline.
+const TOLL_FREE = new Set(['800', '833', '844', '855', '866', '877', '888']);
+export function isTollFree(raw) {
+  const d = String(raw || '').replace(/\D/g, '').slice(-10);
+  return d.length === 10 && TOLL_FREE.has(d.slice(0, 3));
+}
+
 export async function isBlockedPhone(raw) {
   try {
     const d = String(raw || '').replace(/\D/g, '').slice(-10);

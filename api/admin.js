@@ -561,6 +561,24 @@ export default async function handler(req, res) {
       case 'estimates':         return await estimates(req, res, db, auth);
       case 'ring_setup':        return await ringSetup(req, res, db, auth);
       case 'ring_card':         return await ringCard(req, res, db, auth);
+      case 'contact_history': {
+        // Every call and text with one phone number (owner 2026-09-30: the job
+        // ticket showed none of it). Newest first, last 120 days.
+        const ph = String(req.query.phone || '').replace(/\D/g, '').slice(-10);
+        if (ph.length !== 10) return res.status(200).json({ items: [] });
+        const since = new Date(Date.now() - 120 * 86400000).toISOString();
+        const [cs, ms] = await Promise.all([
+          db.from('calls').select('id, occurred_at, kind, answered, duration_sec, handled_by, transcript_summary, resolution, recording_url, tracking_label').eq('caller_phone', ph).in('kind', ['inbound', 'live']).gte('occurred_at', since).order('occurred_at', { ascending: false }).limit(40),
+          db.from('messages').select('created_at, direction, sent_by, body').ilike('customer_phone', '%' + ph).gte('created_at', since).order('created_at', { ascending: false }).limit(80),
+        ]);
+        const items = [];
+        for (const c of cs.data || []) items.push({ at: c.occurred_at, type: c.kind === 'live' ? 'script' : (c.answered === false ? 'missed' : 'call'), by: c.handled_by && !/^(answered|blocked number)$/i.test(c.handled_by) ? c.handled_by : null,
+          secs: c.duration_sec, line: c.tracking_label ? String(c.tracking_label).replace(/^This call is from\s*/i, '').replace(/\.$/, '') : null, outcome: c.resolution || null,
+          summary: c.transcript_summary && Array.isArray(c.transcript_summary.items) ? c.transcript_summary.items.map((i) => i.text).slice(0, 4) : null, call_id: c.recording_url ? c.id : null });
+        for (const m of ms.data || []) items.push({ at: m.created_at, type: m.direction === 'in' ? 'text_in' : 'text_out', by: m.direction === 'in' ? null : m.sent_by, body: String(m.body || '').slice(0, 500) });
+        items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+        return res.status(200).json({ items });
+      }
       case 'estimate_note_add': {
         if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
         let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }

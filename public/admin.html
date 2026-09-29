@@ -4639,7 +4639,34 @@ function bkMapHtml(b){
   return `<img class="bk-map" alt="" loading="lazy" src="${url}" onerror="this.remove()">`;
 }
 
+// Calls + texts with this customer, on the job ticket (owner 2026-09-30).
+async function bkLoadHistory(b){
+  const box=document.getElementById('bkHistory'); if(!box) return;
+  const ph=String(b.customer?.phone||'').replace(/\D/g,'').slice(-10);
+  if(ph.length!==10){ box.remove(); return; }
+  try{
+    const d=await api('contact_history',{ params:{ phone:ph } });
+    const items=d.items||[];
+    const tz=(current&&current.timezone)||'America/Denver';
+    const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:tz,weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    const row=x=>{
+      const icon=x.type==='missed'?'📵':x.type==='call'?'📞':x.type==='script'?'📝':'💬';
+      const head=x.type==='text_in'?'Customer texted':x.type==='text_out'?`We texted${x.by&&x.by!=='automated'?' · '+esc(x.by):x.by==='automated'?' · automated':''}`
+        :x.type==='script'?`Call script${x.by?' · '+esc(x.by):''}${x.outcome?' · '+esc(String(x.outcome).replace(/_/g,' ')):''}`
+        :x.type==='missed'?`Missed call${x.line?' · '+esc(x.line):''}`:`Call${x.secs?' · '+Math.max(1,Math.round(x.secs/60))+' min':''}${x.line?' · '+esc(x.line):''}${x.by?' · '+esc(x.by):''}`;
+      return `<div style="display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line2);"><span style="flex:none;">${icon}</span><div style="flex:1;min-width:0;">
+        <div style="${x.type==='missed'?'color:#b91c1c;':''}">${head}</div>
+        ${x.body?`<div style="white-space:pre-wrap;">${esc(x.body)}</div>`:''}
+        ${x.summary&&x.summary.length?`<div style="color:var(--mute);font-size:12.5px;">${x.summary.map(esc).join(' · ')}</div>`:''}
+        <div style="color:var(--mute);font-size:11.5px;">${esc(W(x.at))}</div></div></div>`;
+    };
+    box.innerHTML=`<div class="bk-d"><div class="bk-dtile">${bkIcon('note')}</div><div style="flex:1;min-width:0;">
+      <span class="bk-dl">Calls &amp; texts (${items.length})</span>
+      <div class="bk-dv" style="font-size:13px;line-height:1.45;">${items.length?items.slice(0,8).map(row).join('')+(items.length>8?`<details><summary style="cursor:pointer;color:var(--accent);margin-top:4px;">Show ${items.length-8} older</summary>${items.slice(8).map(row).join('')}</details>`:''):'<span class="dim">No calls or texts with this number yet.</span>'}</div></div></div>`;
+  }catch(e){ box.innerHTML=''; }
+}
 function openBooking(b){
+  setTimeout(()=>bkLoadHistory(b),60);
   const m=document.getElementById('bkModal');
   const canAssign=!['cancelled','completed','no_show'].includes(b.status);
   const canReopen=b.status==='completed';
@@ -4725,6 +4752,7 @@ function openBooking(b){
         <span class="bk-dl">Tech's estimate notes${en.by?' · '+esc(en.by):''}</span><div class="bk-dv">
         ${row('Customer\'s main goal',en.goal)}${row('Why an estimate / what\'s special',en.why)}${row('Parts needed',en.parts)}
         <div style="margin-top:6px;"><b>Labor price</b> $${esc(Number(en.labor||0).toFixed(2))}</div></div></div></div>`; })()}
+    <div id="bkHistory"></div>
     ${b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>
       <span class="bk-dl">Review</span><div class="bk-dv">${stars(b.review_rating)} ${esc(b.review_text||'')}</div></div></div>`:''}
     ${b.review_token&&!b.review_rating?`<div class="bk-d"><div class="bk-dtile">${bkIcon('star')}</div><div>
