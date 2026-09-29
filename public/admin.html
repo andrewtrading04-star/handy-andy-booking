@@ -10960,7 +10960,11 @@ function plDetailHtml(c){
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
     :`<div style="margin:0 0 12px;"><button type="button" class="pl-btn" data-pl="askwhy"${W_&&W_.loading?' disabled':''}>${W_&&W_.loading?'Thinking…':(c.stage==='completed'?'Ask why no review':'Ask why')}</button>${W_&&W_.err?` <span class="danger" style="font-size:12.5px;">${esc(W_.err)}</span>`:''}</div>`);
   const bizHead=c.business&&c.business.name?`<div style="text-align:center;font-weight:800;font-size:17px;margin:0 0 10px;color:${BRAND_TEXT[c.business.slug]||'#374151'};">${esc(c.business.name)}</div>`:'';
-  return `<div class="pl-detail">${top.join('')}${unBanner}${bizHead}${whyBox}${tabs}<div class="plt-body">${body}</div>
+  // OK-to-call banner, same rule as Review Calls (owner 2026-09-30).
+  const tzArea={'America/Denver':'Denver','America/Chicago':'Texas','America/Los_Angeles':'Los Angeles','America/Phoenix':'Phoenix'}[c.tz]||'their area';
+  const tb=rcCallBand(c.tz);
+  const timeBand=c.phone?`<div class="rc-timeband ${tb.band}" data-rc-tzcard="${esc(c.tz||'')}" data-rc-area="${esc(tzArea)}" style="margin:0 0 10px;text-align:center;">${rcTimeBandLabel(tb.band,tb.hhmm,tzArea)}</div>`:'';
+  return `<div class="pl-detail">${top.join('')}${unBanner}${bizHead}${timeBand}${whyBox}${tabs}<div class="plt-body">${body}</div>
   </div>`;
 }
 // Owner only (the server also leaves `audit` out for secretaries). Score is
