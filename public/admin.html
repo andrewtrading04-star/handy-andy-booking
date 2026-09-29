@@ -10934,13 +10934,13 @@ function plDetailHtml(c){
     ? `${role==='owner'&&c.audit?plAuditHtml(c.audit):''}${plTimelineHtml(c)||'<div class="plv-none">No history yet.</div>'}`
     : tab==='more'
     ? `${moreBtns.length?`<div class="pl-acts">${moreBtns.join('')}</div>`:'<div class="plv-none">Nothing else to do here.</div>'}`
-    : `<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+    : `${c.stage==='completed'?plReviewHtml(c):`<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`}
        ${_plEstOpen&&e.id?`<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;">
          <div style="font-weight:800;margin-bottom:6px;">${esc(e.label||'Estimate')}${e.sent_at?` <span style="color:var(--mute);font-weight:600;">· sent ${esc(plWhen(e.sent_at,c.tz))}${e.opened?' · opened':' · not opened'}</span>`:''}</div>
          ${(e.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px solid var(--line2);"><span>${esc(it.name)}${it.qty>1?' × '+it.qty:''}</span><span>${plMoney(it.qty*it.price)||'$0'}</span></div>`).join('')||'<div style="color:var(--mute);">No line items.</div>'}
          ${plMoney(e.total)?`<div style="display:flex;justify-content:space-between;font-weight:800;padding-top:5px;border-top:1px solid var(--line);"><span>Total</span><span>${plMoney(e.total)}</span></div>`:''}
        </div>`:''}
-       ${c.stage==='completed'?plReviewHtml(c):`<div class="plt-steps">${stepHtml}</div>`}
+       ${c.stage==='completed'?'':`<div class="plt-steps">${stepHtml}</div>`}
        ${plStoryHtml(c)}
        ${plNotesHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}
@@ -11020,15 +11020,13 @@ function plReviewHtml(c){
   const r=c.review||{}, W=iso=>iso?esc(plWhen(iso,c.tz)):'';
   const row=(label,on,detail)=>`<div class="plt-step${on?' on':''}"><span class="plt-dot">${on?'✓':''}</span><span class="plt-lab">${label}${detail?`<small>${detail}</small>`:''}</span></div>`;
   const st=x=>x?` · ${esc(x)}`:'';
-  return `<div class="plt-steps">
-    ${row('Job completed', !!r.completed_at, W(r.completed_at))}
-    ${row('Review text sent', !!r.sms_sent, r.sms_sent?W(r.sms_sent)+st(r.sms_status):'Not sent')}
-    ${row('Review text delivered', !!r.sms_delivered, r.sms_delivered?W(r.sms_delivered):'')}
-    ${row('Review email sent', !!r.email_sent, r.email_sent?W(r.email_sent)+(r.email_count>1?` · sent ${r.email_count} times`:'')+st(r.email_status):'Not sent')}
-    ${row('Review email delivered', !!r.email_delivered, r.email_delivered?W(r.email_delivered):'')}
-    ${row('Customer opened the review link', !!(r.page_opened||r.sms_clicked||r.email_clicked), W(r.page_opened||r.sms_clicked||r.email_clicked))}
-    ${row('Review call', !!r.call_status, r.call_status?esc(r.call_status)+(r.call_by?' · '+esc(r.call_by):'')+' · '+W(r.call_at):'Not called yet')}
-    ${row('Review left', false, 'Waiting')}
+  // Owner 2026-09-30: two simple boxes. No review from the text/email yet ->
+  // call them once. A logged call takes the card off this list.
+  const sent=[r.sms_sent?'Text':'', r.email_sent?'Email':''].filter(Boolean).join(' + ');
+  const opened=!!(r.page_opened||r.sms_clicked||r.email_clicked);
+  return `<div class="plt-info">
+    <div><span>Review request</span><b>${sent?esc(sent)+' sent · '+(opened?'opened':'not opened'):'Not sent'}</b></div>
+    <div><span>Call for review</span><b>${r.call_status?'Called'+(r.call_by?' by '+esc(r.call_by):'')+' · '+W(r.call_at):'<button type="button" data-pl="call" style="font:inherit;font-size:13px;font-weight:800;padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111418;cursor:pointer;">Call for a review</button>'}</b></div>
   </div>
   ${plFollowUpBanner(c)}
   <div class="pl-acts" style="margin-bottom:12px;">

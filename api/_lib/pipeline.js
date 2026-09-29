@@ -1098,7 +1098,8 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
   // reviewed) means nobody chases this customer again -- off "Needs review collection".
   for (let i = shaped.length - 1; i >= 0; i--) {
     const c = shaped[i];
-    if (c.stage === 'completed' && c.review && ['voicemail', 'declined', 'do_not_contact', 'reviewed'].includes(c.review.call_status)) shaped.splice(i, 1);
+    // Owner 2026-09-30: ANY review call logged = off the list (never called twice).
+    if (c.stage === 'completed' && c.review && c.review.call_status) shaped.splice(i, 1);
   }
   if (opts.legacyBoard) for (const c of shaped) if (c.stage === 'completed') c.stage = 'booked';
   const notesBy = new Map();
