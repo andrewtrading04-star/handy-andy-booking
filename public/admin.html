@@ -3345,7 +3345,7 @@ function enterApp(){
   // Availability, Technicians, Customers and Photos move under their own Other tab.
   document.body.classList.toggle('sec-nav', role==='secretary');
   // Pipeline for secretaries, one at a time (owner 2026-09-27: Heather first).
-  document.body.classList.toggle('pl-on', role==='secretary' && ['Heather'].includes(userName));
+  document.body.classList.toggle('pl-on', role==='secretary');
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
   renderSwitcher();
@@ -10922,7 +10922,7 @@ function plDetailHtml(c){
     ['Handled by', c.secretary?esc(c.secretary):'—'],
   ];
   info.splice(0,info.length);
-  info.push(['Estimate sent', e.bounced?'<span class="danger">Email BOUNCED — check the address on the call</span>':e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'}</button> · ${e.opened?'Viewed':'Not viewed'}`:(e.id?'Saved, not sent':'No')]);
+  info.push(['Estimate sent', e.bounced?'<span class="danger">Email BOUNCED — check the address on the call</span>':e.sent_at?`<button type="button" data-pl="estview" style="font:inherit;font-size:13px;font-weight:800;padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111418;cursor:pointer;margin:2px 6px 0 0;">${_plEstOpen?'Hide':'Open'} estimate ${plMoney(e.total)||''}</button>${e.opened?'Viewed':'Not viewed'}`:(e.id?'Saved, not sent':'No')]);
   if(e.sent_at){
     const left=Date.parse(e.sent_at)+3*36e5-Date.now();
     const lt=left>=36e5?`${Math.floor(left/36e5)}h ${Math.round(left%36e5/6e4)}m`:`${Math.max(1,Math.round(left/6e4))} min`;
@@ -11090,7 +11090,7 @@ function plStoryHtml(c){
     rows.push(`<div class="pl-tl-i ${tone}"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${who}${esc(t.text||'')}${t.summary&&t.summary.length?`<div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${t.summary.map(esc).join(' · ')}</div>`:''}${t.media&&t.msg_id?smsMediaHtml({ id:t.msg_id, media:true },160):''}${plAudio(t)}${link}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`);
   }
   if(waitFrom!=null&&Date.now()-waitFrom>=2*36e5&&!['booked','completed','lost'].includes(c.stage)) rows.push(gap(waitFrom,Date.now(),true));
-  return `<div class="rc-count" style="margin:4px 0 6px;">What happened</div>${priceBox}<div class="pl-tl">${rows.join('')}</div>`;
+  return `<div class="rc-count" style="margin:22px 0 8px;font-size:15px;font-weight:800;">What happened</div>${priceBox}<div class="pl-tl">${rows.join('')}</div>`;
 }
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));

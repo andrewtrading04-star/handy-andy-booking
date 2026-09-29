@@ -37,6 +37,9 @@
 // rule with fixtures. Only the loaders and pipelineHandler touch Supabase.
 import { paymentState } from './payroll.js';
 import { allowedSlugsFor, mayUseBusiness, SECRETARY_EXTRA_BUSINESSES } from './staff-access.js';
+// Pipeline = own business + its family only, never access-only brands
+// (owner 2026-09-30: Dom's staff see Dom's family, not Handy Andy).
+const pipelineSlugsFor = (auth) => { const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
 import { localDayStartUTC } from './time.js';
 
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
@@ -1250,7 +1253,7 @@ export async function pipelineHandler(req, res, db, auth, body) {
     const raw = await loadPipelineRaw(db, { nowMs, withAudits: isOwner });
     raw.history = await loadHistory(db, phonesSince(raw, rangeStartMs(range, nowMs)));
     return res.status(200).json(buildPipeline(raw, nowMs, {
-      isOwner, allowed: allowedSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(), legacyBoard: req.query.board === 'legacy',
+      isOwner, allowed: pipelineSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(), legacyBoard: req.query.board === 'legacy',
     }));
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -1269,7 +1272,7 @@ export async function pipelineHandler(req, res, db, auth, body) {
   }
   if (body && body.op === 'ask_why') {
     const { askWhy } = await import('./pipeline-ask.js');
-    const r = await askWhy(db, auth, body, allowedSlugsFor(auth));
+    const r = await askWhy(db, auth, body, pipelineSlugsFor(auth));
     return res.status(r.status).json(r.json);
   }
   try {
@@ -1314,7 +1317,7 @@ async function pipelineOp(res, db, auth, body) {
   const { cards, ctx } = computeCards(raw, nowMs);
   const card = cards.find((c) => c.key === key);
   if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
-  if (!cardVisible(card, allowedSlugsFor(auth))) return res.status(403).json({ error: 'Forbidden for this business' });
+  if (!cardVisible(card, pipelineSlugsFor(auth))) return res.status(403).json({ error: 'Forbidden for this business' });
   const biz = card.shownSlug && ctx.bizBySlug.get(card.shownSlug);
   const bizId = biz ? biz.id : null;
 
@@ -1414,7 +1417,7 @@ export async function pipelineCallTarget(db, auth, rawPhone, cardSlugIn) {
   // use is ignored (the proof below is scoped to her businesses anyway).
   const bizSlug = cardSlugIn && mayUseBusiness(auth, cardSlugIn) ? cardSlugIn : null;
   const fam = bizSlug ? familyOf(bizSlug) : null;
-  const allowed = allowedSlugsFor(auth);
+  const allowed = pipelineSlugsFor(auth);
   const [bizR, linesR] = await Promise.all([
     db.from('businesses').select('id, slug'),
     db.from('tracking_numbers').select('phone, business_slug, active, forward_to, created_at').order('created_at'),
