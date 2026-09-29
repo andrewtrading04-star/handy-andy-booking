@@ -14686,8 +14686,22 @@ function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN);
 function smsMediaHtml(m, max){
   if(!m || !m.id || !(Number(m.media_count)>0 || (m.direction==='in' && !m.body) || m.media)) return '';
   const src=`${API}?action=sms_media&id=${encodeURIComponent(m.id)}&i=0&token=${encodeURIComponent(token)}`;
-  return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="Photo from the customer" loading="lazy" onerror="this.parentNode.remove()" style="display:block;max-width:${max||220}px;max-height:${max||220}px;border-radius:10px;margin-top:4px;"></a>`;
+  return `<a href="${src}" data-lightbox="1"><img src="${src}" alt="Photo from the customer" loading="lazy" onerror="this.parentNode.remove()" style="display:block;max-width:${max||220}px;max-height:${max||220}px;border-radius:10px;margin-top:4px;"></a>`;
 }
+// Photos open big on this page; tap anywhere outside to close (owner 2026-09-30).
+document.addEventListener('click',e=>{
+  const a=e.target&&e.target.closest&&e.target.closest('a[data-lightbox]');
+  if(!a) return;
+  e.preventDefault(); e.stopPropagation();
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out;';
+  ov.innerHTML=`<img src="${a.getAttribute('href')}" alt="Photo" style="max-width:100%;max-height:100%;border-radius:10px;">`;
+  const close=()=>{ ov.remove(); document.removeEventListener('keydown',esc_); };
+  const esc_=k=>{ if(k.key==='Escape') close(); };
+  ov.addEventListener('click',ev=>{ ev.stopPropagation(); close(); });
+  document.addEventListener('keydown',esc_);
+  document.body.appendChild(ov);
+},true);
 function openCallLink(id){
   if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
   _callFocusId=id; _callsPeriod='7d'; _callsView='all'; callHubTab='log'; navTo('callhub');
