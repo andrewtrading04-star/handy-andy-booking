@@ -13615,15 +13615,20 @@ let _callsPeriod='today';
 // 'missed' (calls no human picked up), or 'callback' (the open queue).
 let _callsView='all';
 let _callsPeriodData={open:[],handled:[]};
+// Owner 2026-09-30: days are the US WORK day (Denver midnight to midnight),
+// never the viewer's clock -- at 1 AM in Bangkok "today" was one hour long.
+function workDayStart(back){
+  const tz='America/Denver', now=new Date();
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).map(x=>[x.type,x.value]));
+  const guess=Date.UTC(+p.year,+p.month-1,+p.day-back,0,0,0);
+  const off=new Date(new Date(guess).toLocaleString('en-US',{timeZone:tz})).getTime()-new Date(new Date(guess).toLocaleString('en-US',{timeZone:'UTC'})).getTime();
+  return new Date(guess-off);
+}
 function callPeriodRange(period){
   const now=new Date();
-  const startOfDay=d=>{ const x=new Date(d); x.setHours(0,0,0,0); return x; };
-  if(period==='yesterday'){
-    const to=startOfDay(now);
-    return { from:new Date(to.getTime()-86400000).toISOString(), to:to.toISOString() };
-  }
-  if(period==='7d') return { from:new Date(now.getTime()-7*86400000).toISOString(), to:now.toISOString() };
-  return { from:startOfDay(now).toISOString(), to:now.toISOString() };   // today
+  if(period==='yesterday') return { from:workDayStart(1).toISOString(), to:workDayStart(0).toISOString() };
+  if(period==='7d') return { from:workDayStart(7).toISOString(), to:now.toISOString() };   // today + the 7 full days before
+  return { from:workDayStart(0).toISOString(), to:now.toISOString() };   // today, US time
 }
 async function renderCalls(){
   const request=++_callsRequest;
