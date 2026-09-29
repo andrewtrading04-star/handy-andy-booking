@@ -3188,6 +3188,70 @@ document.addEventListener('click', (e)=>{
 });
 document.getElementById('viewAsBackBtn')?.addEventListener('click', backToAdmin);
 
+// ── Screen pop (owner 2026-09-30) ─────────────────────────────────────────────
+// The phone system pushes a signal the instant a call is sent to this person's
+// handset (Supabase Realtime broadcast, api/_lib/ring-push.js). The card shows
+// at once with the number and the line; the history fills in a moment later.
+let _ringClient=null, _ringChans=[], _ringToken=null;
+function ringLoadLib(){
+  if(window.supabase&&window.supabase.createClient) return Promise.resolve();
+  return new Promise((ok,bad)=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js'; s.onload=ok; s.onerror=bad; document.head.appendChild(s); });
+}
+async function ringInit(){
+  if(role==='auditor' || _ringToken===token) return;
+  _ringToken=token;
+  try{
+    const cfg=await api('ring_setup');
+    if(!cfg||!cfg.url||!cfg.key||!(cfg.topics||[]).length) return;
+    await ringLoadLib();
+    _ringChans.forEach(c=>{ try{ c.unsubscribe(); }catch(_){} }); _ringChans=[];
+    _ringClient=_ringClient||window.supabase.createClient(cfg.url,cfg.key,{ auth:{ persistSession:false } });
+    for(const t of cfg.topics){
+      const ch=_ringClient.channel(t).on('broadcast',{ event:'ring' },m=>ringShow(m.payload||{})).subscribe();
+      _ringChans.push(ch);
+    }
+  }catch(e){ console.warn('[ring] not connected:', e&&e.message); }
+}
+function ringShow(p){
+  const ph=String(p.phone||'').replace(/\D/g,'').slice(-10);
+  document.getElementById('ringPop')?.remove();
+  const biz=(businesses||[]).find(b=>b.slug===p.business);
+  const el=document.createElement('div'); el.id='ringPop';
+  el.style.cssText='position:fixed;right:16px;top:16px;z-index:400;width:min(380px,calc(100vw - 32px));background:#fff;color:#111;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.28);border:2px solid #16a34a;font-size:14px;line-height:1.45;overflow:hidden;';
+  el.innerHTML=`<div style="background:#16a34a;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:8px;font-weight:800;">📞 Incoming call${p.line?' · '+esc(String(p.line).replace(/^This call is from\s*/i,'').replace(/\.$/,'')):''}<button type="button" data-ring-x style="margin-left:auto;background:none;border:none;color:#fff;font-size:18px;cursor:pointer;">✕</button></div>
+    <div style="padding:12px 14px;">
+      <div style="font-size:19px;font-weight:800;" data-ring-name>${esc(fmtPhone(ph)||'Unknown number')}</div>
+      <div style="color:#666;" data-ring-sub>${ph?esc(fmtPhone(ph)):''}${biz?' · '+esc(biz.name):''}</div>
+      <div data-ring-info style="margin-top:8px;color:#666;font-size:13px;">Looking up the customer…</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+        <button type="button" class="btn" data-ring-script style="padding:10px;">Start call script</button>
+        <button type="button" class="btn ghost" data-ring-est style="padding:10px;">Build estimate</button>
+      </div>
+      <button type="button" class="btn ghost" data-ring-calls style="margin-top:8px;width:100%;padding:9px;">Open in Calls</button>
+    </div>`;
+  document.body.appendChild(el);
+  const close=()=>el.remove();
+  el.querySelector('[data-ring-x]').onclick=close;
+  // The line's company, always -- never whatever the dashboard happens to show.
+  const useBiz=()=>{ if(p.business && businesses.some(b=>b.slug===p.business) && current?.slug!==p.business) switchToBusiness(p.business); };
+  el.querySelector('[data-ring-script]').onclick=()=>{ useBiz(); close(); openTakeCall({ phone:ph?fmtPhone(ph):'', name:el.dataset.name||'', business:p.business||current?.slug }); };
+  el.querySelector('[data-ring-est]').onclick=()=>{ close(); plBuildEstimate({ business:{ slug:p.business, name:biz?biz.name:'' }, phone:ph, name:el.dataset.name||'', email:el.dataset.email||'' }); };
+  el.querySelector('[data-ring-calls]').onclick=()=>{ close(); navTo('callhub'); };
+  setTimeout(()=>{ if(el.isConnected) el.style.opacity='.92'; },60000);
+  if(!ph) return;
+  api('ring_card',{ params:{ phone:ph } }).then(d=>{
+    if(!el.isConnected) return;
+    if(d.name){ el.dataset.name=d.name; el.querySelector('[data-ring-name]').innerHTML=esc(d.name)+(typeof vipStar==='function'?vipStar(ph):''); }
+    if(d.email) el.dataset.email=d.email;
+    const bits=[];
+    if(d.blocked) bits.push('<b style="color:#b91c1c;">🚫 Blocked number</b>');
+    bits.push(d.jobs?`<b style="color:#15803d;">Returning customer · ${d.jobs} job${d.jobs===1?'':'s'} · $${Math.round(d.spent).toLocaleString()}</b>`:'<b>New caller</b>');
+    if(d.upcoming) bits.push(`Has a job coming up: ${esc(new Date(d.upcoming).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}`);
+    for(const e of d.estimates||[]) bits.push(`📄 Estimate${e.biz?' ('+esc(e.biz)+')':''}: $${Number(e.total||0).toFixed(2)} · ${e.approved?'approved':esc(String(e.status||'').replace('contacted','sent'))}`);
+    if(d.last_call&&d.last_call.items&&d.last_call.items.length) bits.push(`<div style="margin-top:4px;padding:6px 8px;background:#f4f6f9;border-radius:8px;">Last call${d.last_call.by&&d.last_call.by!=='Answered'?' with '+esc(d.last_call.by):''}: ${d.last_call.items.map(esc).join(' · ')}</div>`);
+    el.querySelector('[data-ring-info]').innerHTML=bits.map(b=>b.startsWith('<div')?b:`<div>${b}</div>`).join('');
+  }).catch(()=>{ const i=el.querySelector('[data-ring-info]'); if(i) i.textContent=''; });
+}
 function enterApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -3202,6 +3266,7 @@ function enterApp(){
   // no match, so it falls through to the handy-andy-first sort above.
   current = (scope && scope!=='all' && businesses.find(b=>b.slug===scope)) || businesses[0] || null;
   loadVip();
+  ringInit();
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
   applyIconTheme();

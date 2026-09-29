@@ -6,6 +6,12 @@ import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { isBotUserAgent } from './_lib/bot-filter.js';
 import crypto from 'crypto';
+import { pushRing } from './_lib/ring-push.js';
+
+// Screen pop payload: what the secretary's CRM needs to draw the card at once.
+function ringPayload(line, from, sid) {
+  return { phone: from || null, line: line?.label || null, business: line?.business_slug || null, market: line?.market || null, sid: sid || null, at: Date.now() };
+}
 
 // Delivery-status webhooks (Twilio + Resend) live in THIS file rather than a
 // new api/*.js — Vercel's Hobby plan caps a project at 12 functions and this
@@ -610,7 +616,9 @@ async function handleVoiceInbound(req, res) {
     // Log first, forward second — but the whole block is wrapped, because if
     // logging throws the call must still connect. A customer reaching a human
     // matters more than the analytics row.
-    await logCallRow(db, { line, from, to, sid, blocked });
+    // No gate on this line: it rings right after this, so pop the screen now.
+    const dest = !blocked && line && !line.ai_bot_enabled ? destinationFor(line) : null;
+    await Promise.all([logCallRow(db, { line, from, to, sid, blocked }), dest ? pushRing(dest, ringPayload(line, from, sid)) : null]);
   } catch (e) {
     console.error('[voice_inbound] log failed:', e.message);
   }
@@ -671,7 +679,12 @@ async function handleVoiceGather(req, res) {
   // instead of one stamped before we knew the call would ever be dialed.
   // Silent-number test calls still skip the row, same as the non-gated path.
   try {
-    if (!(await isSilentNumber(db, from))) await logCallRow(db, { line, from, to, sid, blocked: false });
+    // Passed the gate: the handset rings next. Log + screen pop together.
+    const dest = line ? destinationFor(line) : null;
+    await Promise.all([
+      (async () => { if (!(await isSilentNumber(db, from))) await logCallRow(db, { line, from, to, sid, blocked: false }); })(),
+      dest ? pushRing(dest, ringPayload(line, from, sid)) : null,
+    ]);
   } catch (e) {
     console.error('[voice_gather] log failed:', e.message);
   }

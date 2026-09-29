@@ -559,6 +559,8 @@ export default async function handler(req, res) {
       case 'gsc_queries':       return await gscQueries(req, res, db, auth);
       case 'city_pages_analytics': return await cityPagesAnalytics(req, res, db, auth);
       case 'estimates':         return await estimates(req, res, db, auth);
+      case 'ring_setup':        return await ringSetup(req, res, db, auth);
+      case 'ring_card':         return await ringCard(req, res, db, auth);
       case 'estimate_note_add': {
         if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
         let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
@@ -11697,6 +11699,54 @@ async function estimateFollowups(req, res, db, auth) {
   opened.sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at));
   unopened.sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
   return res.status(200).json({ opened, unopened });
+}
+
+// Screen pop (owner 2026-09-30). ring_setup: which handset channels this login
+// listens to + the public Realtime connection details. ring_card: who is
+// calling -- name, past jobs, open estimates, the last call's summary.
+const SCOPE_HANDSET = { 'handy-andy': '7207223653', doms: '3032190118' };
+async function ringSetup(req, res, db, auth) {
+  if (auth.role === 'auditor') return res.status(200).json({ topics: [] });
+  const { ringTopic } = await import('./_lib/ring-push.js');
+  const phones = new Set();
+  try {
+    const { data } = await db.from('staff_users').select('name, phone').eq('active', true);
+    for (const s of data || []) if (s.name === auth.name && s.phone) phones.add(String(s.phone).replace(/\D/g, '').slice(-10));
+  } catch { /* fall through */ }
+  if (auth.role === 'owner') { const o = String(process.env.OWNER_PHONE_NUMBER || '').replace(/\D/g, '').slice(-10); if (o) phones.add(o); }
+  if (!phones.size && SCOPE_HANDSET[auth.scope]) phones.add(SCOPE_HANDSET[auth.scope]);
+  return res.status(200).json({ url: process.env.SUPABASE_URL || null, key: process.env.SUPABASE_ANON_KEY || null, topics: [...phones].map(ringTopic).filter(Boolean) });
+}
+async function ringCard(req, res, db, auth) {
+  const ph = String(req.query.phone || '').replace(/\D/g, '').slice(-10);
+  if (ph.length !== 10) return res.status(200).json({});
+  const out = { phone: ph, name: null, jobs: 0, spent: 0, last_job: null, upcoming: null, estimates: [], last_call: null, blocked: false };
+  const [cust, calls, ests, blk] = await Promise.all([
+    db.from('customers').select('id, name, email').eq('phone', ph).limit(5),
+    db.from('calls').select('occurred_at, kind, transcript_summary, handled_by').eq('caller_phone', ph).not('transcript_summary', 'is', null).order('occurred_at', { ascending: false }).limit(1),
+    db.from('estimates').select('id, service_label, status, created_at, line_items, tax_rate, approved_at, business:businesses ( slug, name )').ilike('customer_phone', '%' + ph).neq('status', 'archived').order('created_at', { ascending: false }).limit(3),
+    db.from('blocked_numbers').select('id').eq('phone', ph).limit(1),
+  ]);
+  out.blocked = !!(blk.data && blk.data.length);
+  const cs = cust.data || [];
+  out.name = (cs.find((c) => c.name && c.name.replace(/\D/g, '') !== ph) || {}).name || null;
+  out.email = (cs.find((c) => c.email) || {}).email || null;
+  if (cs.length) {
+    const { data: bs } = await db.from('bookings').select('scheduled_at, status, price, payment_status').in('customer_id', cs.map((c) => c.id)).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(50);
+    const now = Date.now();
+    for (const b of bs || []) {
+      if (b.status === 'completed') { out.jobs++; out.spent += Number(b.price) || 0; if (!out.last_job) out.last_job = b.scheduled_at; }
+      else if (Date.parse(b.scheduled_at) > now) out.upcoming = b.scheduled_at;
+    }
+  }
+  const c0 = (calls.data || [])[0];
+  if (c0) out.last_call = { at: c0.occurred_at, by: c0.handled_by, items: (c0.transcript_summary.items || []).map((i) => i.text).slice(0, 4) };
+  out.estimates = (ests.data || []).map((e) => {
+    const items = Array.isArray(e.line_items) ? e.line_items : [];
+    const sub = items.reduce((t, it) => t + (Number(it.qty != null ? it.qty : it.quantity) || 1) * (Number(it.unit_price) || 0), 0);
+    return { id: e.id, service: e.service_label, status: e.status, at: e.created_at, approved: !!e.approved_at, biz: e.business && e.business.name, total: Math.round(sub * (1 + (Number(e.tax_rate) || 0)) * 100) / 100 };
+  });
+  return res.status(200).json(out);
 }
 
 // The whole story of one estimate, oldest first (owner 2026-09-29: "I can't
