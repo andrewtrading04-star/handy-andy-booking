@@ -8,7 +8,7 @@ const SCHEMA = {
   properties: {
     items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind', 'text'],
       properties: {
-        kind: { type: 'string', enum: ['job', 'place', 'price', 'booked', 'not_booked', 'other'] },
+        kind: { type: 'string', enum: ['job', 'place', 'price', 'booked', 'not_booked', 'we_promised', 'other'] },
         text: { type: 'string' },
       } } },
   },
@@ -19,6 +19,7 @@ Return 2-5 bullets, each under 12 words, only facts in the transcript:
 - place: city / zip
 - price: the TOTAL price we quoted, and any change (e.g. "Quoted $339 total", "Quoted $204, dropped to $174"). Never list single fees or add-ons -- only the total.
 - booked or not_booked: the outcome (e.g. "Not booked, will call back")
+- we_promised: something OUR STAFF said they would do next (e.g. "We will text a quote", "We will email the estimate", "We will call back tomorrow"). Only staff promises -- never what the customer will do.
 - other: anything else important
 Skip kinds that are not in the call. The transcript is machine-made; fix obvious mishearings ("1 2nd" in a price is a pause).`;
 

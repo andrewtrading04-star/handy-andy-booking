@@ -307,7 +307,8 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
       // answered call the office/auditor marked as voicemail.
       vm: (c.answered === false && !!c.recording_url) || why === 'marked_voicemail' || why === 'audit_voicemail',
       // Short call summary for the card's story (owner 2026-09-30).
-      summary: c.transcript_summary && Array.isArray(c.transcript_summary.items) ? c.transcript_summary.items.map((i) => String(i && i.text || '')).filter(Boolean).slice(0, 4) : null });
+      summary: c.transcript_summary && Array.isArray(c.transcript_summary.items) ? c.transcript_summary.items.map((i) => String(i && i.text || '')).filter(Boolean).slice(0, 4) : null,
+      promise: c.transcript_summary && Array.isArray(c.transcript_summary.items) ? ((c.transcript_summary.items.find((i) => i && i.kind === 'we_promised') || {}).text || null) : null });
   }
 
   for (const m of raw.messages || []) {
@@ -849,6 +850,7 @@ function timelineFor(card, st, mark, audits) {
         if (t.vm && t.why === 'missed') out[out.length - 1].text = `Voicemail left${line}`;
         if (t.rec) { out[out.length - 1].call_id = t.id; out[out.length - 1].rec = true; }
         if (t.summary && t.summary.length) out[out.length - 1].summary = t.summary;
+        if (t.promise) out[out.length - 1].promise = t.promise;
         break;
       case 'wizard': {
         const r = t.live.resolution;

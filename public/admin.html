@@ -611,6 +611,7 @@
   .plv-pop .pl-card.plv-in>.pl-row{display:none;} .plv-pop .pl-card.plv-in .pl-detail{border-top:none;}
   .pl-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
   .pl-card.leak{border:2px solid #dc2626;}
+  .pl-card.owes{background:#fff5f5;border-color:#fca5a5;box-shadow:0 0 0 1px #fecaca,0 0 14px rgba(248,113,113,.45);}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
   .pl-row{display:block;width:100%;background:transparent;border:none;text-align:left;font:inherit;color:var(--ink);padding:11px 14px;min-height:44px;}
   .pl-row:hover{background:#fafbfc;}
@@ -10801,6 +10802,24 @@ function plTileHtml(c){
     ${next.text&&!src.startsWith(next.text)?`<span class="plv-tile-n ${c.leak?'danger':tone}">${esc(next.text)}</span>`:''}
   </button>`;
 }
+// Customer is waiting on US (owner 2026-09-30): light red glow. We missed
+// their call/text, an estimate sits unsent, or staff promised a text, email,
+// quote or callback on a call and nothing went out after (1h grace).
+// Waiting on the customer stays neutral.
+function plOwes(c){
+  if(!c||['booked','completed','lost'].includes(c.stage)) return false;
+  if(c.unanswered) return true;
+  const e=c.estimate||{};
+  if(e.id&&!e.sent_at) return true;
+  const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(Boolean).slice().sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
+  let promiseAt=null;
+  for(const t of tl){
+    const us=t.icon==='callout'||(t.icon==='text'&&/^Text reply/.test(t.text||''))||(t.icon==='estimate'&&/^Estimate sent/.test(t.text||''))||t.icon==='booking';
+    if(us&&promiseAt!=null&&Date.parse(t.at)>promiseAt) promiseAt=null;
+    if(t.promise||(t.summary||[]).some(s=>TX_QUOTE_LATER.test(s))) promiseAt=Date.parse(t.at);
+  }
+  return promiseAt!=null&&Date.now()-promiseAt>36e5;
+}
 function plCardHtml(c){
   const open=_plOpen===c.key, next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
   const returning=!!(c.history && Number(c.history.prior_jobs)>0);
@@ -10810,7 +10829,7 @@ function plCardHtml(c){
     c.opened_at?`<span title="Opened ${esc(plWhen(c.opened_at,c.tz))}">${esc(plAgo(c.opened_at))}</span>`:'',
     businesses.length>1 && c.business && c.business.name ? esc(c.business.name) : '',
   ].filter(Boolean).join(' · ');
-  return `<div class="pl-card${c.leak?' leak':''}${open?' open':''}" data-plkey="${esc(c.key)}">
+  return `<div class="pl-card${c.leak?' leak':''}${plOwes(c)?' owes':''}${open?' open':''}" data-plkey="${esc(c.key)}">
     <button type="button" class="pl-row" data-pl="toggle" aria-expanded="${open}">
       ${_plWhyUnseen.has(c.key)?'<span class="pl-chip" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">New note from Andrew</span>':''}
       <span class="pl-row-top"><span class="pl-name">${vipPre(c.phone)+esc(plTitle(c))}${vipStar(c.phone)}</span>${c.source?`<span class="pl-chip">${esc(c.source)}</span>`:''}${returning?'<span class="pl-chip ret">Returning</span>':''}${amt?`<span class="pl-amt">${amt}</span>`:''}</span>
