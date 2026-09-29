@@ -491,7 +491,11 @@
   body.ro-embed .wrap, body.ro-embed #view{max-width:none !important;width:100% !important;}
   body.ro-embed .wrap{padding:8px !important;}
   body.sec-nav.pl-on #navPipeline{display:flex !important;}
-  .cv-item{flex-direction:row!important;align-items:center;gap:13px!important;padding:14px 14px!important;}
+  .cv-item{flex-direction:row!important;align-items:center;gap:11px!important;padding:9px 12px!important;margin-bottom:7px!important;}
+  .cv-item .cv-mid{gap:1px;}
+  .cv-item[aria-pressed=true]{border-color:var(--cvb,#315ad7)!important;box-shadow:inset 4px 0 var(--cvb,#315ad7),0 6px 16px rgba(32,52,98,.14)!important;}
+  .cv-item[aria-pressed=true] strong{color:var(--cvs,#244cc2)!important;}
+  .ps-in{border:0!important;padding:0!important;margin:0!important;background:none!important;}
   .cv-av{flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
   .cv-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
   .cv-mid>span{font-size:12.5px;color:#536277;line-height:1.4;}
@@ -13750,7 +13754,11 @@ function callPeriodRange(period){
   if(period==='7d') return { from:workDayStart(7).toISOString(), to:now.toISOString() };   // today + the 7 full days before
   return { from:workDayStart(0).toISOString(), to:now.toISOString() };   // today, US time
 }
-async function renderCalls(){
+// Speed (owner 2026-09-30): a poll never starts while the last load is still
+// running -- slow loads used to stack up every 20s and look like a crash.
+let _callsBusy=0, _callsBadgeBusy=false, _callsBadgeAgain=false;
+async function renderCalls(opts){
+  if(opts&&opts.poll&&_callsBusy) return;
   const request=++_callsRequest;
   const view=document.getElementById('view');
   // Only the FIRST load blanks the screen. This runs again every 20s from the
@@ -13776,10 +13784,14 @@ async function renderCalls(){
   if(!firstLoad && [...view.querySelectorAll('audio')].some(a=>!a.paused&&!a.ended)) return;
   try{
     const {from,to}=callPeriodRange(_callsPeriod);
-    const [base, period]=await Promise.all([
-      api('calls',{ params:{ limit:100 }}),
-      api('calls',{ params:{ limit:200, from, to }}),
-    ]);
+    _callsBusy++;
+    let base, period;
+    try{
+      [base, period]=await Promise.all([
+        api('calls',{ params:{ limit:100 }}),
+        api('calls',{ params:{ limit:200, from, to }}),
+      ]);
+    }finally{ _callsBusy--; }
     // Re-check: playback could have started while the fetch was in flight.
     if(!firstLoad && [...view.querySelectorAll('audio')].some(a=>!a.paused&&!a.ended)) return;
     // The user may have navigated away mid-fetch — repainting #view now would
@@ -13898,11 +13910,23 @@ const CV_ICON={
   cal:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>',
 };
 const CV_COLORS=[['#dbeafe','#1d4ed8'],['#fce7f3','#be185d'],['#dcfce7','#15803d'],['#ffedd5','#c2410c'],['#ede9fe','#6d28d9'],['#cffafe','#0e7490']];
+// Call colors (owner 2026-09-30): inbound light blue, outbound green, missed red.
+const CV_DIR={ in:['#e0f2fe','#0369a1','#38bdf8'], out:['#dcfce7','#15803d','#22c55e'], miss:['#fee2e2','#b91c1c','#f87171'] };
+function cvDir(g){
+  const r=g.latest;
+  if(r.answered===false&&r.kind!=='live') return 'miss';
+  const inAt=Date.parse(r.occurred_at)||0;
+  return g.rows.some(x=>(Date.parse(x.called_back_at||'')||0)>inAt)?'out':'in';
+}
+// Earlier calls as the same boxed timeline as the Pipeline card.
+function callEarlierStory(rows){
+  return `<div class="ps-list">${rows.map(r=>{ const [bg,fg]=CV_DIR[r.answered===false&&r.kind!=='live'?'miss':'in'];
+    return `<div class="ps-row"><div class="ps-ic" style="background:${bg};color:${fg};">📞</div><div class="ps-box" style="display:block;">${callEarlierRow(r).replace('class="cg-earlier"','class="cg-earlier ps-in"')}</div></div>`; }).join('')}</div>`;
+}
 function cvAvatar(g,size){
   const r=g.latest, name=r.customer?.name||r.routed_to_name||'';
   const letter=(name.match(/[A-Za-z]/)||['#'])[0].toUpperCase();
-  let h=0; for(const c of String(g.key)) h=(h*31+c.charCodeAt(0))>>>0;
-  const [bg,fg]=CV_COLORS[h%CV_COLORS.length];
+  const [bg,fg]=CV_DIR[cvDir(g)];
   return `<span class="cv-av" style="width:${size}px;height:${size}px;font-size:${Math.round(size*.42)}px;background:${bg};color:${fg};">${esc(letter)}</span>`;
 }
 // The detail-side summary: the three things we may have from this caller, each
@@ -14434,7 +14458,7 @@ function callInboxPhone(groups){
         ${callSplitView(g)||''}
         ${callHaveBoxes(g)}
         ${callSplitView(g)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(r, !g.open, g)}</details>`:callCard(r, !g.open, g)}
-        ${!callSplitView(g)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+        ${!callSplitView(g)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later)}`:''}
       </div>`:''}
     </div>`; }).join('')}</div>`;
 }
@@ -14447,8 +14471,8 @@ function callInbox(groups){
   return `<div class="ci-inbox"><div class="ci-list" role="group" aria-label="Select a caller">
     ${groups.map(g=>{ const r=g.latest; const missed=r.answered===false&&r.kind!=='live';
       const bits=[esc(callOutcome(r))]; if(g.recordings) bits.push(g.recordings+(g.recordings>1?' recordings':' recording')); if(g.voicemails) bits.push(g.voicemails+' voicemail'); if(g.texts) bits.push(g.texts+(g.texts>1?' texts':' text')); { const qe=r.history&&r.history.last_estimate; if(qe) bits.push(qe.approved_at?'quote approved':qe.sent_at?'quote sent':'quote not sent'); } if(g.rows.length>1) bits.push(g.rows.length+' calls'); { const nb=new Set(g.rows.filter(x=>x.kind!=='live'&&x.kind!=='sms').map(x=>x.business&&x.business.name).filter(Boolean)).size; if(nb>1) bits.push(nb+' companies'); }
-      return `<button type="button" class="ci-item cv-item" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
-      ${cvAvatar(g,42)}
+      return `<button type="button" class="ci-item cv-item" style="--cvb:${CV_DIR[cvDir(g)][2]};--cvs:${CV_DIR[cvDir(g)][1]};" data-callselect="${esc(g.key)}" aria-pressed="${g.key===selected.key}">
+      ${cvAvatar(g,36)}
       <span class="cv-mid">
         ${(()=>{ // Owner 2026-09-28: Name / Phone / Secretary / Answered - Quote.
           const nm=r.customer?.name || (r.history&&r.history.name) || '';
@@ -14471,7 +14495,7 @@ function callInbox(groups){
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
     ${callSplitView(selected)||''}
     ${callSplitView(selected)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(selected.latest, !selected.open, selected, true)}</details>`:callCard(selected.latest, !selected.open, selected, true)}
-    ${!callSplitView(selected)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls from this number (${later.length})</div>${later.map(callEarlierRow).join('')}`:''}
+    ${!callSplitView(selected)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later)}`:''}
   </section></div>`;
 }
 // The Text box on a call card: pops that ONE customer's texts over the Calls
@@ -14888,13 +14912,17 @@ function paintCallBanner(call){
 // Unread count on the nav button. Safe to call from anywhere: it silently does
 // nothing if the endpoint or the table isn't there yet.
 async function refreshCallsBadge(){
+  if(_callsBadgeBusy){ _callsBadgeAgain=true; return; }
+  _callsBadgeBusy=true;
   try{
-    const d=(onScreen('calllog')&&_callsData?.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100 }});
+    // lite: counts + banner only, no customer history (much faster).
+    const d=(onScreen('calllog')&&_callsData?.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100, lite:1 }});
     const n=d.open_count||0;
     const el=document.getElementById('callsBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
     paintCallBanner(d.banner||null);
   }catch(_){ /* endpoint not deployed yet — leave the badge hidden */ }
+  finally{ _callsBadgeBusy=false; if(_callsBadgeAgain){ _callsBadgeAgain=false; refreshCallsBadge(); } }
 }
 // Poll while the office has the dashboard open, so a claim taken on one screen
 // shows up on the other within seconds rather than on the next manual refresh —
@@ -14903,7 +14931,7 @@ async function refreshCallsBadge(){
 // in the background so it costs nothing.
 setInterval(()=>{
   if(document.hidden||!current) return;
-  if(onScreen('calllog')) renderCalls();
+  if(onScreen('calllog')) renderCalls({ poll:true });
   else refreshCallsBadge();
 }, 20000);
 

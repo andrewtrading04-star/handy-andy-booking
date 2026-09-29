@@ -8989,30 +8989,42 @@ async function calls(req, res, db, auth) {
   // it lives in a different action (reviewCalls/renderReviewCalls) with its
   // own cross-company-by-design query, never this one.
   const viewerSlugs = allowedSlugsFor(auth);   // null = owner, no filter
+  // Speed (owner 2026-09-30: the Calls tab took ~5s). Everything below used to
+  // run one query after another (~15 round trips). Now: the viewer's business
+  // ids are looked up ONCE, and every lookup that doesn't depend on another
+  // runs at the same time. Same response shape as before.
+  const NONE = '00000000-0000-0000-0000-000000000000';
+  // A failed side lookup reads as "no data" -- never fail the list over a nicety.
+  const safe = (p) => Promise.resolve(p).then((r) => r || { data: null }, () => ({ data: null }));
+  const staffP = safe(db.from('staff_users').select('name, phone').eq('active', true));
+  const linesP = safe(db.from('tracking_numbers').select('phone, display_name, label'));
+  let vids = null;
   if (viewerSlugs) {
     const { data: viewerBiz } = await db.from('businesses').select('id').in('slug', viewerSlugs);
-    const viewerBizIds = (viewerBiz || []).map(b => b.id);
+    vids = (viewerBiz || []).map(b => b.id);
     // No matching business rows would mean an unfiltered query (Supabase
     // treats an empty .in() array as "no restriction"), which is exactly
     // backwards for an access boundary — an empty allow-list must return
     // nothing, never everything.
-    q = q.in('business_id', viewerBizIds.length ? viewerBizIds : ['00000000-0000-0000-0000-000000000000']);
+    q = q.in('business_id', vids.length ? vids : [NONE]);
   }
+  const inVids = (qq) => (vids ? qq.in('business_id', vids.length ? vids : [NONE]) : qq);
   const { data: rows, error } = await q;
   if (error) throw error;
 
   // Self-healing "did this call become a job?": a booking made AFTER ingest
   // cannot have been linked at ingest time. Rather than coupling booking
   // creation to the call log, unlinked calls are re-checked on read, in ONE
-  // batched query for the whole page.
-  const needLink = (rows || []).filter(r => r.customer_id && !r.booking_id);
-  if (needLink.length) {
+  // batched query for the whole page. Runs alongside the lookups below.
+  const relinkP = (async () => {
+    const needLink = (rows || []).filter(r => r.customer_id && !r.booking_id);
+    if (!needLink.length) return;
     const oldest = needLink.reduce((m, r) => (r.occurred_at < m ? r.occurred_at : m), needLink[0].occurred_at);
-    const { data: bks } = await db.from('bookings')
+    const { data: bks } = await safe(db.from('bookings')
       .select('id, customer_id, created_at, scheduled_at, status, price, technician:technicians!technician_id ( name )')
       .in('customer_id', [...new Set(needLink.map(r => r.customer_id))])
       .gte('created_at', oldest)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true }));
     const patch = [];
     for (const r of needLink) {
       const until = new Date(new Date(r.occurred_at).getTime() + 14 * 86400000).toISOString();
@@ -9032,14 +9044,15 @@ async function calls(req, res, db, auth) {
         }
       }
     }
-    // Persist so the next read does not repeat the work. Best-effort: the list
-    // is already correct in memory either way.
-    for (const p of patch) {
+    // Persist so the next read does not repeat the work (all at once, not one
+    // by one). Best-effort: the list is already correct in memory either way.
+    const nowIso = new Date().toISOString();
+    await Promise.all(patch.map((p) => {
       const upd = { booking_id: p.booking_id };
-      if (p.wasOpen) { upd.status = 'resolved'; upd.handled_by = 'Booked'; upd.handled_at = new Date().toISOString(); }
-      await db.from('calls').update(upd).eq('id', p.id).then(null, () => {});
-    }
-  }
+      if (p.wasOpen) { upd.status = 'resolved'; upd.handled_by = 'Booked'; upd.handled_at = nowIso; }
+      return safe(db.from('calls').update(upd).eq('id', p.id));
+    }));
+  })().catch(() => {});
 
   const me = auth.name || auth.role || 'office';
 
@@ -9047,157 +9060,134 @@ async function calls(req, res, db, auth) {
   // texts have passed between us in the last 60 days. The Calls screen folds
   // every call from one number into ONE card and shows what we hold from that
   // person: a recording, a voicemail, a text. Counts only, no message bodies.
+  // Plus the customer history per caller number (owner rule 2026-09-24): jobs,
+  // estimates, script quotes, the owner's review and texts, matched on the
+  // caller's phone and limited to the businesses this viewer can see.
   const callerDigits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
   const callerPhones = [...new Set((rows || []).map(r => callerDigits(r.caller_phone)).filter(p => p.length === 10))];
   const blockedSet = new Set();
   const textInfo = new Map();          // digits -> { total, inbound, last }
-  if (callerPhones.length) {
-    try {
-      const { data: bl } = await db.from('blocked_numbers').select('phone').in('phone', callerPhones);
-      for (const b of (bl || [])) blockedSet.add(b.phone);
-    } catch (e) { /* the flag is a nicety; never fail the list over it */ }
-    try {
-      const forms = callerPhones.flatMap(p => [p, '+1' + p]);
-      let mq = db.from('messages').select('customer_phone, our_phone, direction, created_at')
-        .in('customer_phone', forms).gte('created_at', new Date(Date.now() - 60 * 86400000).toISOString()).limit(3000);
-      if (viewerSlugs) {
-        const { data: vb } = await db.from('businesses').select('id').in('slug', viewerSlugs);
-        const vids = (vb || []).map(b => b.id);
-        mq = mq.or(vids.length ? `business_id.in.(${vids.join(',')}),business_id.is.null` : 'business_id.is.null');
-      }
-      const { data: ms } = await mq;
-      for (const m of (ms || [])) {
-        const d = callerDigits(m.customer_phone);
-        const t = textInfo.get(d) || { total: 0, inbound: 0, last: null };
-        t.total++; if (m.direction === 'in' || m.direction === 'inbound') t.inbound++;
-        // our_phone of the newest message = the thread the Calls card's Text box opens.
-        if (!t.last || m.created_at > t.last) { t.last = m.created_at; t.our = m.our_phone; }
-        textInfo.set(d, t);
-      }
-    } catch (e) { /* same: counts are a nicety */ }
-  }
-
-  // Customer history per caller number (owner rule 2026-09-24: "add customers
-  // history with us to this card -- most will have none, some call back or
-  // work with us again"). Jobs and estimates matched on the caller's phone,
-  // limited to the businesses this viewer can see. A summary only; the full
-  // record is one tap away in the customer popup.
   const historyBy = new Map();         // digits -> { jobs, completed, spent, last_job, upcoming, estimates, last_estimate }
-  if (callerPhones.length) {
-    try {
-      let vids = null;
-      if (viewerSlugs) { const { data: vb } = await db.from('businesses').select('id').in('slug', viewerSlugs); vids = (vb || []).map(b => b.id); }
-      const pretty = p => `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}`;
-      const forms = callerPhones.flatMap(p => [p, '+1' + p, pretty(p)]);
-      let cq = db.from('customers').select('id, phone').in('phone', forms);
-      if (vids) cq = cq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
-      const { data: custs } = await cq;
-      const digitsByCust = new Map((custs || []).map(c => [c.id, callerDigits(c.phone)]));
-      const custIds = [...digitsByCust.keys()];
-      const h = d => { let x = historyBy.get(d); if (!x) { x = { jobs: 0, completed: 0, spent: 0, last_job: null, upcoming: null, estimates: 0, last_estimate: null }; historyBy.set(d, x); } return x; };
-      if (custIds.length) {
-        const { data: bks } = await db.from('bookings').select('id, customer_id, scheduled_at, created_at, status, price, metadata, services(name), business:businesses(name, slug), customer:customers(name)')
-          .in('customer_id', custIds).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(2000);
-        const nowIso = new Date().toISOString();
-        for (const b of (bks || [])) {
-          const x = h(digitsByCust.get(b.customer_id)); if (!x) continue;
-          x.jobs++;
-          if (b.status === 'completed') { x.completed++; x.spent += Number(b.price) || 0; }
-          const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null,
-            brand: b.business?.name || null, brand_slug: b.business?.slug || null, created_at: b.created_at || null, booked_by: b.metadata?.booked_by || null,
-            id: b.id, customer_name: b.customer?.name || null };
-          (x.booking_list || (x.booking_list = [])).length < 15 && x.booking_list.push(j);
-          if (b.customer?.name && !x.name) x.name = b.customer.name;
-          // Which brand they most recently booked with (owner 2026-09-28: a
-          // caller who rang Dom's and Handy Andy must show where they booked).
-          if (!x.latest_booking || (b.created_at || '') > (x.latest_booking.created_at || '')) x.latest_booking = j;
-          if (b.scheduled_at > nowIso && b.status !== 'completed') { if (!x.upcoming || b.scheduled_at < x.upcoming.at) x.upcoming = j; }
-          else if (!x.last_job) x.last_job = j;   // rows arrive newest first
-        }
-      }
-      let eq = db.from('estimates').select('id, customer_phone, customer_name, created_at, status, approved_at, service_label, texted_at, emailed_at, text_opened_at, email_opened_at, line_items, tax_rate, business:businesses(name)').in('customer_phone', forms)
-        .order('created_at', { ascending: false }).limit(2000);
-      if (vids) eq = eq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
-      const { data: ests } = await eq;
-      for (const e of (ests || [])) {
-        const x = h(callerDigits(e.customer_phone));
-        x.estimates++;
-        // Every quote per company, openable on the call card (owner 2026-09-28).
-        if (!x.estimate_list) x.estimate_list = [];
-        if (x.estimate_list.length < 15) {
-          const items = (Array.isArray(e.line_items) ? e.line_items : []).map((li) => ({ name: String((li && (li.description || li.name)) || 'Item'), qty: Number(li && (li.qty ?? li.quantity)) || 1, price: Number(li && li.unit_price) || 0 }));
-          const sub = items.reduce((t, i) => t + i.qty * i.price, 0);
-          x.estimate_list.push({ id: e.id, brand: e.business?.name || null, created_at: e.created_at, service: e.service_label || null,
-            items, total: Math.round((sub * (1 + (Number(e.tax_rate) || 0))) * 100) / 100, sent_at: e.texted_at || e.emailed_at || null,
-            opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null });
-        }
-        if (e.customer_name && !/^\+?\d[\d\s().-]+$/.test(e.customer_name) && !/@/.test(e.customer_name) && !x.name) x.name = e.customer_name;
-        if (!x.last_estimate) {
-          // Quote sent / opened / approved for the call card (owner, 2026-09-26).
-          const total = (Array.isArray(e.line_items) ? e.line_items : []).reduce((t, li) => t + (Number(li && li.unit_price) || 0) * (Number(li && li.qty) || 1), 0);
-          x.last_estimate = { at: e.created_at, status: e.approved_at ? 'approved' : e.status, service: e.service_label || null,
-            sent_at: e.texted_at || e.emailed_at || null, total: Math.round(total * 100) / 100,
-            opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null };
-        }
-      }
-      // What each secretary priced in the call script (the live row's notes)
-      // and the owner's review of this caller, for the side-by-side card.
-      try {
-        const { data: lives } = await db.from('calls').select('caller_phone, occurred_at, handled_by, notes, quoted_total, resolution, business:businesses(name)')
-          .eq('kind', 'live').in('caller_phone', forms).not('notes', 'is', null).order('occurred_at', { ascending: false }).limit(500);
-        for (const l of (lives || [])) {
-          const x = h(callerDigits(l.caller_phone));
-          if (!x.script_quotes) x.script_quotes = [];
-          if (x.script_quotes.length < 10) x.script_quotes.push({ at: l.occurred_at, by: l.handled_by || null, brand: l.business?.name || null, notes: String(l.notes || '').slice(0, 2000), total: Number(l.quoted_total) || null, outcome: l.resolution || null });
-        }
-        const { data: revs } = await db.from('caller_reviews').select('phone, data').in('phone', callerPhones);
-        for (const r of (revs || [])) h(callerDigits(r.phone)).review = r.data;
-      } catch (_) {}
-      // Texts per caller, with the company each one belongs to (owner 2026-09-28).
-      try {
-        let mq = db.from('messages').select('customer_phone, created_at, direction, body, sent_by, business:businesses(name)')
-          .in('customer_phone', forms).order('created_at', { ascending: false }).limit(1500);
-        if (vids) mq = mq.in('business_id', vids.length ? vids : ['00000000-0000-0000-0000-000000000000']);
-        const { data: msgs } = await mq;
-        for (const m of (msgs || [])) {
-          const x = h(callerDigits(m.customer_phone));
-          if (!x.texts_list) x.texts_list = [];
-          if (x.texts_list.length < 40) x.texts_list.push({ at: m.created_at, dir: m.direction, body: String(m.body || '').slice(0, 600), by: m.sent_by || null, brand: m.business?.name || null });
-        }
-      } catch (_) {}
-      for (const x of historyBy.values()) x.spent = Math.round(x.spent * 100) / 100;
-    } catch (e) { /* history is a nicety; never fail the call list over it */ }
+  const EMPTY = Promise.resolve({ data: null });
+  const has = callerPhones.length > 0;
+  // lite=1 (the nav badge poll): counts and banner only, no customer history.
+  const hist = has && req.query.lite !== '1';
+  const pretty = p => `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}`;
+  const forms2 = callerPhones.flatMap(p => [p, '+1' + p]);
+  const forms = callerPhones.flatMap(p => [p, '+1' + p, pretty(p)]);
+  let mq60 = db.from('messages').select('customer_phone, our_phone, direction, created_at')
+    .in('customer_phone', forms2).gte('created_at', new Date(Date.now() - 60 * 86400000).toISOString()).limit(3000);
+  if (vids) mq60 = mq60.or(vids.length ? `business_id.in.(${vids.join(',')}),business_id.is.null` : 'business_id.is.null');
+  const custP = hist ? safe(inVids(db.from('customers').select('id, phone').in('phone', forms))) : EMPTY;
+  // Bookings wait only on the customers lookup.
+  const bksP = custP.then(({ data: custs }) => {
+    const ids = (custs || []).map(c => c.id);
+    return ids.length ? safe(db.from('bookings').select('id, customer_id, scheduled_at, created_at, status, price, metadata, services(name), business:businesses(name, slug), customer:customers(name)')
+      .in('customer_id', ids).neq('status', 'cancelled').order('scheduled_at', { ascending: false }).limit(2000)) : { data: null };
+  });
+  const [, blR, m60R, custR, bkR, estR, liveR, revR, msgR, staffR, lineR] = await Promise.all([
+    relinkP,
+    has ? safe(db.from('blocked_numbers').select('phone').in('phone', callerPhones)) : EMPTY,
+    has ? safe(mq60) : EMPTY,
+    custP,
+    hist ? bksP : EMPTY,
+    hist ? safe(inVids(db.from('estimates').select('id, customer_phone, customer_name, created_at, status, approved_at, service_label, texted_at, emailed_at, text_opened_at, email_opened_at, line_items, tax_rate, business:businesses(name)').in('customer_phone', forms)
+      .order('created_at', { ascending: false }).limit(2000))) : EMPTY,
+    // What each secretary priced in the call script (the live row's notes)
+    // and the owner's review of this caller, for the side-by-side card.
+    hist ? safe(inVids(db.from('calls').select('caller_phone, occurred_at, handled_by, notes, quoted_total, resolution, business:businesses(name)')
+      .eq('kind', 'live').in('caller_phone', forms).not('notes', 'is', null).order('occurred_at', { ascending: false }).limit(500))) : EMPTY,   // scoped to the viewer's businesses
+    hist ? safe(db.from('caller_reviews').select('phone, data').in('phone', callerPhones)) : EMPTY,
+    // Texts per caller, with the company each one belongs to (owner 2026-09-28).
+    hist ? safe(inVids(db.from('messages').select('customer_phone, created_at, direction, body, sent_by, business:businesses(name)')
+      .in('customer_phone', forms).order('created_at', { ascending: false }).limit(1500))) : EMPTY,
+    staffP,
+    linesP,
+  ]);
+
+  for (const b of (blR.data || [])) blockedSet.add(b.phone);
+  for (const m of (m60R.data || [])) {
+    const d = callerDigits(m.customer_phone);
+    const t = textInfo.get(d) || { total: 0, inbound: 0, last: null };
+    t.total++; if (m.direction === 'in' || m.direction === 'inbound') t.inbound++;
+    // our_phone of the newest message = the thread the Calls card's Text box opens.
+    if (!t.last || m.created_at > t.last) { t.last = m.created_at; t.our = m.our_phone; }
+    textInfo.set(d, t);
   }
+  try {
+    const digitsByCust = new Map((custR.data || []).map(c => [c.id, callerDigits(c.phone)]));
+    const h = d => { let x = historyBy.get(d); if (!x) { x = { jobs: 0, completed: 0, spent: 0, last_job: null, upcoming: null, estimates: 0, last_estimate: null }; historyBy.set(d, x); } return x; };
+    const nowIso = new Date().toISOString();
+    for (const b of (bkR.data || [])) {
+      const x = h(digitsByCust.get(b.customer_id)); if (!x) continue;
+      x.jobs++;
+      if (b.status === 'completed') { x.completed++; x.spent += Number(b.price) || 0; }
+      const j = { at: b.scheduled_at, status: b.status, price: Number(b.price) || 0, service: b.services?.name || null,
+        brand: b.business?.name || null, brand_slug: b.business?.slug || null, created_at: b.created_at || null, booked_by: b.metadata?.booked_by || null,
+        id: b.id, customer_name: b.customer?.name || null };
+      (x.booking_list || (x.booking_list = [])).length < 15 && x.booking_list.push(j);
+      if (b.customer?.name && !x.name) x.name = b.customer.name;
+      // Which brand they most recently booked with (owner 2026-09-28: a
+      // caller who rang Dom's and Handy Andy must show where they booked).
+      if (!x.latest_booking || (b.created_at || '') > (x.latest_booking.created_at || '')) x.latest_booking = j;
+      if (b.scheduled_at > nowIso && b.status !== 'completed') { if (!x.upcoming || b.scheduled_at < x.upcoming.at) x.upcoming = j; }
+      else if (!x.last_job) x.last_job = j;   // rows arrive newest first
+    }
+    for (const e of (estR.data || [])) {
+      const x = h(callerDigits(e.customer_phone));
+      x.estimates++;
+      // Every quote per company, openable on the call card (owner 2026-09-28).
+      if (!x.estimate_list) x.estimate_list = [];
+      if (x.estimate_list.length < 15) {
+        const items = (Array.isArray(e.line_items) ? e.line_items : []).map((li) => ({ name: String((li && (li.description || li.name)) || 'Item'), qty: Number(li && (li.qty ?? li.quantity)) || 1, price: Number(li && li.unit_price) || 0 }));
+        const sub = items.reduce((t, i) => t + i.qty * i.price, 0);
+        x.estimate_list.push({ id: e.id, brand: e.business?.name || null, created_at: e.created_at, service: e.service_label || null,
+          items, total: Math.round((sub * (1 + (Number(e.tax_rate) || 0))) * 100) / 100, sent_at: e.texted_at || e.emailed_at || null,
+          opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null });
+      }
+      if (e.customer_name && !/^\+?\d[\d\s().-]+$/.test(e.customer_name) && !/@/.test(e.customer_name) && !x.name) x.name = e.customer_name;
+      if (!x.last_estimate) {
+        // Quote sent / opened / approved for the call card (owner, 2026-09-26).
+        const total = (Array.isArray(e.line_items) ? e.line_items : []).reduce((t, li) => t + (Number(li && li.unit_price) || 0) * (Number(li && li.qty) || 1), 0);
+        x.last_estimate = { at: e.created_at, status: e.approved_at ? 'approved' : e.status, service: e.service_label || null,
+          sent_at: e.texted_at || e.emailed_at || null, total: Math.round(total * 100) / 100,
+          opened: !!(e.text_opened_at || e.email_opened_at), approved_at: e.approved_at || null };
+      }
+    }
+    for (const l of (liveR.data || [])) {
+      const x = h(callerDigits(l.caller_phone));
+      if (!x.script_quotes) x.script_quotes = [];
+      if (x.script_quotes.length < 10) x.script_quotes.push({ at: l.occurred_at, by: l.handled_by || null, brand: l.business?.name || null, notes: String(l.notes || '').slice(0, 2000), total: Number(l.quoted_total) || null, outcome: l.resolution || null });
+    }
+    for (const r of (revR.data || [])) h(callerDigits(r.phone)).review = r.data;
+    for (const m of (msgR.data || [])) {
+      const x = h(callerDigits(m.customer_phone));
+      if (!x.texts_list) x.texts_list = [];
+      if (x.texts_list.length < 40) x.texts_list.push({ at: m.created_at, dir: m.direction, body: String(m.body || '').slice(0, 600), by: m.sent_by || null, brand: m.business?.name || null });
+    }
+    for (const x of historyBy.values()) x.spent = Math.round(x.spent * 100) / 100;
+  } catch (e) { /* history is a nicety; never fail the call list over it */ }
 
   // Who answers each forwarding number, so a card can say "routed to Joey"
   // instead of ten digits nobody memorises. Matched on digits alone: the
   // tracking rows store E.164 (+1XXXXXXXXXX) while staff_users stores bare
-  // 10-digit numbers, and neither is worth normalising in the database for
-  // this. One small read per request; an unknown number simply keeps showing
-  // as a number rather than guessing at a name.
+  // 10-digit numbers. An unknown number keeps showing as a number.
   const staffByPhone = new Map();
-  try {
-    const { data: staffRows } = await db.from('staff_users').select('name, phone').eq('active', true);
-    for (const s of staffRows || []) {
-      const d = String(s.phone || '').replace(/\D/g, '').slice(-10);
-      if (d.length === 10 && s.name) staffByPhone.set(d, s.name);
-    }
-  } catch (e) { /* names are a nicety — never fail the call list over them */ }
+  for (const s of staffR.data || []) {
+    const d = String(s.phone || '').replace(/\D/g, '').slice(-10);
+    if (d.length === 10 && s.name) staffByPhone.set(d, s.name);
+  }
 
   // What LINE this call actually came in on (migration 0132's display_name),
   // e.g. "HA Golden" or "HA Greenway" — not the business name, which several
   // of Handy Andy's lead-gen city lines share, and not tracking_label, which
   // is the recording-consent sentence, not a name. Matched by the dialed
-  // number's last 10 digits so it doesn't care whether a row stored it bare
-  // or E.164.
+  // number's last 10 digits.
   const lineNameByPhone = new Map();
-  try {
-    const { data: lineRows } = await db.from('tracking_numbers').select('phone, display_name, label');
-    for (const l of lineRows || []) {
-      const d = String(l.phone || '').replace(/\D/g, '').slice(-10);
-      if (d.length === 10) lineNameByPhone.set(d, l.display_name || null);
-    }
-  } catch (e) { /* a nicety — never fail the call list over it */ }
+  for (const l of lineR.data || []) {
+    const d = String(l.phone || '').replace(/\D/g, '').slice(-10);
+    if (d.length === 10) lineNameByPhone.set(d, l.display_name || null);
+  }
 
   // Owner 2026-09-29: a forward that the handset's OWN voicemail picked up
   // reaches Twilio as "answered" (the carrier answered it). The transcript
