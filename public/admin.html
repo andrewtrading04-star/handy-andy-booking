@@ -11037,8 +11037,11 @@ function plOwnerMoveHtml(c){
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
   if(!tl.length) return '';
+  // Owner 2026-09-30: tap a text to open the conversation, a call to open it
+  // in Calls -- same as the Calls tab. Texted photos show right here.
+  const isText=t=>t.icon==='text'||t.icon==='auto';
   return `<div class="rc-count" style="margin:4px 0 6px;">Voicemails, calls &amp; texts</div><div class="pl-tl">${tl.slice().reverse().map(t=>
-    `<div class="pl-tl-i"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}${plAudio(t)}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`).join('')}</div>`;
+    `<div class="pl-tl-i"><span class="ic">${ic(PL_TL_ICON[t.icon]||'')||'•'}</span><span class="t">${esc(t.text||'')}${t.who?` <span class="w">· ${esc(t.who)}</span>`:''}${t.media&&t.msg_id?smsMediaHtml({ id:t.msg_id, media:true },160):''}${plAudio(t)}${isText(t)&&c.phone?' <a href="javascript:void(0)" data-pl="tl-text" style="color:var(--accent);font-size:12px;font-weight:700;white-space:nowrap;">Open texts ›</a>':t.call_id?` <a href="javascript:void(0)" data-pl="tl-call" data-call-id="${esc(t.call_id)}" style="color:var(--accent);font-size:12px;font-weight:700;white-space:nowrap;">Open call ›</a>`:''}</span><span class="w">${esc(plWhen(t.at,c.tz))}</span></div>`).join('')}</div>`;
 }
 
 // Every write: POST {op,...}, then re-read the board (the server returns only
@@ -11116,6 +11119,8 @@ function plClick(e){
     case 'manual': _plAsk[c.key]={ mode:'manual' }; paintPipeline(); return;
     case 'ask-yes': case 'ask-no': plAnswer(c, act==='ask-yes', b); return;
     case 'ask-x': delete _plAsk[c.key]; paintPipeline(); return;
+    case 'tl-text': openCallTexts(c.our_phone||'', c.phone, { send:!!c.our_phone }); return;
+    case 'tl-call': if(b.dataset.callId){ _plOpen=null; openCallLink(b.dataset.callId); } return;
     case 'text':
       // Same hand-off as the Calls tab's "Send a message": open that exact
       // thread (our line + their number) on the Messages screen.
@@ -14398,7 +14403,7 @@ async function openCallTexts(our,customer,opts){
     const ms=t.messages||[];
     body.innerHTML=ms.length ? ms.map(m=>{ const mine=m.direction==='out', bad=m.status==='failed'||m.status==='undelivered';
       const meta=[msgWhen(m.created_at,t.business_timezone), mine&&m.sent_by?(m.sent_by==='automated'?'Automated':m.sent_by):null, bad?'NOT DELIVERED':null].filter(Boolean).join(' · ');
-      return `<div class="ctp-m${mine?' us':''}${bad?' bad':''}"><div class="ctp-b">${esc(m.body||'')}</div><div class="ctp-t">${esc(meta)}</div></div>`; }).join('') : '<div class="empty">No texts with this customer.</div>';
+      return `<div class="ctp-m${mine?' us':''}${bad?' bad':''}"><div class="ctp-b">${esc(m.body||'')}${smsMediaHtml(m)}</div><div class="ctp-t">${esc(meta)}</div></div>`; }).join('') : '<div class="empty">No texts with this customer.</div>';
     body.scrollTop=body.scrollHeight;
   }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message||'Could not load the texts')}</div>`; }
   // Booking card Text button (owner, 2026-09-26): send right here.
@@ -14639,6 +14644,12 @@ function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN);
   // Repaint once the stars arrive, so they show without a refresh.
   if(was!==JSON.stringify(_vipN)&&section==='messages'&&_msgThreads){ try{ paintMessages(); }catch(_){} }
 }).catch(()=>{}); }
+// A photo a customer texted (MMS): an inline thumbnail, tap to open full size.
+function smsMediaHtml(m, max){
+  if(!m || !m.id || !(Number(m.media_count)>0 || (m.direction==='in' && !m.body) || m.media)) return '';
+  const src=`${API}?action=sms_media&id=${encodeURIComponent(m.id)}&i=0&token=${encodeURIComponent(token)}`;
+  return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="Photo from the customer" loading="lazy" onerror="this.parentNode.remove()" style="display:block;max-width:${max||220}px;max-height:${max||220}px;border-radius:10px;margin-top:4px;"></a>`;
+}
 function openCallLink(id){
   if(!/^[0-9a-f-]{36}$/i.test(String(id||''))) return;
   _callFocusId=id; _callsPeriod='7d'; _callsView='all'; callHubTab='log'; navTo('callhub');
@@ -15130,7 +15141,7 @@ function msgDetailHtml(t){
         else if(m.status==='queued') meta+=' · sending…';
         if(m.sent_by && m.sent_by!=='automated') meta+=' · '+m.sent_by;
       }
-      const bubble='<div style="background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 13px;font-size:15px;line-height:1.35;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+'</div>';
+      const bubble='<div style="background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 13px;font-size:15px;line-height:1.35;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+smsMediaHtml(m)+'</div>';
       html+='<div style="max-width:75%;width:fit-content;'+align+'margin-bottom:10px;">'
         +(automated?'<div class="msg-auto-label" style="text-align:right;">Automated</div>':'')
         +(mine ? bubble

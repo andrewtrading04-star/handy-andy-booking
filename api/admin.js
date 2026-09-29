@@ -406,7 +406,7 @@ export default async function handler(req, res) {
     // way a browser media request actually can.
     // note_photo needs the same query-string exception as call_recording --
     // it's loaded by a plain <img src>, which can't attach a header either.
-    let auth = verifyToken((action === 'call_recording' || action === 'note_photo') ? (getBearer(req) || req.query.token) : getBearer(req));
+    let auth = verifyToken((action === 'call_recording' || action === 'note_photo' || action === 'sms_media') ? (getBearer(req) || req.query.token) : getBearer(req));
     // Jiyah's audit portal (public/audit.html, token kind 'auditor' from
     // api/audit.js) reads the CRM's call data through THESE handlers rather
     // than a second copy of them (owner rule 2026-09-22: she sees everything
@@ -668,6 +668,22 @@ export default async function handler(req, res) {
       case 'domain_watch_check':  return await domainWatchCheck(req, res, db, auth, body);
       case 'notes_photo':  return await notesPhoto(req, res, db, auth, body);
       case 'note_photo':   return await notePhoto(req, res, db, auth);
+      case 'sms_media': {
+        // A photo a customer texted us (owner 2026-09-30). Loaded by <img src>,
+        // so the token rides in ?token=. Pulled from Twilio by message sid.
+        const { data: m } = await db.from('messages').select('twilio_sid').eq('id', String(req.query.id || '')).maybeSingle();
+        const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+        if (!m || !m.twilio_sid || !sid || !tok) return res.status(404).end();
+        const basic = 'Basic ' + Buffer.from(`${sid}:${tok}`).toString('base64');
+        const list = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${encodeURIComponent(m.twilio_sid)}/Media.json`, { headers: { Authorization: basic } }).then((r) => r.ok ? r.json() : null).catch(() => null);
+        const item = list && Array.isArray(list.media_list) ? list.media_list[Math.max(0, Number(req.query.i) || 0)] : null;
+        if (!item) return res.status(404).end();
+        const r = await fetch('https://api.twilio.com' + String(item.uri).replace(/\.json$/, ''), { headers: { Authorization: basic } });
+        if (!r.ok) return res.status(404).end();
+        res.setHeader('Content-Type', r.headers.get('content-type') || item.content_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        return res.status(200).send(Buffer.from(await r.arrayBuffer()));
+      }
       case 'notes_replies_seen': return await notesRepliesSeen(req, res, db, auth);
       case 'tech_notes_targets': return await techNotesTargets(req, res, db, auth);
       case 'tech_notes_add':     return await techNotesAdd(req, res, db, auth, body);
@@ -17278,7 +17294,7 @@ async function messagesThread(req, res, db, auth) {
   // All three at once -- speed (owner, 2026-09-24).
   const [{ data: rows, error }, { data: c }, bizById] = await Promise.all([
     db.from('messages')
-      .select('id, direction, body, created_at, status, error, sent_by, read_at')
+      .select('id, direction, body, created_at, status, error, sent_by, read_at, media_count')
       .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer)
       .order('created_at', { ascending: true }).limit(500),
     cq.limit(1),

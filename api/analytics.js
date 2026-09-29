@@ -1837,6 +1837,9 @@ async function handleSmsInbound(req, res) {
         body: body || null,
         twilio_sid: (params.MessageSid || params.SmsSid || '').toString() || null,
         customer_id,
+        // Photos (MMS): the pictures stay at Twilio; api/admin.js sms_media
+        // fetches them by this message's sid (owner 2026-09-30).
+        media_count: Number(params.NumMedia) || 0,
       });
       if (msgErr && !/duplicate key|unique/i.test(msgErr.message || '')) {
         console.error('[sms_inbound] message store failed:', msgErr.message);

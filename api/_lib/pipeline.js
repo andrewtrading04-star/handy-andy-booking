@@ -856,7 +856,7 @@ function timelineFor(card, st, mark, audits) {
         out.push(item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'));
         break;
       }
-      case 'text_in': out.push(item(t.atMs, 'text', `Text: ${clip(t.body, 600)}`, null, 'ok')); break;
+      case 'text_in': out.push({ ...item(t.atMs, 'text', t.body ? `Text: ${clip(t.body, 600)}` : 'Texted a photo', null, 'ok'), msg_id: t.id, media: !t.body }); break;
       case 'text_out_staff': out.push(item(t.atMs, 'text', `Text reply: ${clip(t.body, 600)}`, t.staff, 'ok')); break;
       case 'text_auto': {
         const label = { missed_call: 'Auto-text sent (missed call)', estimate: 'Estimate link texted', booked: 'Booking confirmation texted' }[t.auto];
