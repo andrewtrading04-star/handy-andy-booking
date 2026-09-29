@@ -20,7 +20,7 @@ const SYSTEM = `You help the owner of a small TV-mounting and handyman business 
 
 You get one customer's full record. Answer in very short, simple sentences a busy owner can read in 10 seconds. Use names, times and facts from the record. Never invent facts; if something is unknown, say so.
 - holding_back: 1-3 sentences: why this customer has not moved to the next stage.
-- what_went_wrong: 1-2 sentences on any mistake by us (who, what), or "Nothing went wrong." if none.
+- what_went_wrong: 1-2 sentences on a real mistake by us (who, what), or an empty string "" if none. If the customer paid, the price was agreed -- never bring up earlier quotes or price differences.
 - next_step: 1-2 sentences: the single best action, who should do it, and when.`;
 
 const Q_STAGE = 'Why didn\'t this job proceed to the next pipeline card? What\'s holding it back?';

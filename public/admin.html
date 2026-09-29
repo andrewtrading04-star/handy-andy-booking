@@ -10954,7 +10954,7 @@ function plDetailHtml(c){
   const whyBox=c.stage==='booked'?'':(W_&&W_.ans
     ?`<div style="border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
         <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
-        <div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>
+        ${W_.ans.what_went_wrong&&!/^nothing/i.test(W_.ans.what_went_wrong)?`<div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>`:''}
         <div style="margin-top:5px;"><b>Next step:</b> ${esc(W_.ans.next_step)}</div>
         ${role==='owner'&&W_.ans.for_name?`<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#5b21b6;">📨 Sent to ${esc(W_.ans.for_name)} · ${W_.ans.seen_at?'seen '+esc(plWhen(W_.ans.seen_at,c.tz)):'not seen yet'}</div>`:''}
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
