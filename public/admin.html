@@ -11060,7 +11060,7 @@ function plOwnerMoveHtml(c){
 function plStoryHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(Boolean).slice().sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
   if(!tl.length) return '';
-  const isText=t=>t.icon==='text'||t.icon==='auto';
+  const isText=t=>t.icon==='text';   // auto-texts go from another number; no link (owner 2026-09-30)
   const fromCust=t=>t.icon==='missed'||(t.icon==='text'&&/^(Text:|Texted a photo)/.test(t.text||''));
   const fromUs=t=>(t.icon==='phone'&&t.tone==='ok')||t.icon==='callout'||t.icon==='script'||(t.icon==='text'&&/^Text reply/.test(t.text||''))||(t.icon==='estimate'&&/^Estimate sent/.test(t.text||''))||t.icon==='booking';
   const hrs=ms=>ms>=36e5*48?Math.floor(ms/864e5)+' days':Math.max(1,Math.floor(ms/36e5))+'h';
