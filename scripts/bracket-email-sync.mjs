@@ -65,6 +65,7 @@ const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 //   GMAIL_USER_5  denvermainbusiness@gmail.com    (HA Denver #1 reviews)
 //   GMAIL_USER_6  denverinstallpros@gmail.com     (HA Denver #2 reviews)
 //   GMAIL_USER_7  austinmainbusiness@gmail.com    (HA Austin reviews)
+//   GMAIL_USER_8  tvmountinglaca@gmail.com        (HA Los Angeles reviews)
 // Every mailbox is scanned for Walmart, Amazon AND Google-review emails alike,
 // so a review inbox that never sees an order simply yields reviews only.
 // This mailbox exists ONLY to buy the wire concealment plate product — see
@@ -74,7 +75,7 @@ const STATUS_RANK = { in_route: 0, ordered: 0, delivered: 1, canceled: 2 };
 // real order. Since nothing else is ever bought through this account, any
 // real Amazon order-flow email seen here is trusted as a plate order.
 const PLATE_DEDICATED_MAILBOX_IDX = 3;
-const EXPECTED_MAILBOX_COUNT = 7;
+const EXPECTED_MAILBOX_COUNT = 8;
 const MAILBOX_ROLE = {
   1: 'Walmart orders forwarder', 2: "Dom's reviews + Walmart", 3: 'Amazon wire plates',
   4: 'Houston reviews', 5: 'Denver #1 reviews', 6: 'Denver #2 reviews', 7: 'Austin reviews',

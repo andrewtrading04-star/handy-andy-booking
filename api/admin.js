@@ -10419,6 +10419,9 @@ async function attachInboundVoicemails(db, rows) {
     const { data } = await db.from('calls')
       .select('id, caller_phone, transcript, transcript_summary, occurred_at, market, status')
       .in('caller_phone', [...byPhone.keys()])
+      // Real calls only: a customer's TEXT is not a voicemail (owner 2026-09-30,
+      // Matt Seigler's "2 people" text showed as one).
+      .not('kind', 'in', '(sms,live)')
       .order('occurred_at', { ascending: false });
     for (const c of (data || [])) {
       for (const r of (byPhone.get(c.caller_phone) || [])) {

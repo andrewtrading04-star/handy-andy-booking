@@ -141,6 +141,9 @@ jobs:
           GMAIL_APP_PASSWORD_6:  ${{ secrets.GMAIL_APP_PASSWORD_6 }}
           GMAIL_USER_7:          ${{ secrets.GMAIL_USER_7 }}
           GMAIL_APP_PASSWORD_7:  ${{ secrets.GMAIL_APP_PASSWORD_7 }}
+          # _8 tvmountinglaca@gmail.com (HA Los Angeles reviews)
+          GMAIL_USER_8:          ${{ secrets.GMAIL_USER_8 }}
+          GMAIL_APP_PASSWORD_8:  ${{ secrets.GMAIL_APP_PASSWORD_8 }}
           # Optional override for the Amazon product-match regex (set once the
           # exact plate product title is known, to keep matching strict).
           AMAZON_PLATE_MATCH:    ${{ secrets.AMAZON_PLATE_MATCH }}

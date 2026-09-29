@@ -141,9 +141,8 @@ export const GMB_LOCATIONS = [
     // Live in admin.js's GMB_LISTINGS review routing but missing from this
     // registry entirely until 2026-09-08. It has ZERO reviews so far, so no
     // notification email has ever had to be attributed to it — which is why the
-    // gap went unnoticed. notifyEmail is UNCONFIRMED (tvmountinglaca@gmail.com
-    // is the likely candidate); confirm it before LA's first review lands, or
-    // that review arrives in a mailbox nothing scans and is simply lost.
+    // gap went unnoticed. Owner confirmed 2026-09-30: LA's review emails go to
+    // tvmountinglaca@gmail.com, scanned as mailbox slot 8.
     key: 'ha-los-angeles',
     name: 'Handy Andy — Los Angeles',
     displayName: 'Handy Andy TV Mounting Los Angeles',
@@ -157,8 +156,8 @@ export const GMB_LOCATIONS = [
     rating: null,
     reviewCount: 0,
     statsVerified: '2026-09-08',
-    notifyEmail: null,
-    mailboxEnv: null,
+    notifyEmail: 'tvmountinglaca@gmail.com',
+    mailboxEnv: 'GMAIL_USER_8',
   },
   {
     key: 'doms-colorado',
