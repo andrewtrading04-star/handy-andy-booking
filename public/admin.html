@@ -10895,19 +10895,20 @@ function plDetailHtml(c){
   if(c.lost) steps.push(['Lost · '+esc(c.lost.reason||''), c.lost.at||true, c.lost.note?'“'+esc(c.lost.note)+'”':'']);
   // Only steps that actually happened (owner 2026-09-27).
   const stepHtml=steps.filter(x=>x[1]).map(([label,at,extra])=>`<div class="plt-step${at?' on':''}"><span class="plt-dot">${at?'✓':''}</span><span class="plt-lab">${label}${extra?`<small>${extra}</small>`:''}</span><span class="plt-at">${at&&at!==true?W(at):at?'':'—'}</span></div>`).join('');
+  // Owner 2026-09-30: only two boxes -- estimate (viewed or not) and the 3-hour email.
   const info=[
-    ['Brand', c.business&&c.business.name?esc(c.business.name):'—'],
+    ['_brand', ''],
     // Owner 2026-09-27: Estimate sent (tap to view it here) instead of Phone.
     ['Estimate sent', e.bounced?'<span class="danger">Email BOUNCED — check the address on the call</span>':e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'} · ${_plEstOpen?'hide':'view'}</button>`:(e.id?'<span class="danger">Saved, not sent</span>':'No')],
     ['Handled by', c.secretary?esc(c.secretary):'—'],
   ];
+  info.splice(0,info.length);
+  info.push(['Estimate sent', e.bounced?'<span class="danger">Email BOUNCED — check the address on the call</span>':e.sent_at?`<button type="button" class="md-link" data-pl="estview" style="font:inherit;font-weight:800;padding:0;border:none;background:none;color:var(--accent);cursor:pointer;">${plMoney(e.total)||'View'}</button> · ${e.opened?'Viewed':'Not viewed'}`:(e.id?'Saved, not sent':'No')]);
   if(e.sent_at){
-    const age=Date.now()-new Date(e.sent_at).getTime();
-    info.push(['Estimate age', `${esc(plAgo(e.sent_at))}${e.opened?' · opened':' · not opened'}`]);
-    info.push(['3-hour follow-up email', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:(age>4*36e5?'Not sent':'Not yet (goes at 3h)')]);
+    const left=Date.parse(e.sent_at)+3*36e5-Date.now();
+    const lt=left>=36e5?`${Math.floor(left/36e5)}h ${Math.round(left%36e5/6e4)}m`:`${Math.max(1,Math.round(left/6e4))} min`;
+    info.push(['3-hour auto follow-up', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:left>0?`Goes out in ${lt}`:'Not sent']);
   }
-  if(Number(c.tries)>0) info.push(['Callback tries', `${Number(c.tries)} with no answer`]);
-  if(pj||pc) info.push(['History', `${pj?`Returning · ${pj} past job${pj===1?'':'s'}${plMoney(h.spent)?' · '+plMoney(h.spent):''}`:'Asked before'}`]);
   const tab=_plTab||'ov', nHist=Array.isArray(c.timeline)?c.timeline.length:0;
   const tabs=`<div class="plt-tabs" role="tablist">${[['ov','Overview'],['hist',`History (${nHist})`],['more','More']].map(([k,l])=>`<button type="button" role="tab" class="${tab===k?'on':''}" data-pl="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join('')}</div>`;
   const body=tab==='hist'
@@ -10939,7 +10940,8 @@ function plDetailHtml(c){
         ${role==='owner'&&W_.ans.for_name?`<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#5b21b6;">📨 Sent to ${esc(W_.ans.for_name)} · ${W_.ans.seen_at?'seen '+esc(plWhen(W_.ans.seen_at,c.tz)):'not seen yet'}</div>`:''}
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
     :`<div style="margin:0 0 12px;"><button type="button" class="pl-btn" data-pl="askwhy"${W_&&W_.loading?' disabled':''}>${W_&&W_.loading?'Thinking…':(c.stage==='completed'?'Ask why no review':'Ask why')}</button>${W_&&W_.err?` <span class="danger" style="font-size:12.5px;">${esc(W_.err)}</span>`:''}</div>`);
-  return `<div class="pl-detail">${top.join('')}${unBanner}${whyBox}${tabs}<div class="plt-body">${body}</div>
+  const bizHead=c.business&&c.business.name?`<div style="text-align:center;font-weight:800;font-size:17px;margin:0 0 10px;color:${BRAND_TEXT[c.business.slug]||'#374151'};">${esc(c.business.name)}</div>`:'';
+  return `<div class="pl-detail">${top.join('')}${unBanner}${bizHead}${whyBox}${tabs}<div class="plt-body">${body}</div>
   </div>`;
 }
 // Owner only (the server also leaves `audit` out for secretaries). Score is
