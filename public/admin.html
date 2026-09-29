@@ -13912,15 +13912,19 @@ const CV_ICON={
 const CV_COLORS=[['#dbeafe','#1d4ed8'],['#fce7f3','#be185d'],['#dcfce7','#15803d'],['#ffedd5','#c2410c'],['#ede9fe','#6d28d9'],['#cffafe','#0e7490']];
 // Call colors (owner 2026-09-30): inbound light blue, outbound green, missed red.
 const CV_DIR={ in:['#e0f2fe','#0369a1','#38bdf8'], out:['#dcfce7','#15803d','#22c55e'], miss:['#fee2e2','#b91c1c','#f87171'] };
+// Red = missed AND not returned (owner 2026-09-30). A returned call is green.
+function cvReturned(r, all){
+  const at=Date.parse(r.occurred_at)||0;
+  return (all||[r]).some(x=>(Date.parse(x.called_back_at||'')||0)>at || (x!==r && (Date.parse(x.occurred_at)||0)>at && (x.kind==='live'||x.answered===true)));
+}
 function cvDir(g){
   const r=g.latest;
-  if(r.answered===false&&r.kind!=='live') return 'miss';
-  const inAt=Date.parse(r.occurred_at)||0;
-  return g.rows.some(x=>(Date.parse(x.called_back_at||'')||0)>inAt)?'out':'in';
+  if(cvReturned(r, g.rows)) return 'out';
+  return r.answered===false&&r.kind!=='live' ? 'miss' : 'in';
 }
 // Earlier calls as the same boxed timeline as the Pipeline card.
-function callEarlierStory(rows){
-  return `<div class="ps-list">${rows.map(r=>{ const [bg,fg]=CV_DIR[r.answered===false&&r.kind!=='live'?'miss':'in'];
+function callEarlierStory(rows, all){
+  return `<div class="ps-list">${rows.map(r=>{ const [bg,fg]=CV_DIR[r.answered===false&&r.kind!=='live'?(cvReturned(r, all||rows)?'out':'miss'):'in'];
     return `<div class="ps-row"><div class="ps-ic" style="background:${bg};color:${fg};">📞</div><div class="ps-box" style="display:block;">${callEarlierRow(r).replace('class="cg-earlier"','class="cg-earlier ps-in"')}</div></div>`; }).join('')}</div>`;
 }
 function cvAvatar(g,size){
@@ -14458,7 +14462,7 @@ function callInboxPhone(groups){
         ${callSplitView(g)||''}
         ${callHaveBoxes(g)}
         ${callSplitView(g)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(r, !g.open, g)}</details>`:callCard(r, !g.open, g)}
-        ${!callSplitView(g)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later)}`:''}
+        ${!callSplitView(g)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later, g.rows)}`:''}
       </div>`:''}
     </div>`; }).join('')}</div>`;
 }
@@ -14478,10 +14482,10 @@ function callInbox(groups){
           const nm=r.customer?.name || (r.history&&r.history.name) || '';
           const qe=r.history&&r.history.last_estimate;
           const quote=(r.booking||callOutcome(r)==='Booked'||(r.history&&r.history.upcoming))?'Booked':qe&&qe.approved_at?'Quote approved':qe&&qe.sent_at?'Quote sent':'Quote not sent';
-          return `<strong style="font-size:15px;${missed?'color:#dc2626;':''}">${vipPre(r.caller_phone)+esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
+          return `<strong style="font-size:15px;${cvDir(g)==='miss'?'color:#dc2626;':''}">${vipPre(r.caller_phone)+esc(nm||'No name')}${vipStar(r.caller_phone)}</strong>
         <span style="font-size:15px;color:var(--ink);font-weight:400;">${esc(r.caller_pretty||r.caller_phone||'Unknown number')}</span>
         <span style="font-size:12.5px;color:var(--mute);">${esc(r.routed_to_name || 'Not assigned')}</span>
-        <span class="cv-out ${g.blocked||missed?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.inArrow+' Not answered':CV_ICON.inArrow+' Answered')+' - '+quote}</span>${(()=>{
+        <span class="cv-out ${g.blocked||cvDir(g)==='miss'?'miss':'ok'}">${g.blocked?'🚫 Blocked':(missed?CV_ICON.inArrow+' Not answered':CV_ICON.inArrow+' Answered')+' - '+quote}</span>${(()=>{
           // We only see an outbound call when someone tapped Call back / logged it
           // (calls go out from their own phones). Show the latest one after the call in.
           const inAt=Date.parse(r.occurred_at)||0; let best=null;
@@ -14495,7 +14499,7 @@ function callInbox(groups){
     ${selected.blocked?`<div class="cg-blocked"><b>🚫 Blocked on every business.</b> This number is rejected before it rings anyone, on every tracking line for every business, and its texts are stopped. Anyone we block is treated as a scammer.</div>`:''}
     ${callSplitView(selected)||''}
     ${callSplitView(selected)?`<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">Latest call details and actions</summary>${callCard(selected.latest, !selected.open, selected, true)}</details>`:callCard(selected.latest, !selected.open, selected, true)}
-    ${!callSplitView(selected)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later)}`:''}
+    ${!callSplitView(selected)&&later.length?`<div class="cap-h" style="margin-top:16px;">Earlier calls (${later.length})</div>${callEarlierStory(later, selected.rows)}`:''}
   </section></div>`;
 }
 // The Text box on a call card: pops that ONE customer's texts over the Calls
