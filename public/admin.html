@@ -3248,7 +3248,7 @@ function ringShow(p){
     bits.push(d.jobs?`<b style="color:#15803d;">Returning customer · ${d.jobs} job${d.jobs===1?'':'s'} · $${Math.round(d.spent).toLocaleString()}</b>`:'<b>New caller</b>');
     if(d.upcoming) bits.push(`Has a job coming up: ${esc(new Date(d.upcoming).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}`);
     for(const e of d.estimates||[]) bits.push(`📄 Estimate${e.biz?' ('+esc(e.biz)+')':''}: $${Number(e.total||0).toFixed(2)} · ${e.approved?'approved':esc(String(e.status||'').replace('contacted','sent'))}`);
-    if(d.last_call&&d.last_call.items&&d.last_call.items.length) bits.push(`<div style="margin-top:4px;padding:6px 8px;background:#f4f6f9;border-radius:8px;">Last call${d.last_call.by&&d.last_call.by!=='Answered'?' with '+esc(d.last_call.by):''}: ${d.last_call.items.map(esc).join(' · ')}</div>`);
+    if(d.last_call&&d.last_call.items&&d.last_call.items.length) bits.push(`<div style="margin-top:4px;padding:6px 8px;background:#f4f6f9;border-radius:8px;">Last call${d.last_call.by&&!/^(answered|booked|blocked number|missed|resolved)$/i.test(d.last_call.by)?' with '+esc(d.last_call.by):''}: ${d.last_call.items.map(esc).join(' · ')}</div>`);
     el.querySelector('[data-ring-info]').innerHTML=bits.map(b=>b.startsWith('<div')?b:`<div>${b}</div>`).join('');
   }).catch(()=>{ const i=el.querySelector('[data-ring-info]'); if(i) i.textContent=''; });
 }
