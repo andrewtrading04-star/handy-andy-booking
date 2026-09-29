@@ -3223,11 +3223,8 @@ function ringShow(p){
       <div style="font-size:19px;font-weight:800;" data-ring-name>${esc(fmtPhone(ph)||'Unknown number')}</div>
       <div style="color:#666;" data-ring-sub>${ph?esc(fmtPhone(ph)):''}${biz?' · '+esc(biz.name):''}</div>
       <div data-ring-info style="margin-top:8px;color:#666;font-size:13px;">Looking up the customer…</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
-        <button type="button" class="btn" data-ring-script style="padding:10px;">Start call script</button>
-        <button type="button" class="btn ghost" data-ring-est style="padding:10px;">Build estimate</button>
-      </div>
-      <button type="button" class="btn ghost" data-ring-calls style="margin-top:8px;width:100%;padding:9px;">Open in Calls</button>
+      <button type="button" class="btn" data-ring-script style="margin-top:12px;width:100%;padding:12px;font-size:15px;">Answer call and start call script</button>
+      <div style="text-align:center;margin-top:6px;"><button type="button" data-ring-ignore style="background:none;border:none;color:#888;font:inherit;font-size:11.5px;text-decoration:underline;cursor:pointer;">Close and ignore the call</button></div>
     </div>`;
   document.body.appendChild(el);
   const close=()=>el.remove();
@@ -3235,8 +3232,9 @@ function ringShow(p){
   // The line's company, always -- never whatever the dashboard happens to show.
   const useBiz=()=>{ if(p.business && businesses.some(b=>b.slug===p.business) && current?.slug!==p.business) switchToBusiness(p.business); };
   el.querySelector('[data-ring-script]').onclick=()=>{ useBiz(); close(); openTakeCall({ phone:ph?fmtPhone(ph):'', name:el.dataset.name||'', business:p.business||current?.slug }); };
-  el.querySelector('[data-ring-est]').onclick=()=>{ close(); plBuildEstimate({ business:{ slug:p.business, name:biz?biz.name:'' }, phone:ph, name:el.dataset.name||'', email:el.dataset.email||'' }); };
-  el.querySelector('[data-ring-calls]').onclick=()=>{ close(); navTo('callhub'); };
+  // Ignoring only closes the card: the call itself is already logged by the
+  // phone system and stays in Calls either way.
+  el.querySelector('[data-ring-ignore]').onclick=close;
   setTimeout(()=>{ if(el.isConnected) el.style.opacity='.92'; },60000);
   if(!ph) return;
   api('ring_card',{ params:{ phone:ph } }).then(d=>{
