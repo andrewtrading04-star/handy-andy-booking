@@ -14896,7 +14896,7 @@ function msgAvatar(t){
 function paintMessages(){
   const view=document.getElementById('view');
   // Owner 2026-09-28: only the last 7 days show here. Older texts are kept, just hidden.
-  const _cut=Date.now()-7*86400000;
+  const _cut=workDayStart(7).getTime();   // 7 full US work days + today, not the viewer's clock
   const rows=(_msgThreads||[]).filter(t=>!t.last_at||new Date(t.last_at).getTime()>=_cut);
   const totalUnread=rows.reduce((n,t)=>n+(t.unread||0),0);
 

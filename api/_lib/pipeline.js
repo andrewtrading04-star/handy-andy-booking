@@ -76,6 +76,9 @@ const RANGE_DAYS = { today: 0, 2: 1, yesterday: 1, 7: 6, 30: 29 };   // '2' = to
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CARD_KEY = /^c_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TEST_NAME = /\(ignore\)|e2e test/i;
+// A text that's selling something to us, not asking for a job: links, app
+// stores, lead/marketing/payment pitches.
+const SPAM_TEXT = /https?:\/\/|www\.|apps\.apple|play\.google|download .*free|\bupfront\b|\bour (system|director|platform)\b|\bproviders?\b.*\bjoin\b|\bleads? (for|to) (you|your)\b|\bW-?9\b|\bSEO\b|google (listing|ranking|reviews? for your)|\bmerchant\b|\bfunding\b|\bbusiness loan\b|\bgrow your business\b|reply stop to (opt|unsub)/i;
 const REPEATED = /^(\d)\1{9}$/;
 
 // ── Small helpers ───────────────────────────────────────────────────────────
@@ -315,7 +318,10 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
     if (m.direction === 'in') {
       // Texts to the toll-free are replies to our automated texts (existing
       // customers): they join a card but never open one.
-      touches.push({ ...base, type: 'text_in', canOpen: !!line && our !== TOLL_FREE });
+      // Sales pitches (owner 2026-09-30: an app ad, "jobs for $0 upfront",
+      // "we still need your W-9") never OPEN a card. A real customer who
+      // already has a card still sees the text on it.
+      touches.push({ ...base, type: 'text_in', canOpen: !!line && our !== TOLL_FREE && !SPAM_TEXT.test(body) });
     } else if (!m.sent_by || m.sent_by === 'automated') {
       touches.push({ ...base, type: 'text_auto', canOpen: false, auto: autoKind(body), failed: m.status === 'failed' || m.status === 'undelivered' });
     } else {
