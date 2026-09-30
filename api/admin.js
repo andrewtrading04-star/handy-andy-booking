@@ -815,7 +815,7 @@ async function login(req, res, body) {
   }
   // `scope` stays the ONE primary business (every company-specific tool keys
   // off it); `allowed` is the extra brands this person also answers for.
-  const token = signToken({ kind: 'admin', role, scope, name, ...(loginExtra.length ? { allowed: loginExtra } : {}), sess: 1 });
+  const token = signToken({ kind: 'admin', role, scope, name, ...(loginExtra.length ? { allowed: loginExtra } : {}), sess: 1 }, ADMIN_SESSION_MAX);   // stays signed in 7 days, even idle (Joey 2026-09-30)
   // Tell the dashboard which outbound channels are wired up so it can show or
   // hide the Send SMS / Send Email buttons instead of surfacing a dead click.
   const config = {
@@ -898,7 +898,7 @@ async function sessionStatus(req, res) {
   if (!auth || auth.kind !== 'admin') return res.status(401).json({ error: 'Unauthorized' });
   // Slide the session (refreshToken in _lib/auth.js): the dashboard adopts the
   // returned token; a capped or non-session token is echoed unchanged.
-  const fresh = refreshToken(auth, { maxSeconds: ADMIN_SESSION_MAX });
+  const fresh = refreshToken(auth, { ttlSeconds: ADMIN_SESSION_MAX, maxSeconds: ADMIN_SESSION_MAX });
   const claims = fresh ? verifyToken(fresh) : auth;
 
   const db = serviceClient();
