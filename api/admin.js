@@ -8338,6 +8338,9 @@ const GMB_LISTINGS = {
   },
   'doms': {
     _all: ['https://g.page/r/Cffr7Tp2DSNOEBM/review'],
+    // Oklahoma listings (owner 2026-10-01).
+    okc:   ['https://g.page/r/CVzdSzBVNisHEBM/review'],
+    tulsa: ['https://g.page/r/CWgqNbH57DHDEBM/review'],
   },
 };
 // Technician first name (lowercase) -> metro. Extend as the roster grows.
@@ -8357,8 +8360,14 @@ function hashIndex(str, n) {
 // Resolve the Google review URL for a booking. `bookingId` keeps the choice
 // stable across page refreshes; the hash spreads bookings across the metro's
 // listings so both accounts collect reviews.
-function resolveGoogleReviewUrl({ slug, techName, areaName, bookingId }) {
-  if (slug === 'doms') return GMB_LISTINGS.doms._all[0] || null;
+function resolveGoogleReviewUrl({ slug, techName, areaName, bookingId, state, city, zip }) {
+  if (slug === 'doms') {
+    // Oklahoma jobs go to that city's listing: Tulsa by city or 740/741 ZIP, else OKC.
+    if (/^ok/i.test(String(state || '')) || /^7[34]\d/.test(String(zip || ''))) {
+      return (/tulsa/i.test(String(city || '')) || /^74[01]/.test(String(zip || ''))) ? GMB_LISTINGS.doms.tulsa[0] : GMB_LISTINGS.doms.okc[0];
+    }
+    return GMB_LISTINGS.doms._all[0] || null;
+  }
 
   const metros = GMB_LISTINGS[slug];
   if (!metros) return null;
@@ -8406,7 +8415,7 @@ async function reviewCheck(req, res, body) {
 
   const db = serviceClient();
   const { data: booking, error } = await db.from('bookings')
-    .select('id, reviewed_at, service_area:service_areas(name), technician:technicians!technician_id(name), business:businesses(slug, name)')
+    .select('id, reviewed_at, city, state, postal_code, service_area:service_areas(name), technician:technicians!technician_id(name), business:businesses(slug, name)')
     .eq('id', reviewToken.booking_id)
     .single();
 
@@ -8426,6 +8435,7 @@ async function reviewCheck(req, res, body) {
     techName: booking.technician?.name || '',
     areaName: booking.service_area?.name || '',
     bookingId: booking.id,
+    state: booking.state, city: booking.city, zip: booking.postal_code,
   });
 
   return res.status(200).json({
