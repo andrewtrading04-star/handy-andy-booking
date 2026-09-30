@@ -9,8 +9,8 @@ Items marked **(confirm)** are unverified.
 |---|---|---|---|---|
 | **Heather** | Lead phone rep — **Handy Andy Denver** (locked) | 7 days/wk now → goal 6 | $665/wk | Star performer. Perfect English, great on the phone, follows instructions exactly. Needs a day off but needs the income. |
 | **Joey** (she) | Personal assistant + social media manager. **Off incoming calls.** | 7 days/wk | ~₱14,800/wk **(confirm)** | Philippines. Excellent at completing tasks; weak at sales/incoming calls. Sometimes struggles with night hours but tries. |
-| **Alex** (he) | Night shift incoming calls + heavy cold calling | 4 days/wk (promised) | ₱2,000/day (~₱8,000/wk) | New. High expectations; expected to push cold calls hard. |
-| **Joe** | Incoming calls (reliability role) | 4 days/wk (promised) | **(confirm)** | Expected to be very reliable; sales ability unknown — no data yet. |
+| **Alex** (he) | Night shift incoming calls + heavy cold calling | 4 days/wk (promised), **Mon–Fri only — Sat & Sun off** (his request) | ₱2,000/day (~₱8,000/wk) | New. Has commitments on Saturdays. High expectations; expected to push cold calls hard. |
+| **Joe** | Incoming calls (reliability role) | 4 days/wk (promised), **available any day** | **(confirm)** | Expected to be very reliable; sales ability unknown — no data yet. |
 
 ## Core routing rule: no cross-brand overlap per city
 
@@ -25,9 +25,17 @@ Rule: **within one city, each brand line goes to a different rep.** Split by cit
 
 ## Coverage plan (proposed)
 
-- **Heather:** Handy Andy Denver, 6 days. On her day off, Joe covers Handy Andy Denver — and on that day Denver's Dom's line must go to Alex (not Joe).
-- **Alex:** nights, 4 days, incoming calls + cold calls.
-- **Joe:** days, 4 days, incoming calls; covers Heather's day off.
+- **Heather:** Handy Andy Denver, 6 days, off on a weekday (proposed: Wednesday).
+- **Alex:** nights, 4 of Mon–Fri (proposed Mon, Tue, Wed, Thu), incoming + cold calls. Never weekends.
+- **Joe:** 4 days = **Sat + Sun** (Alex's gap) + **Wed** (Heather's day off, covers Handy Andy Denver) + **Fri** (Alex's weekday off).
+- On Wed, Joe has Handy Andy Denver, so Dom's Denver must go to Alex that day — never Joe.
+
+| | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+|---|---|---|---|---|---|---|---|
+| Heather | ✓ | ✓ | off | ✓ | ✓ | ✓ | ✓ |
+| Alex (nights) | ✓ | ✓ | ✓ | ✓ | off | off | off |
+| Joe | | | ✓ (covers Heather) | | ✓ | ✓ | ✓ |
+| Joey | tasks / social — no calls |||||||
 - **Joey:** no incoming calls. Daily owner-task list + all online/social media work.
 
 ### Offsetting Heather's cost
@@ -45,5 +53,5 @@ Rule: **within one city, each brand line goes to a different rep.** Split by cit
 ## Open items
 - Confirm Joey's exact weekly pay.
 - Set Joe's pay.
-- Pick Heather's day off and Alex/Joe's 4 days so every line is covered 7 days.
+- Confirm Heather's day off (proposed Wed) and whether Joe's Fri/Sat/Sun shifts are nights (to cover Alex's slot).
 - List every brand × city line and fill the routing table.
