@@ -8,7 +8,7 @@ Items marked **(confirm)** are unverified.
 | Name | Role (planned) | Schedule | Pay | Notes |
 |---|---|---|---|---|
 | **Heather** | Lead phone rep — **Handy Andy Denver** (locked) | 7 days/wk now → goal 6 | $665/wk | Star performer. Perfect English, great on the phone, follows instructions exactly. Needs a day off but needs the income. |
-| **Joey** (she) | Personal assistant + social media manager. **Off incoming calls.** | 7 days/wk | ~₱14,800/wk **(confirm)** | Philippines. Excellent at completing tasks; weak at sales/incoming calls. Sometimes struggles with night hours but tries. |
+| **Joey** (she) | Personal assistant + social media manager. **Off incoming calls.** | **5 days/wk, Mon–Fri** | ~₱14,800/wk **(confirm)** | Philippines. Excellent at completing tasks; weak at sales/incoming calls. Sometimes struggles with night hours but tries. |
 | **Alex** (he) | Night shift incoming calls + heavy cold calling | 4 days/wk (promised), **Mon–Fri only — Sat & Sun off** (his request) | ₱2,000/day (~₱8,000/wk) | New. Has commitments on Saturdays. High expectations; expected to push cold calls hard. |
 | **Joe** | Incoming calls (reliability role) | 4 days/wk (promised), **available any day** | **(confirm)** | Expected to be very reliable; sales ability unknown — no data yet. |
 
@@ -35,7 +35,7 @@ Rule: **within one city, each brand line goes to a different rep.** Split by cit
 | Heather | ✓ | ✓ | off | ✓ | ✓ | ✓ | ✓ |
 | Alex (nights) | ✓ | ✓ | ✓ | ✓ | off | off | off |
 | Joe | | | ✓ (covers Heather) | | ✓ | ✓ | ✓ |
-| Joey | tasks / social — no calls |||||||
+| Joey | ✓ | ✓ | ✓ | ✓ | ✓ | off | off |
 - **Joey:** no incoming calls. Daily owner-task list + all online/social media work.
 
 ### Offsetting Heather's cost
@@ -55,3 +55,7 @@ Rule: **within one city, each brand line goes to a different rep.** Split by cit
 - Set Joe's pay.
 - Confirm Heather's day off (proposed Wed) and whether Joe's Fri/Sat/Sun shifts are nights (to cover Alex's slot).
 - List every brand × city line and fill the routing table.
+
+## CRM rules
+- Alex and Joe: show their schedule in their own CRM login and update their CRM availability to match. Send each a note to open it. **Do not start paying them yet.**
+- **Share nothing about this plan with Joey** (other people's schedules, pay, or role changes).
