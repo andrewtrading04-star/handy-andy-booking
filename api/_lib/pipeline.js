@@ -858,10 +858,10 @@ function timelineFor(card, st, mark, audits) {
       case 'wizard': {
         const r = t.live.resolution;
         // Only a real sent estimate moves a card to Quoted (owner 2026-09-27).
-        const how = r === 'booked' ? ' · booked' : r === 'estimate_sent' ? (card.touches.some((x) => x.type === 'estimate' && x.est.sentMs != null) ? ' · estimate sent' : ' · marked estimate sent, but none was sent') : r === 'refused' ? ' · customer declined'
-          : r === 'other' ? ' · other outcome' : t.live.step ? ` · stopped at ${t.live.step}` : '';
-        const q = t.live.quoted ? ` · quoted ${dollars(t.live.quoted)}` : '';
-        out.push({ ...item(t.atMs, 'script', `Take a Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'), price: t.live.quoted || null });
+        const how = r === 'booked' ? ' · booked' : r === 'estimate_sent' ? (card.touches.some((x) => x.type === 'estimate' && x.est.sentMs != null) ? ' · estimate sent' : ' · estimate marked sent, none sent') : r === 'refused' ? ' · declined'
+          : r === 'other' ? ' · other' : t.live.step ? ` · stopped at ${t.live.step}` : '';
+        const q = t.live.quoted ? ` · ${dollars(t.live.quoted)}` : '';   // short (owner 2026-09-30)
+        out.push({ ...item(t.atMs, 'script', `Call script${how}${q}`, t.staff, r === 'refused' ? 'warn' : 'ok'), price: t.live.quoted || null });
         break;
       }
       case 'text_in': out.push({ ...item(t.atMs, 'text', t.body ? `Text: ${clip(t.body, 600)}` : 'Texted a photo', null, 'ok'), msg_id: t.id, media: !t.body }); break;
