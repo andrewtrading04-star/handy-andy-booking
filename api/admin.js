@@ -8338,10 +8338,15 @@ const GMB_LISTINGS = {
   },
   'doms': {
     _all: ['https://g.page/r/Cffr7Tp2DSNOEBM/review'],
-    // Oklahoma listings (owner 2026-10-01).
-    okc:   ['https://g.page/r/CVzdSzBVNisHEBM/review'],
-    tulsa: ['https://g.page/r/CWgqNbH57DHDEBM/review'],
   },
+  // A1 TV Mounting, DFW (owner 2026-10-01).
+  a1tvmounting: { _all: ['https://g.page/r/CeBT0JzNUua1EBM/review'] },
+};
+// Oklahoma locations bought from Dom (owner 2026-10-01). Any business's job
+// with an Oklahoma address gets these, whichever brand booked it.
+const OK_REVIEW = {
+  okc:   'https://g.page/r/CVzdSzBVNisHEBM/review',
+  tulsa: 'https://g.page/r/CWgqNbH57DHDEBM/review',
 };
 // Technician first name (lowercase) -> metro. Extend as the roster grows.
 const TECH_METRO = {
@@ -8361,13 +8366,12 @@ function hashIndex(str, n) {
 // stable across page refreshes; the hash spreads bookings across the metro's
 // listings so both accounts collect reviews.
 function resolveGoogleReviewUrl({ slug, techName, areaName, bookingId, state, city, zip }) {
-  if (slug === 'doms') {
-    // Oklahoma jobs go to that city's listing: Tulsa by city or 740/741 ZIP, else OKC.
-    if (/^ok/i.test(String(state || '')) || /^7[34]\d/.test(String(zip || ''))) {
-      return (/tulsa/i.test(String(city || '')) || /^74[01]/.test(String(zip || ''))) ? GMB_LISTINGS.doms.tulsa[0] : GMB_LISTINGS.doms.okc[0];
-    }
-    return GMB_LISTINGS.doms._all[0] || null;
+  // Oklahoma jobs go to that city's listing: Tulsa by city or 740/741 ZIP, else OKC.
+  if (/^ok/i.test(String(state || '')) || /^7[34]\d/.test(String(zip || ''))) {
+    return (/tulsa/i.test(String(city || '')) || /^74[01]/.test(String(zip || ''))) ? OK_REVIEW.tulsa : OK_REVIEW.okc;
   }
+  if (slug === 'doms') return GMB_LISTINGS.doms._all[0] || null;
+  if (GMB_LISTINGS[slug] && GMB_LISTINGS[slug]._all) return GMB_LISTINGS[slug]._all[0] || null;
 
   const metros = GMB_LISTINGS[slug];
   if (!metros) return null;
