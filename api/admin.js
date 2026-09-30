@@ -7434,6 +7434,9 @@ async function receiptSend(req, res, db, auth, body) {
   if (kind === 'invoice' && total + tip <= 0) {
     return res.status(400).json({ error: 'This job has no price set, so there is nothing to invoice. Add the line items first.' });
   }
+  // An invoice must carry the pay link (owner 2026-09-30: Edwin's invoices had
+  // none). invoice_send builds the Stripe link and texts it too.
+  if (kind === 'invoice') return invoiceSend(req, res, db, auth, body);
 
   // Tax rides in the line items as its own row; split it out so the receipt
   // shows a true subtotal + tax rather than burying tax among the services.
@@ -7668,7 +7671,7 @@ async function invoiceSend(req, res, db, auth, body) {
 
   console.log(`[invoice] sent for ${id} by ${auth.name || auth.role} to ${b.customer.email}${smsResult.ok ? ' + sms' : ''}`);
   return res.status(200).json({
-    ok: true, to: b.customer.email, amountDue,
+    ok: true, kind: 'invoice', to: b.customer.email, amountDue,
     sms: smsResult.ok ? 'sent' : (smsResult.skipped || smsResult.error || 'not_sent'),
     payUrl: !!payUrl,
   });
