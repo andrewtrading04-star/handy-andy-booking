@@ -11351,9 +11351,9 @@ function renderStaffNotesPane(){
         <div style="flex:1;min-width:150px;">
           <label for="noteTarget" style="${NOTE_LABEL_CSS}">FOR</label>
           <select id="noteTarget" style="${NOTE_FIELD_CSS}">
-            <option value="">Both secretaries</option>
+            <option value="">All secretaries</option>
             <option value="handy-andy">Handy Andy (Heather) only</option>
-            <option value="doms">Dom's (Joey) only</option>
+            <option value="doms">Dom's only (Joey, Alex, Joe)</option>
             ${role!=='owner'?'<option value="owner">Andrew only</option>':''}
           </select>
         </div>
@@ -11417,7 +11417,7 @@ async function loadNotesRecent(){
     if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
     wrap.className='';
     wrap.innerHTML=notes.map(n=>{
-      const who=n.to_owner ? 'Andrew' : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'Both';
+      const who=n.to_owner ? 'Andrew' : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'All';
       const reads=n.reads||[];
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
