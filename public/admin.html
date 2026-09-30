@@ -9488,6 +9488,14 @@ async function renderMyAvailability(){
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('secretary_availability');
+    // Alex / Joe: their own days, read-only (owner 2026-09-30).
+    if(d.personal){
+      const on=new Map((d.days||[]).map(x=>[x.day_of_week,x]));
+      const t=v=>{ const [h,m]=String(v||'').split(':').map(Number); return `${h%12||12}${m?':'+String(m).padStart(2,'0'):''} ${h<12?'AM':'PM'}`; };
+      view.innerHTML=`<div class="wrap"><h2 style="margin:0 0 12px;">My schedule</h2>${[1,2,3,4,5,6,0].map(dow=>{ const x=on.get(dow);
+        return `<div class="job" style="display:flex;justify-content:space-between;align-items:center;"><div class="name">${esc(d.day_names[dow])}</div><div class="meta" style="font-weight:700;">${x?`${t(x.start_time)} – ${t(x.end_time)} Denver`:'Off'}</div></div>`; }).join('')}</div>`;
+      return;
+    }
     const patternByDow={}; (d.pattern||[]).forEach(p=>{ patternByDow[p.day_of_week]=p.is_available; });
     const excByDate={}; (d.exceptions||[]).forEach(e=>{ excByDate[e.exception_date]=e.is_available; });
     const dayRow=(dow)=>{
@@ -11354,6 +11362,7 @@ function renderStaffNotesPane(){
             <option value="">All secretaries</option>
             <option value="handy-andy">Handy Andy (Heather) only</option>
             <option value="doms">Dom's only (Joey, Alex, Joe)</option>
+            ${role==='owner'?'<option value="person:Heather">Heather only</option><option value="person:Joey">Joey only</option><option value="person:Alex">Alex only</option><option value="person:Joe">Joe only</option>':''}
             ${role!=='owner'?'<option value="owner">Andrew only</option>':''}
           </select>
         </div>

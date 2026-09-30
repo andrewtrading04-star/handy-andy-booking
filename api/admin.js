@@ -15148,6 +15148,12 @@ async function fetchSecretaryAvailability(db, bizId) {
 // owner must pass ?business= to pick which one.
 async function secretaryAvailability(req, res, db, auth) {
   let slug;
+  // Alex / Joe (owner 2026-09-30): their OWN weekly schedule, read-only. They
+  // never see or change the business's (Joey's) days.
+  if (auth.role === 'secretary' && auth.name && auth.name !== displayNameFor(auth.scope)) {
+    const { data: days } = await db.from('staff_schedules').select('day_of_week, start_time, end_time, timezone').eq('name', auth.name).order('day_of_week');
+    return res.status(200).json({ personal: true, name: auth.name, day_names: DOW_NAMES, days: days || [] });
+  }
   if (auth.role === 'secretary') slug = auth.scope;
   else if (auth.role === 'owner') slug = (req.query.business || '').toString();
   else return res.status(403).json({ error: 'Not authorized' });
@@ -15170,6 +15176,7 @@ async function secretaryAvailability(req, res, db, auth) {
 async function secretaryAvailabilitySet(req, res, db, auth) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (auth.role !== 'secretary') return res.status(403).json({ error: 'Secretary only' });
+  if (auth.name && auth.name !== displayNameFor(auth.scope)) return res.status(403).json({ error: 'Your schedule is set by Andrew.' });
   const dayOfWeek = parseInt(req.body?.day_of_week, 10);
   const isAvailable = !!(req.body || {}).is_available;
   if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return res.status(400).json({ error: 'day_of_week (0-6) required' });
@@ -15277,6 +15284,7 @@ async function recordSecretaryChange(db, { biz, scope, kind, dayOfWeek = null, d
 async function secretaryAvailabilityExceptionSet(req, res, db, auth) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const body = req.body || {};
+  if (auth.role === 'secretary' && auth.name && auth.name !== displayNameFor(auth.scope)) return res.status(403).json({ error: 'Your schedule is set by Andrew.' });
   let scope;
   if (auth.role === 'secretary') scope = auth.scope;
   else if (auth.role === 'owner') scope = (body.business || '').toString();
@@ -15364,7 +15372,7 @@ async function notesActive(req, res, db, auth) {
   const reader = noteReader(auth);
   const isOwner = auth.role === 'owner';
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
+    .select('id, target_slug, target_name, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(100);
@@ -15378,6 +15386,8 @@ async function notesActive(req, res, db, auth) {
     .filter(n => (n.created_by || '') !== reader)
     // Jiyah (auditor) only gets notes addressed to her (target_slug 'auditor', owner 2026-09-28).
     .filter(n => auth.auditor ? n.target_slug === 'auditor' : isOwner ? !!n.to_owner : (!n.to_owner && n.target_slug !== 'auditor' && (!n.target_slug || n.target_slug === auth.scope)))
+    // A one-person note is seen by that person only.
+    .filter(n => !n.target_name || (!isOwner && !auth.auditor && n.target_name === auth.name))
     .filter(n => noteIsLive(n, today));
 
   return res.status(200).json({ notes, count: notes.length });
@@ -15514,12 +15524,14 @@ async function notesAdd(req, res, db, auth, body) {
   if (!text) return res.status(400).json({ error: 'Write something first' });
   if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
   const toOwner = body.target === 'owner';
-  const target = !toOwner && body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+  // One person only (owner 2026-09-30): target 'person:<Name>'.
+  const person = /^person:(Heather|Joey|Alex|Joe)$/.exec(String(body.target || ''));
+  const target = person ? null : !toOwner && body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
   const mode = ['today', 'two_days', 'until_read'].includes(body.mode) ? body.mode : 'today';
   const when = resolveSendAt(body);
   if (when.error) return res.status(400).json({ error: when.error });
   const { data, error } = await db.from('staff_notes')
-    .insert({ body: text, target_slug: target, to_owner: toOwner, mode, show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
+    .insert({ body: text, target_slug: target, target_name: person ? person[1] : null, to_owner: toOwner, mode, show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Owner', photo_urls: cleanNotePhotos(body.photos) })
     .select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
