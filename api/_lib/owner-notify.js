@@ -37,7 +37,9 @@ const BIG_BRACKET_THRESHOLD = 4;
 export function bracketCountFromLines(lines) {
   return (Array.isArray(lines) ? lines : []).reduce((n, l) => {
     const name = String(l.name || l.label || '');
-    if (/i have my own bracket/i.test(name)) return n;
+    // Customer's own hardware never counts: "I have my own bracket", and the
+    // Samsung Frame's in-the-box bracket (owner 2026-10-01: 7 Frames + 2 Flat = 2).
+    if (/i have my own bracket|comes in the box|frame tv|using the bracket/i.test(name)) return n;
     const isBracket = /\bbracket\b/i.test(name)
       || /^flat$/i.test(name.trim())
       || /^tilting/i.test(name.trim())
