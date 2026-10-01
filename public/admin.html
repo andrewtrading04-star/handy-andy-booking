@@ -15255,7 +15255,7 @@ function paintMessages(){
     const key=msgKey(_msgThread.our_phone, _msgThread.customer_phone);
     ta.addEventListener('input',()=>{ _msgDraft[key]=ta.value; });
     const sendBtn=view.querySelector('[data-msgsend]');
-    const MSG_MAX_WORDS=200, box=ta.closest('.msg-stx');
+    const MSG_MAX_WORDS=100, box=ta.closest('.msg-stx');
     const words=v=>(v.trim().match(/\S+/g)||[]).length;
     const msgStx=()=>{
       ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,140)+'px';
