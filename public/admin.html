@@ -110,16 +110,19 @@
   .sb-collapse{display:none;}
   body.sb-glass .sb-collapse{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:#111;font-size:13px;font-weight:900;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 1px var(--line);}
   @media(min-width:761px){
-    body.sb-glass.sb-mini .sidebar{width:76px;overflow-x:hidden;}
-    body.sb-glass.sb-mini .logo .ttl, body.sb-glass.sb-mini #takeCallBtn, body.sb-glass.sb-mini .switcher, body.sb-glass.sb-mini .seg,
-    body.sb-glass.sb-mini #schedSidebar, body.sb-glass.sb-mini #who, body.sb-glass.sb-mini #whoChevron, body.sb-glass.sb-mini #logout, body.sb-glass.sb-mini #viewAsBanner{display:none !important;}
-    body.sb-glass.sb-mini .side-head{flex-direction:column;gap:10px;padding:14px 0 10px;}
-    body.sb-glass.sb-mini .logo{flex:none;}
-    body.sb-glass.sb-mini .side-section{font-size:8.5px;letter-spacing:.5px;padding:12px 0 4px;text-align:center;}
-    body.sb-glass.sb-mini .side-nav button{font-size:0;justify-content:center;position:relative;padding:12px 0;}
-    body.sb-glass.sb-mini .side-nav button .ic{font-size:17px;width:auto;}
-    body.sb-glass.sb-mini .side-nav .nav-badge{position:absolute;top:4px;right:12px;font-size:9px;min-width:14px;height:14px;line-height:14px;padding:0 3px;}
-    body.sb-glass.sb-mini .side-foot{justify-content:center;}
+    /* Mini menu opens over the page while the cursor is on it (owner 2026-10-01). */
+    body.sb-glass.sb-mini .app-shell{padding-left:76px;}
+    body.sb-glass.sb-mini .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;width:76px;overflow-x:hidden;transition:width .15s ease,box-shadow .15s ease;}
+    body.sb-glass.sb-mini .sidebar:hover{width:248px;box-shadow:8px 0 30px rgba(20,30,50,.18);}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .logo .ttl, body.sb-glass.sb-mini .sidebar:not(:hover) #takeCallBtn, body.sb-glass.sb-mini .sidebar:not(:hover) .switcher, body.sb-glass.sb-mini .sidebar:not(:hover) .seg,
+    body.sb-glass.sb-mini .sidebar:not(:hover) #schedSidebar, body.sb-glass.sb-mini .sidebar:not(:hover) #who, body.sb-glass.sb-mini .sidebar:not(:hover) #whoChevron, body.sb-glass.sb-mini .sidebar:not(:hover) #logout, body.sb-glass.sb-mini .sidebar:not(:hover) #viewAsBanner{display:none !important;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-head{flex-direction:column;gap:10px;padding:14px 0 10px;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .logo{flex:none;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-section{font-size:8.5px;letter-spacing:.5px;padding:12px 0 4px;text-align:center;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-nav button{font-size:0;justify-content:center;position:relative;padding:12px 0;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-nav button .ic{font-size:17px;width:auto;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-nav .nav-badge{position:absolute;top:4px;right:12px;font-size:9px;min-width:14px;height:14px;line-height:14px;padding:0 3px;}
+    body.sb-glass.sb-mini .sidebar:not(:hover) .side-foot{justify-content:center;}
   }
   .side-section.collapsible{cursor:pointer;display:flex;align-items:center;gap:6px;list-style:none;user-select:none;}
   .side-section.collapsible::-webkit-details-marker{display:none;}
