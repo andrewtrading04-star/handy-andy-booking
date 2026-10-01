@@ -106,28 +106,9 @@
   @media(prefers-reduced-motion:reduce){.nav-badge.urgent{animation:none;}}
 
   .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
-  /* ── Dark glass sidebar (owner trial 2026-10-01; remove body.sb-glass to revert) ── */
-  body.sb-glass .sidebar{background:linear-gradient(180deg,#2a2c30 0%,#1b1c1f 100%);border-right:1px solid #33363b;color:#e5e7eb;transition:width .18s ease;}
-  body.sb-glass .logo{color:#fff;}
-  body.sb-glass .plus{color:#fff;border-color:#45484e;background:rgba(255,255,255,.04);}
-  body.sb-glass .switcher button{background:rgba(255,255,255,.05);border-color:#3a3d42;color:#c3c7ce;}
-  body.sb-glass .switcher button.on{background:#c8102e;border-color:#c8102e;color:#fff;}
-  body.sb-glass .seg{background:rgba(255,255,255,.06);}
-  body.sb-glass .seg button{color:#aeb3bb;}
-  body.sb-glass .seg button.on{background:#3a3d42;color:#fff;box-shadow:none;}
-  body.sb-glass .side-section{color:#8b9099;letter-spacing:1.2px;}
-  body.sb-glass .side-nav button{color:#d6d9de;border-radius:0;margin:0 -8px;padding:10px 18px;width:calc(100% + 16px);}
-  body.sb-glass .side-nav button:hover{background:rgba(255,255,255,.07);}
-  body.sb-glass .side-nav button.on{background:#c8102e;color:#fff;}
-  body.sb-glass .nav-badge{background:#dc2626;}
-  body.sb-glass .side-nav button.on .nav-badge{background:#fff;color:#c8102e;}
-  body.sb-glass .side-list, body.sb-glass .side-list *{color:#c3c7ce;}
-  body.sb-glass .side-foot{border-top-color:#33363b !important;}
-  body.sb-glass #who{color:#e5e7eb;}
-  body.sb-glass #logout{background:transparent;color:#d6d9de;border-color:#45484e;}
-  body.sb-glass #whoAv{background:#c8102e !important;}
+  /* ── Collapsible sidebar (owner trial 2026-10-01; dark theme removed same day at his request) ── */
   .sb-collapse{display:none;}
-  body.sb-glass .sb-collapse{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:#111;font-size:13px;font-weight:900;cursor:pointer;flex-shrink:0;}
+  body.sb-glass .sb-collapse{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:#111;font-size:13px;font-weight:900;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 1px var(--line);}
   @media(min-width:761px){
     body.sb-glass.sb-mini .sidebar{width:76px;overflow-x:hidden;}
     body.sb-glass.sb-mini .logo .ttl, body.sb-glass.sb-mini #takeCallBtn, body.sb-glass.sb-mini .switcher, body.sb-glass.sb-mini .seg,
