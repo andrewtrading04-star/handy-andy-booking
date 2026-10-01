@@ -1073,6 +1073,23 @@
   .msg-thread .msg-meta{font-size:11px;color:var(--mute);margin-top:3px;}
   .msg-ireply{display:flex;align-items:flex-end;gap:8px;padding:8px 10px;}
   .msg-icall{flex:none;width:34px;height:34px;border-radius:50%;border:none;background:var(--line2);font-size:15px;cursor:pointer;}
+  .msg-stx{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;background:var(--card,#fff);transition:border-color .2s,box-shadow .2s;}
+  .msg-stx:focus-within{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.15);}
+  .msg-stx.over{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.12);}
+  .msg-stx .msg-ibox{border:0 !important;background:transparent !important;box-shadow:none !important;}
+  .msg-stx-bar{display:flex;align-items:center;gap:6px;padding:0 8px 6px 10px;}
+  .msg-stx-emo{width:26px;height:26px;border:0;border-radius:8px;background:#f4f2ff;color:#7c5cff;cursor:pointer;font-size:14px;line-height:1;}
+  .msg-stx-count{margin-left:auto;font-size:11px;font-weight:700;color:var(--mute);padding:2px 8px;border-radius:999px;background:#f3f4f6;}
+  .msg-stx-count:empty{display:none;}
+  .msg-stx.over .msg-stx-count{background:#fee2e2;color:#ef4444;}
+  .msg-stx-prog{position:absolute;left:14px;right:14px;bottom:0;height:2px;overflow:hidden;border-radius:2px;}
+  .msg-stx-prog i{display:block;height:100%;width:0;background:#7c5cff;transition:width .2s;}
+  .msg-stx.over .msg-stx-prog i{background:#ef4444;}
+  .msg-stx-pop{position:absolute;bottom:calc(100% + 6px);left:0;display:none;grid-template-columns:repeat(6,1fr);gap:2px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 12px 30px rgba(0,0,0,.12);z-index:20;}
+  .msg-stx-pop.open{display:grid;}
+  .msg-stx-pop button{border:0;background:none;font-size:20px;cursor:pointer;border-radius:8px;padding:4px;}
+  .msg-stx-pop button:hover{background:#f3f4f6;}
+  .msg-isend:disabled{opacity:.4;cursor:not-allowed;}
   .msg-ibox{flex:1;min-width:0;border:1px solid var(--line);border-radius:18px;padding:8px 14px;font:inherit;font-size:15px;resize:none;max-height:140px;background:var(--card,#fff);color:var(--ink);outline:none;}
   .msg-isend{flex:none;width:34px;height:34px;border-radius:50%;border:none;background:#0B84FF;color:#fff;font-size:18px;font-weight:800;cursor:pointer;line-height:1;}
   @media(max-width:880px){ .msg-wrap:has(.msg-shell.detail-open) > .rc-head, .msg-wrap:has(.msg-shell.detail-open) > .rc-sub{display:none;} }
@@ -15238,10 +15255,28 @@ function paintMessages(){
     const key=msgKey(_msgThread.our_phone, _msgThread.customer_phone);
     ta.addEventListener('input',()=>{ _msgDraft[key]=ta.value; });
     const sendBtn=view.querySelector('[data-msgsend]');
+    const MSG_MAX_WORDS=200, box=ta.closest('.msg-stx');
+    const words=v=>(v.trim().match(/\S+/g)||[]).length;
+    const msgStx=()=>{
+      ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,140)+'px';
+      const n=words(ta.value), over=n>MSG_MAX_WORDS;
+      box.classList.toggle('over',over);
+      box.querySelector('.msg-stx-count').textContent=n?n+'/'+MSG_MAX_WORDS:'';
+      box.querySelector('.msg-stx-prog i').style.width=Math.min(100,n/MSG_MAX_WORDS*100)+'%';
+      sendBtn.disabled=over; sendBtn.title=over?'Over '+MSG_MAX_WORDS+' words':'Send';
+    };
+    ta.addEventListener('input',msgStx); msgStx();
+    const pop=box.querySelector('.msg-stx-pop');
+    pop.innerHTML=['😀','😊','👍','🙏','✅','📅','📍','⏰','🔧','📺','🚗','⭐'].map(e=>'<button type="button">'+e+'</button>').join('');
+    box.querySelector('[data-msgemo]').addEventListener('click',ev=>{ ev.stopPropagation(); pop.classList.toggle('open'); });
+    pop.addEventListener('click',ev=>{ const b=ev.target.closest('button'); if(!b) return;
+      ta.setRangeText(b.textContent,ta.selectionStart,ta.selectionEnd,'end'); ta.focus(); ta.dispatchEvent(new Event('input')); pop.classList.remove('open'); });
+    document.addEventListener('click',ev=>{ if(!pop.contains(ev.target)) pop.classList.remove('open'); });
     sendBtn.addEventListener('click',async(ev)=>{
       const btn=ev.currentTarget;
       const text=(ta.value||'').trim();
       if(!text){ toast('Type a message first'); return; }
+      if(words(text)>MSG_MAX_WORDS){ toast('Over '+MSG_MAX_WORDS+' words'); return; }
       btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
       const t=_msgThread;
       try{
@@ -15343,7 +15378,11 @@ function msgDetailHtml(t){
   // iPhone-style compose bar: call button, rounded box, round blue send.
   html+='<div class="msg-reply msg-ireply">'
     +'<button class="msg-icall" data-msgcall="1" title="Call" aria-label="Call">📞</button>'
-    +'<textarea class="msg-ibox" data-msgreply rows="1" maxlength="1200" placeholder="Text Message">'+esc(_msgDraft[key]||'')+'</textarea>'
+    // Smart compose box (owner 2026-10-01): grows as you type, live word count
+    // toward a 200-word limit, progress line, emoji, red + send blocked when over.
+    +'<div class="msg-stx"><textarea class="msg-ibox" data-msgreply rows="1" maxlength="1600" placeholder="Text Message">'+esc(_msgDraft[key]||'')+'</textarea>'
+    +'<div class="msg-stx-bar"><button type="button" class="msg-stx-emo" data-msgemo="1" aria-label="Add emoji" title="Add emoji">☺</button><span class="msg-stx-count" aria-live="polite"></span></div>'
+    +'<div class="msg-stx-prog" aria-hidden="true"><i></i></div><div class="msg-stx-pop" role="listbox"></div></div>'
     +'<button class="msg-isend" data-msgsend="1" title="Send" aria-label="Send">↑</button>'
     +'<div class="rc-actions" style="display:none;">'
     // Dials from whoever clicks it, same as every other 📞 tel: link in the
