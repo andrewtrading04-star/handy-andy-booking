@@ -4704,15 +4704,18 @@ async function bkLoadHistory(b){
       const head=x.type==='text_in'?'Customer texted':x.type==='text_out'?`We texted${x.by&&x.by!=='automated'?' · '+esc(x.by):x.by==='automated'?' · automated':''}`
         :x.type==='script'?`Call script${x.by?' · '+esc(x.by):''}${x.outcome?' · '+esc(String(x.outcome).replace(/_/g,' ')):''}`
         :x.type==='missed'?`Missed call${x.line?' · '+esc(x.line):''}`:`Call${x.secs?' · '+Math.max(1,Math.round(x.secs/60))+' min':''}${x.line?' · '+esc(x.line):''}${x.by?' · '+esc(x.by):''}`;
-      return `<div style="display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line2);"><span style="flex:none;">${icon}</span><div style="flex:1;min-width:0;">
-        <div style="${x.type==='missed'?'color:#b91c1c;':''}">${head}</div>
-        ${x.body?`<div style="white-space:pre-wrap;">${esc(x.body)}</div>`:''}
-        ${x.summary&&x.summary.length?`<div style="color:var(--mute);font-size:12.5px;">${x.summary.map(esc).join(' · ')}</div>`:''}
-        <div style="color:var(--mute);font-size:11.5px;">${esc(W(x.at))}</div></div></div>`;
+      // Same timeline style as the Pipeline card (owner 2026-10-01).
+      const col=x.type==='missed'?'#e11d48':x.type==='call'?'#0369a1':x.type==='script'?'#b45309':'#7c3aed';
+      const w=W(x.at).split(/,\s*(?=\d{1,2}:\d\d)/);
+      return `<div class="ps-row"><div class="ps-ic" style="color:${col};"></div><div class="ps-box"><div class="ps-main">
+        <div class="ps-t"${x.type==='missed'?' style="color:#b91c1c;"':''}>${head}</div>
+        ${x.body?`<div class="ps-s" style="white-space:pre-wrap;">${esc(x.body)}</div>`:''}
+        ${x.summary&&x.summary.length?`<div class="ps-s">${x.summary.map(esc).join(' · ')}</div>`:''}
+        </div><div class="ps-when">${esc(w[0])}${w[1]?'<br>'+esc(w[1]):''}</div></div></div>`;
     };
     box.innerHTML=`<div class="bk-d"><div class="bk-dtile">${bkIcon('note')}</div><div style="flex:1;min-width:0;">
       <details><summary class="bk-dl" style="cursor:pointer;">Calls &amp; texts (${items.length}) ▸</summary>
-      <div class="bk-dv" style="font-size:13px;line-height:1.45;">${items.length?items.slice().reverse().map(row).join(''):'<span class="dim">No calls or texts with this number yet.</span>'}</div></details></div></div>`;
+      <div class="bk-dv" style="font-size:13px;line-height:1.45;margin-top:8px;">${items.length?'<div class="ps-list tl2">'+items.slice().reverse().map(row).join('')+'</div>':'<span class="dim">No calls or texts with this number yet.</span>'}</div></details></div></div>`;
   }catch(e){ box.innerHTML=''; }
 }
 function openBooking(b){
