@@ -644,6 +644,15 @@
   .ps-when{font-size:11.5px;color:#6b7280;text-align:right;white-space:nowrap;line-height:1.35;}
   .ps-link{display:inline-block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:700;}
   .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
+  /* Pipeline timeline (owner 2026-10-01, namethatui 'timeline'): time on the left, small dot on the line, text on the right. */
+  .tl2.ps-list{gap:14px;}
+  .tl2.ps-list:before{left:95px;top:8px;bottom:8px;}
+  .tl2 .ps-row{grid-template-columns:76px 12px minmax(0,1fr);gap:0 12px;}
+  .tl2 .ps-box{display:contents;}
+  .tl2 .ps-when{order:-1;text-align:right;padding-top:1px;}
+  .tl2 .ps-ic{order:0;width:12px;height:12px;margin-top:3px;font-size:0;background:currentColor !important;box-shadow:0 0 0 3px #fff;}
+  .tl2 .ps-main{order:1;}
+  .tl2 .ps-gap{margin-left:100px;}
   .pl-card.owes{background:#fff5f5;border-color:#fca5a5;box-shadow:0 0 0 1px #fecaca,0 0 14px rgba(248,113,113,.45);}
   .pl-card.open{box-shadow:0 6px 18px rgba(20,30,50,.08);}
   .pl-row{display:block;width:100%;background:transparent;border:none;text-align:left;font:inherit;color:var(--ink);padding:11px 14px;min-height:44px;}
@@ -11153,7 +11162,7 @@ function plStoryHtml(c){
     </div><div class="ps-when">${when(t.at)}</div></div></div>`);
   }
   if(waitFrom!=null&&Date.now()-waitFrom>=2*36e5&&!['booked','completed','lost'].includes(c.stage)) rows.push(gap(waitFrom,Date.now(),true));
-  return `<div class="rc-count" style="margin:22px 0 10px;font-size:15px;font-weight:800;">What happened</div><div class="ps-list">${rows.join('')}</div>`;
+  return `<div class="rc-count" style="margin:22px 0 10px;font-size:15px;font-weight:800;">What happened</div><div class="ps-list tl2">${rows.join('')}</div>`;
 }
 function plMediaHtml(c){
   const tl=(Array.isArray(c.timeline)?c.timeline:[]).filter(t=>t&&(t.rec||t.icon==='text'||t.icon==='auto'));
