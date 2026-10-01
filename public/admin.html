@@ -7321,7 +7321,7 @@ function anaRender(d){
   const kpis=[
     ['Sessions', t.sessions, `${t.visitors} unique visitors`],
     ['Bookings', t.bookings, t.bookingFailures>0?`<span class="bad">${t.bookingFailures} failed attempts</span>`:'no failed attempts'],
-    ['Conversion', t.conversion+'%', 'of all sessions'],
+    ['Conversion', t.conversion+'%', t.zipSessions!=null?`of ${t.zipSessions} who entered a ZIP`:'of all sessions'],
     ['Revenue (booked)', anaMoney(t.revenue), `avg ticket ${anaMoney(t.avgTicket)}`],
     ['Saw a Price', t.priceShown, `${t.priceToBooking}% then booked`],
     ['Abandoned Carts', t.abandonedCarts, `<span class="bad">${anaMoney(t.lostValue)} quoted, not booked</span>`],

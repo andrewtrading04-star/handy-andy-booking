@@ -2231,6 +2231,7 @@ export default async function handler(req, res) {
         s.errors.push({ type: t, step: e.step_name, message: e.error_message, at: e.created_at });
         if (t === 'booking_failed') s.failed = true;
       } else if (t === 'zip_check') {
+        s.zipEntered = true;
         if (e.step_name === 'served') zipServed++;
         else if (e.step_name === 'unserved') {
           zipUnserved++;
@@ -2383,7 +2384,10 @@ export default async function handler(req, res) {
         repeatVisitors,
         bookings: bookings.length,
         bookingsFromRepeat,
-        conversion: totalSessions ? round1(bookings.length / totalSessions * 100) : 0,
+        // Owner 2026-10-01: count from ZIP entry, not from page load. A booking
+        // always counts (some flows skip the ZIP step).
+        zipSessions: sess.filter(s => s.zipEntered || s.booked).length,
+        conversion: sess.filter(s => s.zipEntered || s.booked).length ? round1(bookings.length / sess.filter(s => s.zipEntered || s.booked).length * 100) : 0,
         priceShown: sess.filter(s => s.priceShown).length,
         priceToBooking: sess.filter(s => s.priceShown).length
           ? round1(bookings.length / sess.filter(s => s.priceShown).length * 100) : 0,
