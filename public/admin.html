@@ -8965,6 +8965,22 @@ function renderPayrollData(d){
 // Handy Andy, Joey on Dom's) — the server scopes this to auth.scope, so
 // there's no business picker here at all; a secretary only ever sees/edits
 // their own week.
+// Google Voice settings every secretary needs before taking forwarded calls.
+// Screening, Do Not Disturb, spam filtering and Google's own voicemail all
+// intercept the call before the CRM's ring timeout, so the caller lands in
+// Google voicemail and never gets the missed-call text.
+const GOOGLE_VOICE_SETUP_HTML=`<div class="job" style="display:block;margin-bottom:18px;border-left:4px solid #f59e0b;">
+  <div class="name" style="margin-bottom:6px;">Phone setup (Google Voice)</div>
+  <div class="meta" style="margin-bottom:6px;">Google Voice → Settings → Calls:</div>
+  <ul style="margin:0 0 8px 18px;padding:0;line-height:1.6;">
+    <li>Screen calls: <b>OFF</b></li>
+    <li>Do Not Disturb: <b>OFF</b></li>
+    <li>Filter spam: <b>OFF</b></li>
+    <li>Forwarding: ring in the Google Voice app only, not forwarded to your cell</li>
+    <li>Voicemail: record a 1-second blank greeting</li>
+  </ul>
+  <div class="meta">Send Andrew your Google Voice number when done.</div>
+</div>`;
 async function renderMyAvailability(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
@@ -9002,6 +9018,7 @@ async function renderMyAvailability(){
         </div>`).join('')
       : '';
     view.innerHTML=`<div class="wrap">
+      ${GOOGLE_VOICE_SETUP_HTML}
       <div style="margin-bottom:14px;">
         <h2 style="margin:0 0 4px;">${esc(d.name)}'s Weekly Availability</h2>
         <div class="meta">Toggle the days you normally work.</div>
