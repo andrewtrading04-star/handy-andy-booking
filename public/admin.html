@@ -3369,9 +3369,9 @@ function enterApp(){
   // on). Secretaries: owner only, read-only view of both.
   const navMyAvail=document.getElementById('navMyAvailability');
   if(navMyAvail) navMyAvail.style.display = role==='secretary' ? '' : 'none';
-  // Dark glass sidebar: owner trial only (2026-10-01). Collapse is remembered.
-  document.body.classList.toggle('sb-glass', role==='owner');
-  try{ document.body.classList.toggle('sb-mini', role==='owner' && localStorage.getItem('sb_mini')==='1'); }catch(_){}
+  // Collapsible menu for every login (owner 2026-10-01). Collapse is remembered per browser.
+  document.body.classList.toggle('sb-glass', true);
+  try{ document.body.classList.toggle('sb-mini', localStorage.getItem('sb_mini')==='1'); }catch(_){}
   const sbC=document.getElementById('sbCollapse');
   if(sbC && !sbC._wired){ sbC._wired=true; sbC.addEventListener('click',()=>{ const on=!document.body.classList.contains('sb-mini'); document.body.classList.toggle('sb-mini',on); sbC.textContent=on?'›':'‹'; try{ localStorage.setItem('sb_mini',on?'1':'0'); }catch(_){} }); }
   if(sbC) sbC.textContent=document.body.classList.contains('sb-mini')?'›':'‹';
