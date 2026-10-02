@@ -500,7 +500,7 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
-  body.sec-nav.gal-on #navGallery{display:flex !important;}   /* Joey sees Photos (owner 2026-10-02) */
+  body.sec-nav.gal-on #navGallery{display:flex !important;} body.gal-on #navMyCallPerf{display:none !important;}   /* Joey sees Photos (owner 2026-10-02) */
   /* Jiyah's read-only copy of Calls/Messages inside her audit portal (owner 2026-09-28). */
   body.ro-embed #sidebar, body.ro-embed .mobilebar, body.ro-embed #navScrim, body.ro-embed #takeCallBtn{display:none !important;}
   body.ro-embed .rc-btn, body.ro-embed .rc-btn-row, body.ro-embed .rc-actions, body.ro-embed .msg-reply, body.ro-embed [data-bkc],
@@ -2826,6 +2826,7 @@ const bizName = slug => (businesses.find(b=>b.slug===slug)||{}).name || slug;
 // Short label for compact stat boxes — drops a trailing " TV Mounting".
 const bizShort = slug => bizName(slug).replace(/\s*TV Mounting$/i,'').trim();
 let current = null;            // current business object
+let viewBusinesses = [];       // read-only extra businesses (Joey: every business's jobs, Schedule only)
 let greetingData = null;       // { jobs, estimates, tz } for the schedule greeting
 let greetingClock = null;      // interval handle for the live greeting clock
 
@@ -3372,6 +3373,7 @@ function enterApp(){
   // no match, so it falls through to the handy-andy-first sort above.
   current = (scope && scope!=='all' && businesses.find(b=>b.slug===scope)) || businesses[0] || null;
   loadVip();
+  loadJobViewBusinesses();
   ringInit();
   if(current) nbWarmDataCache(current.slug);   // start the New Booking data fetch before it's ever opened
   anchorDate = todayStr();
@@ -3679,7 +3681,7 @@ async function openPayrollJob(id, slug){
   }catch(e){ current=prev; toast(e.message); }
 }
 async function openAlertJob(slug, id){
-  const biz = businesses.find(b=>b.slug===slug);
+  const biz = businesses.find(b=>b.slug===slug) || viewBusinesses.find(b=>b.slug===slug);
   // Switch context to the alert's business so the job modal (and its photo/note
   // loads, which use current.slug) resolve against the right business.
   if(biz && (!current || current.slug!==slug)){
@@ -3713,10 +3715,20 @@ const LEAD_GEN_CITY_GROUPS = [
   { label: 'DFW',     slugs: ['a1tvmounting'] },
 ];
 
+async function loadJobViewBusinesses(){
+  viewBusinesses=[];
+  if(role!=='secretary' || userName!=='Joey') return;
+  try{
+    const d=await api('job_view_businesses',{});
+    viewBusinesses=(d.businesses||[]).filter(b=>!businesses.some(x=>x.slug===b.slug)).map(b=>Object.assign({},b,{view_only:true}));
+    renderSwitcher();
+  }catch(_){}
+}
 function switchToBusiness(slug){
-  const next = businesses.find(b => b.slug === slug);
+  const next = businesses.find(b => b.slug === slug) || viewBusinesses.find(b => b.slug === slug);
   if(!next) return;
   current = next;
+  if(next.view_only) section='schedule';
   nbWarmDataCache(current.slug);
   // See the matching comment in openAlertJob — navTo(section) already covers
   // 'schedule' (renderGreeting) and 'estimates' (renderEstimates) itself.
@@ -3741,9 +3753,10 @@ function renderLeadGenMenu(leadGen, isOn){
 
 function renderSwitcher(){
   const el = document.getElementById('switcher');
-  if(businesses.length<2){ el.innerHTML=''; return; }
-  const own     = OWN_CHIP_SLUGS.map(sl => businesses.find(b => b.slug === sl)).filter(Boolean);
-  const leadGen = businesses.filter(b => !OWN_CHIP_SLUGS.includes(b.slug));
+  const allBiz = businesses.concat(viewBusinesses);
+  if(allBiz.length<2){ el.innerHTML=''; return; }
+  const own     = OWN_CHIP_SLUGS.map(sl => allBiz.find(b => b.slug === sl)).filter(Boolean);
+  const leadGen = allBiz.filter(b => !OWN_CHIP_SLUGS.includes(b.slug));
   const isOn    = b => current && b.slug === current.slug;
 
   let html = own.map(b =>
@@ -3793,6 +3806,8 @@ function navTo(s){
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
   if(s==='pipeline' && role!=='owner' && role!=='secretary') s='schedule';
+  // A view-only business (Joey) is Schedule-only; any other screen goes back to her own company.
+  if(current && current.view_only && s!=='schedule'){ current=businesses.find(b=>b.slug===scope)||businesses[0]||current; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); }
   section=s;
   document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch'||s==='estimates');
   document.getElementById('view').classList.toggle('estimates-workspace',s==='estimates');
@@ -4093,7 +4108,7 @@ function ghostEvtCard(g){
   const who=g.customer_name?` for ${esc(g.customer_name)}`:'';
   // Owner, 2026-09-29: when this login may also work the other company (Joey
   // on Handy Andy), the server sends the real booking -- click opens that job.
-  const canOpen=!!(g.booking_id&&g.open_slug&&businesses.some(x=>x.slug===g.open_slug));
+  const canOpen=!!(g.booking_id&&g.open_slug&&businesses.concat(viewBusinesses).some(x=>x.slug===g.open_slug));
   if(canOpen) return `<div class="evt evt-ghost evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}" title="Open this ${esc(g.partner_company||'partner')} job${who}">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
     <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>

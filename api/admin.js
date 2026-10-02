@@ -475,6 +475,7 @@ export default async function handler(req, res) {
       case 'available_dates':   return await availableDates(req, res, db, auth);
       case 'calendar':          return await calendar(req, res, db, auth);
       case 'calendar_probe':    return await calendarProbe(req, res, db, auth);
+      case 'job_view_businesses': return await jobViewBusinesses(req, res, db, auth);
       case 'availability_overview': return await availabilityOverview(req, res, db, auth);
       case 'bookings':          return await bookings(req, res, db, auth);
       case 'booking_create':    return await bookingCreate(req, res, db, auth, body);
@@ -944,9 +945,21 @@ async function sessionStatus(req, res) {
 // timezone from staying stale for more than a minute.
 const _bizCache = new Map(); // slug -> { biz, at }
 const BIZ_CACHE_TTL_MS = 60_000;
-async function resolveBusiness(db, auth, slug) {
+// Owner, 2026-10-02: Joey (secretary, Dom's) can READ every business's jobs
+// (schedule, job list, a job's ticket/notes/photos). Read-only actions opt in
+// with { view: true }; every write and every other screen keeps the normal
+// mayUseBusiness() gate, so this widens nothing else.
+function isAllJobsViewer(auth) { return !!auth && auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey'; }
+function mayViewJobs(auth, slug) { return mayUseBusiness(auth, slug) || (!!slug && isAllJobsViewer(auth)); }
+async function jobViewBusinesses(req, res, db, auth) {
+  if (!isAllJobsViewer(auth)) return res.status(200).json({ businesses: [] });
+  const { data, error } = await db.from('businesses').select('id, slug, name, timezone, brand_navy, brand_orange').eq('active', true).order('name');
+  if (error) throw error;
+  return res.status(200).json({ businesses: data || [] });
+}
+async function resolveBusiness(db, auth, slug, opts) {
   if (!slug) { const e = new Error('business is required'); e.status = 400; throw e; }
-  if (!mayUseBusiness(auth, slug)) { const e = new Error('Forbidden for this business'); e.status = 403; throw e; }
+  if (!(opts && opts.view ? mayViewJobs(auth, slug) : mayUseBusiness(auth, slug))) { const e = new Error('Forbidden for this business'); e.status = 403; throw e; }
   const cached = _bizCache.get(slug);
   if (cached && (Date.now() - cached.at) < BIZ_CACHE_TTL_MS) return cached.biz;
   const { data, error } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', slug).single();
@@ -1430,7 +1443,7 @@ function calFingerprint(rows) {
   return { count: rows.length, maxUpdatedAt };
 }
 async function calendar(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const from = (req.query.from || '').toString();
   const to = (req.query.to || '').toString();
   if (!from || !to) return res.status(400).json({ error: 'from and to required' });
@@ -1470,7 +1483,7 @@ async function calendar(req, res, db, auth) {
     // booking id + slug so the card can open that job. Never sent otherwise.
     const openRef = (b) => {
       const slug = otherBizById[b.business_id]?.slug;
-      return (slug && mayUseBusiness(auth, slug)) ? { booking_id: b.id, open_slug: slug } : {};
+      return (slug && mayViewJobs(auth, slug)) ? { booking_id: b.id, open_slug: slug } : {};
     };
     // Ghosts already added for a booking, so the lead-gen sweep below can't
     // repeat one that source 1 surfaced through a shared tech.
@@ -1583,7 +1596,7 @@ async function calendar(req, res, db, auth) {
 // fetch, so the 60s schedule poll can skip re-fetching+re-computing the whole
 // week when nothing did. See calFingerprint() for what this can and can't detect.
 async function calendarProbe(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const from = (req.query.from || '').toString();
   const to = (req.query.to || '').toString();
   if (!from || !to) return res.status(400).json({ error: 'from and to required' });
@@ -1994,7 +2007,7 @@ async function availabilityOverview(req, res, db, auth) {
 
 // ── Bookings list ────────────────────────────────────────────────────────────
 async function bookings(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const tz = biz.timezone || 'America/Denver';
   const range = (req.query.range || 'upcoming').toString();
   const status = (req.query.status || '').toString();
@@ -5965,7 +5978,7 @@ async function assertBooking(db, biz, id) {
 }
 
 async function bookingPhotos(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const id = (req.query.id || '').toString();
   try { await assertBooking(db, biz, id); } catch (e) { return bail(res, e); }
   const { data, error } = await db.from('booking_photos')
@@ -6005,7 +6018,7 @@ async function bookingPhotoDelete(req, res, db, auth, body) {
 
 // ── Booking notes (internal; owner/secretary author; permanent delete) ───────
 async function bookingNotes(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const id = (req.query.id || '').toString();
   try { await assertBooking(db, biz, id); } catch (e) { return bail(res, e); }
   const { data, error } = await db.from('booking_notes')
