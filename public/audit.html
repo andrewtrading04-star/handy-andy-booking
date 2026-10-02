@@ -2309,7 +2309,7 @@ const QFLOW=[
   {k:'q_discount_source', t:'Did she give the “Where did you hear about us?” discount?', show:a=>a.cust_accepted_price==='no'},
   {k:'cust_accepted_discount', t:'Did the customer accept the discount?', cust:true, show:a=>a.cust_accepted_price==='no'},
   {k:'q_info_correct', t:'Was all the customer’s information filled in correctly?'},
-  {k:'q_explained_comms', t:'Did she explain the texts and emails they’ll get, and ask “Is there anything else?”'},
+  {k:'q_explained_comms', t:'Did she explain the follow up email and text?'},
 ];
 QFLOW.forEach(q=>{ KEY_TEXT[q.k]=q.t; });
 function qVisible(){ return QFLOW.filter(q=>!q.show||q.show(qState.answers)); }
