@@ -9261,8 +9261,12 @@ async function calls(req, res, db, auth) {
   }));
   // Owner, 2026-09-25: Handy Andy's Los Angeles lines stay out of Heather's
   // and Joey's Calls until he says otherwise. Owner still sees them.
-  const HIDE_FROM_STAFF = ['2135793329', '3235701778'];
-  const shown = auth.role === 'owner' ? mapped : mapped.filter(r => !HIDE_FROM_STAFF.includes(String(r.grasshopper_number || '').replace(/\D/g, '').slice(-10)));
+  // Owner 2026-10-02: LA lines are off the Calls tab for everyone; the owner
+  // sees them only in Analytics -> LA (this same action with la=1).
+  const LA_LINES = ['2135793329', '2137226032', '3235701778'];
+  const isLA = (r) => LA_LINES.includes(String(r.grasshopper_number || '').replace(/\D/g, '').slice(-10));
+  const laOnly = req.query.la === '1' && auth.role === 'owner';
+  const shown = laOnly ? mapped.filter(isLA) : mapped.filter(r => !isLA(r));
   const open = shown.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
   // before anything about the customer is known, on purpose, so an abandoned

@@ -12820,6 +12820,33 @@ const CALL_TABS=[
 // with no handyman offering at all, so the tab is just an empty/zero screen
 // for them -- hidden rather than shown-but-empty.
 const HANDYMAN_SLUGS = new Set(['handy-andy', 'doms', 'austin']);
+// Analytics -> LA (owner 2026-10-02): every Los Angeles call, kept off Calls
+// and Pipeline. Last 30 days, newest first.
+async function renderLaCalls(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  let d; try{ d=await api('calls',{ params:{ la:1, limit:200, from:new Date(Date.now()-30*864e5).toISOString() } }); }
+  catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  if(!onScreen('lacalls')) return;
+  const rows=[...(d.open||[]),...(d.handled||[])].sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+  const missed=rows.filter(r=>r.answered===false).length;
+  const byLine={}; rows.forEach(r=>{ const k=r.line_name||r.business?.name||'LA'; byLine[k]=(byLine[k]||0)+1; });
+  const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  view.innerHTML=`<div class="wrap" style="max-width:900px;">
+    <h2 style="margin:0 0 4px;">Los Angeles calls</h2><div class="meta" style="margin-bottom:12px;">Last 30 days · Pacific time · owner only</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+      <div class="card" style="padding:10px 14px;"><div class="meta">Calls</div><b style="font-size:22px;">${rows.length}</b></div>
+      <div class="card" style="padding:10px 14px;"><div class="meta">Missed</div><b style="font-size:22px;">${missed}</b></div>
+      ${Object.entries(byLine).map(([k,n])=>`<div class="card" style="padding:10px 14px;"><div class="meta">${esc(k)}</div><b style="font-size:22px;">${n}</b></div>`).join('')}
+    </div>
+    ${rows.length?rows.map(r=>`<div class="card" style="padding:10px 14px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;"><b>${esc(r.customer?.name||fmtPhone(r.caller_phone))}</b><span class="meta">${esc(W(r.occurred_at))}</span></div>
+      <div class="meta">${esc(r.line_name||'')} · ${r.answered===false?'<span style="color:#b91c1c;">Missed</span>':'Answered'}${r.duration_sec?' · '+esc(callDuration(r.duration_sec)):''}${r.customer?.name?' · '+esc(fmtPhone(r.caller_phone)):''}</div>
+      ${r.recording_url?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:''}
+      ${txBrief(r)}
+    </div>`).join(''):'<div class="empty">No LA calls in the last 30 days.</div>'}
+  </div>`;
+}
 const ANALYTICS_TABS=[
   { id:'insights', label:'Insights', screen:'insights', show:()=>role==='owner', render:()=>renderInsights() },
   { id:'capacity', label:'Capacity', screen:'capacity', show:()=>role==='owner', render:()=>renderCapacity() },
@@ -12828,6 +12855,7 @@ const ANALYTICS_TABS=[
   { id:'bookings', label:'Bookings', screen:'analytics',    show:()=>role==='owner', render:()=>renderAnalytics() },
   { id:'handyman', label:'Handyman', screen:'handyman',      show:()=>role==='owner' && HANDYMAN_SLUGS.has(current?.slug), render:()=>renderHandymanAnalytics() },
   { id:'website',  label:'Website',  screen:'webanalytics',  show:()=>role==='owner', render:()=>renderWebAnalytics() },
+  { id:'la',       label:'LA',       screen:'lacalls',       show:()=>role==='owner', render:()=>renderLaCalls() },
   { id:'askq', get label(){ return _askOpen?`Ask Andrew (${_askOpen} to answer)`:'Ask Andrew'; }, screen:'askq', show:()=>role==='owner', render:()=>renderAskLog() },
 ];
 // callHubTab starts null and resolves on first render: the owner lands on

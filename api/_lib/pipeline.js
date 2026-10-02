@@ -47,7 +47,9 @@ export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
 export const LOST_REASONS = ['Too expensive', 'Went with someone else', 'Just shopping', 'Out of area', "We don't do that", 'No reply after estimate', 'Never reached', 'Spam', 'Other'];
 export const STAGES = ['new', 'talked', 'quoted', 'booked', 'completed', 'paid', 'lost'];   // 'done' folded into Booked (owner, 2026-09-26)
 
-const TOLL_FREE = '8889159967';          // the notification sender: every brand's automated texts
+const TOLL_FREE = '8889159967';
+// Los Angeles lines (owner 2026-10-02): logged, but never on the Pipeline.
+const LA_LINES = new Set(['2135793329', '2137226032', '3235701778']);          // the notification sender: every brand's automated texts
 // Heather's own phone until 2026-09-18 (she changed numbers). Forwarded calls
 // before then rang it, and it is not in staff_users any more.
 const HEATHER_OLD_PHONE = '7203711561';
@@ -237,6 +239,7 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
   for (const c of calls) {
     if (c.kind !== 'inbound' || (c.source && c.source !== 'twilio')) continue;
     if (c.status === 'ignored' && c.handled_by === 'Blocked number') continue;
+    if (LA_LINES.has(phone10(c.grasshopper_number))) continue;
     const phone = strictPhone(c.caller_phone);
     if (ctx.isExcluded(phone)) continue;
     const atMs = msOf(c.occurred_at); if (atMs == null) continue;
@@ -316,6 +319,7 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
 
   for (const m of raw.messages || []) {
     const phone = phone10(m.customer_phone); if (ctx.isExcluded(phone)) continue;
+    if (LA_LINES.has(phone10(m.our_phone))) continue;
     const atMs = msOf(m.created_at); if (atMs == null) continue;
     const our = phone10(m.our_phone); const line = ctx.lines.get(our);
     const slug = ctx.slugOf(m) || (line && line.slug) || null;
