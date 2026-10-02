@@ -657,6 +657,7 @@ export default async function handler(req, res) {
       case 'secretaries_list': return await secretariesList(req, res, db, auth);
       case 'notes_active': return await notesActive(req, res, db, auth);
       case 'assistant_tasks': return await assistantTasks(req, res, db, auth, body);
+      case 'joey_metrics': return await joeyMetrics(req, res, db, auth);
       case 'notes_read':   return await notesRead(req, res, db, auth, body);
       case 'notes_list':   return await notesList(req, res, db, auth);
       case 'notes_add':    return await notesAdd(req, res, db, auth, body);
@@ -1301,25 +1302,7 @@ async function summary(req, res, db, auth) {
       // The numbers are the LAST 7 DAYS (today plus the 6 days before it, in
       // the business's own time zone), the same window as the 7-day
       // Conversion card, not the Sun-Sat revenue week.
-      const last7Start = localDayStartUTC(tz, -6);
-      const rosterSince = new Date(last7Start.getTime() - 28 * 24 * 60 * 60 * 1000);
-      const { data: cRows } = await db.from('calls')
-        .select('handled_by, booking_id, resolution, reached_step, reached_extras, occurred_at')
-        .eq('kind', 'live')
-        .gte('occurred_at', rosterSince.toISOString());
-      const by = {};
-      for (const c of (cRows || [])) {
-        const who = (c.handled_by || '').trim();
-        if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
-        const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
-        if (new Date(c.occurred_at) < last7Start) continue;   // roster only
-        if (!(c.booking_id || c.reached_extras)) continue;   // owner 2026-09-25: counts once they reached "anything else"
-        p.calls++;
-        if (c.booking_id || c.resolution === 'booked') p.booked++;
-      }
-      revenue.week_secretaries = Object.values(by)
-        .map(p => ({ ...p, conversion: p.calls ? Math.round((p.booked / p.calls) * 1000) / 10 : 0 }))
-        .sort((a, b) => b.calls - a.calls);
+      revenue.week_secretaries = await secretaryWeekConversion(db, tz);
     } catch (e) { console.warn('[admin] weekly secretary conversion failed:', e.message); }
   }
 
@@ -17579,6 +17562,71 @@ async function messagesBlock(req, res, db, auth, body) {
 // linked job opens the job ticket. Only the owner and Joey see this.
 function taskAccess(auth) {
   return auth && (auth.role === 'owner' || (auth.role === 'secretary' && auth.name === 'Joey'));
+}
+// Each secretary's 7-day booking rate (owner dashboard + Joey's home card).
+async function secretaryWeekConversion(db, tz) {
+      const last7Start = localDayStartUTC(tz, -6);
+      const rosterSince = new Date(last7Start.getTime() - 28 * 24 * 60 * 60 * 1000);
+      const { data: cRows } = await db.from('calls')
+        .select('handled_by, booking_id, resolution, reached_step, reached_extras, occurred_at')
+        .eq('kind', 'live')
+        .gte('occurred_at', rosterSince.toISOString());
+      const by = {};
+      for (const c of (cRows || [])) {
+        const who = (c.handled_by || '').trim();
+        if (!who || /^andrew/i.test(who) || /^unknown$/i.test(who)) continue;
+        const p = by[who] || (by[who] = { person: who, calls: 0, booked: 0 });
+        if (new Date(c.occurred_at) < last7Start) continue;   // roster only
+        if (!(c.booking_id || c.reached_extras)) continue;   // owner 2026-09-25: counts once they reached "anything else"
+        p.calls++;
+        if (c.booking_id || c.resolution === 'booked') p.booked++;
+      }
+      return Object.values(by)
+        .map(p => ({ ...p, conversion: p.calls ? Math.round((p.booked / p.calls) * 1000) / 10 : 0 }))
+        .sort((a, b) => b.calls - a.calls);
+}
+// Joey's home cards (owner 2026-10-03): who covers each business today, jobs on
+// the schedule today (all businesses), open urgent tasks, secretaries' 7-day
+// booking rate. Joey only; nothing else from the owner payload.
+async function joeyMetrics(req, res, db, auth) {
+  if (!(auth && auth.role === 'secretary' && auth.name === 'Joey')) return res.status(403).json({ error: 'Not available for this login' });
+  const DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const dowIn = z => DOW[new Intl.DateTimeFormat('en-US', { timeZone: z, weekday: 'short' }).format(new Date())];
+  const [bizRes, ha, doms, tasks, secs] = await Promise.all([
+    db.from('businesses').select('id, slug, timezone'),
+    (async () => {
+      // Heather: her My Availability days (pattern + date exceptions). Day off: lines ring the owner.
+      const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', 'handy-andy').maybeSingle();
+      if (!biz) return 'Heather';
+      const z = biz.timezone || 'America/Chicago';
+      const today = localDateStr(z, new Date().toISOString());
+      const [{ data: pat }, { data: exc }] = await Promise.all([
+        db.from('secretary_availability').select('day_of_week, is_available').eq('business_id', biz.id).eq('day_of_week', dowIn(z)),
+        db.from('secretary_availability_exceptions').select('is_available').eq('business_id', biz.id).eq('exception_date', today),
+      ]);
+      const avail = (exc && exc.length) ? exc[0].is_available : (pat && pat.length ? pat[0].is_available : true);
+      return avail ? 'Heather' : 'Andrew';
+    })(),
+    (async () => {
+      // Same rule as applyShiftRouting: today's staff_schedules row, lowest priority wins.
+      const { data } = await db.from('staff_schedules').select('name, priority')
+        .eq('business_slug', 'doms').eq('day_of_week', dowIn('America/Denver'))
+        .order('priority', { ascending: true }).order('name', { ascending: true });
+      return (data && data[0] && data[0].name) || 'Andrew';
+    })(),
+    db.from('assistant_tasks').select('id', { count: 'exact', head: true }).is('deleted_at', null).is('done_at', null).eq('color', 'red'),
+    secretaryWeekConversion(db, 'America/Denver').catch(() => []),
+  ]);
+  let jobs = 0;
+  await Promise.all((bizRes.data || []).map(async b => {
+    const z = b.timezone || 'America/Denver';
+    const { data } = await db.from('bookings').select('status').eq('business_id', b.id)
+      .gte('scheduled_at', localDayStartUTC(z, 0).toISOString()).lt('scheduled_at', localDayStartUTC(z, 1).toISOString());
+    jobs += (data || []).filter(r => r.status !== 'cancelled').length;
+  }));
+  const list = secs.filter(p => p.person !== 'Joey').map(p => ({ person: p.person, calls: p.calls, booked: p.booked, conversion: p.conversion }));
+  for (const n of ['Heather', 'Alex', 'Joe']) if (!list.some(p => p.person === n)) list.push({ person: n, calls: 0, booked: 0, conversion: 0 });
+  return res.status(200).json({ covering: { 'handy-andy': ha, doms }, jobs_today: jobs, urgent_tasks: tasks.count || 0, secretaries: list });
 }
 async function assistantTasks(req, res, db, auth, body) {
   if (!taskAccess(auth)) return res.status(403).json({ error: 'Not available for this login' });

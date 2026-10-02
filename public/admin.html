@@ -1964,7 +1964,8 @@
   .greeting.gl .greet-line b{color:#534AB7;} .greeting.gl .greet-link{color:#1f2937;}
   .greeting.gl .greet-line b.good{color:#16a34a;} .greeting.gl .greet-line b.urgent{color:#dc2626;}
   .greeting.gl .greet-stats{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"rev avg inc inc" "pred pf ndp ndp";gap:12px;}
-  .greeting.gl .greet-stats>.gstat{background:#fff;border:none;border-radius:16px;box-shadow:0 1px 3px rgba(20,30,50,.06);color:#1f2937;height:auto;padding:14px 16px;}
+  .greeting.gl .greet-stats>.gstat{background:#e9ecf1;border:none;border-radius:16px;box-shadow:0 1px 3px rgba(20,30,50,.06);color:#1f2937;height:auto;padding:14px 16px;}
+  .greeting.gl .greet-stats.jy{grid-template-areas:none;} .greeting.gl .greet-stats.jy>.gstat{grid-area:auto !important;}
   .greeting.gl .greet-stats>.gstat:nth-child(1){grid-area:rev;}
   .greeting.gl .greet-stats>.gstat:nth-child(2){grid-area:pred;}
   .greeting.gl .greet-stats>.gstat:nth-child(3){grid-area:avg;}
@@ -12847,7 +12848,7 @@ const CALL_TABS=[
   // everyone, not just the owner: claiming and dialing a voicemail back is
   // exactly what Joey/Heather already do here.
   { id:'log',         label:'Incoming Calls',      screen:'calllog',       show:()=>true,                 render:()=>renderCalls() },
-  { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy'&&role!=='auditor', render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
+  { id:'reviewcalls', label:'Review Calls to Make', screen:'reviewcalls',   show:()=>scope!=='handy-andy'&&role!=='auditor'&&!(role==='secretary'&&userName==='Joey'), render:()=>(role==='owner'&&!_rcOwnerQueue)?renderReviewCallReport():renderReviewCalls() },
   { id:'performance', label:'Performance',  screen:'callanalytics', show:()=>role==='owner',       render:()=>renderCallAnalytics() },
   { id:'audit',       label:'Audit',        screen:'callaudit',     show:()=>role==='owner',       render:()=>renderCallAudit() },
   { id:'numbers',     label:'Numbers',      screen:'callnumbers',   show:()=>role==='owner',       render:()=>renderCallNumbers() },
@@ -12978,7 +12979,7 @@ async function renderHub(tabs, activeId, onPick){
   return cur.id;
 }
 async function renderCallHub(){
-  if(!callHubTab) callHubTab = role==='owner' ? 'log' : 'reviewcalls';
+  if(!callHubTab) callHubTab = (role==='owner'||userName==='Joey') ? 'log' : 'reviewcalls';
   await renderHub(CALL_TABS, callHubTab, id=>{ callHubTab=id; renderCallHub(); });
 }
 // ── Ask Andrew (owner, 2026-09-24) ─────────────────────────────────────────
@@ -15698,7 +15699,7 @@ setTimeout(refreshPlWhyBadge,3000);
 let _rcPopCount=null, _rcPopCountAt=0;
 async function rcTimePop(){
   let el=document.getElementById('rcTimePop');
-  const who=role==='secretary'&&['Joey','Joe','Alex'].includes(userName);
+  const who=role==='secretary'&&['Joe','Alex'].includes(userName);
   const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',hourCycle:'h23',hour:'2-digit',minute:'2-digit'}).formatToParts(new Date());
   const hh=Number(p.find(x=>x.type==='hour').value), mm=Number(p.find(x=>x.type==='minute').value);
   let snooze=0; try{ snooze=Number(localStorage.getItem('rc_pop_snooze')||0); }catch(_){}
@@ -18742,7 +18743,9 @@ async function renderGreeting(){
       refreshEstimateBadge(),
       // How many review calls Joey has to make (cross-business, yesterday's jobs).
       // Not part of Heather's (Handy Andy) platform — skip the call entirely.
-      scope==='handy-andy' ? Promise.resolve({counts:{}}) : api('review_calls',{ params:{ days:7 }}).catch(()=>({counts:{}})),
+      (scope==='handy-andy'||isJoeyHome()) ? Promise.resolve({counts:{}}) : api('review_calls',{ params:{ days:7 }}).catch(()=>({counts:{}})),
+      // Joey's 4 home cards (owner 2026-10-03).
+      isJoeyHome() ? api('joey_metrics').catch(()=>null) : Promise.resolve(null),
     ];
     // Owner: also check for pending brackets + current per-tech stock levels
     // (the stock feeds the low-stock warning in the Predicted-income box).
@@ -18764,7 +18767,7 @@ async function renderGreeting(){
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:0 }}).catch(()=>null));
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
     }
-    const [s,newEst,rc,...rest]=await Promise.all(reqs);
+    const [s,newEst,rc,jm,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
     const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
     if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
@@ -18785,6 +18788,7 @@ async function renderGreeting(){
       reviewCalls: (rc && rc.counts && rc.counts.to_call) || 0,
       lowStockTechs: lowStockCount(bracketInv),
       callPerf,
+      joey: jm,
     };
     paintGreeting();
     /* Calls badge = missed calls only (owner 2026-10-02); see refreshCallsBadge. */
@@ -18874,9 +18878,10 @@ let netDailyChartCache={};
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
-  el.classList.toggle('gl', role==='owner');   // light card layout (owner 2026-10-02)
+  el.classList.toggle('gl', role==='owner'||isJoeyHome());   // light card layout (owner 2026-10-02)
   el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
   el.style.setProperty('--gaccent', bizTheme(current&&current.slug).onDark);
+  if(isJoeyHome()){ el.innerHTML=joeyCardsHtml(); return; }
   const z=greetingData.tz||tz(), now=new Date();
   const dateStr=now.toLocaleDateString('en-US',{ timeZone:z, weekday:'long', month:'long', day:'numeric' });
   const timeStr=now.toLocaleTimeString('en-US',{ timeZone:z, hour:'numeric', minute:'2-digit' });
@@ -19355,6 +19360,25 @@ function secretaryConversionHtml(){
     </div>
     <div class="conv-foot"><span>7-day rolling</span><span>${whenStr}</span></div>
   </div>`;
+}
+function isJoeyHome(){ return role==='secretary' && userName==='Joey'; }
+// Joey's home (owner 2026-10-03): exactly 4 cards, fewest words.
+function joeyCardsHtml(){
+  const j=greetingData&&greetingData.joey;
+  if(!j) return '';
+  const card=(l,v)=>`<div class="gstat"><span class="gstat-l">${l}</span>${v}</div>`;
+  const big=v=>`<span class="gstat-v">${v}</span>`;
+  const cov=j.covering||{};
+  const covHtml=`<div style="font-size:13px;line-height:1.5;"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
+  const u=Number(j.urgent_tasks)||0;
+  const secs=(j.secretaries||[]).map(p=>{ const c=Number(p.conversion)||0;
+    return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;"><span>${esc(p.person)}</span><b style="color:${p.calls?`hsl(${convHue(c)} 70% 56%)`:'inherit'};">${p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–'}</b></div>`; }).join('');
+  return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
+    card('Covering today',covHtml)+
+    card('Jobs today',big(Number(j.jobs_today)||0))+
+    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>`)+
+    card('Booking rate · 7 days',secs)+
+  `</div>`;
 }
 function greetStatsHtml(){
   if(role!=='owner' || !greetingData || !greetingData.revenue) return '';
