@@ -8999,6 +8999,8 @@ async function calls(req, res, db, auth) {
   // table as history but never surface anywhere again. Twilio rows are kind
   // 'inbound'; the Take a Call wizard's own rows are kind 'live'.
   q = q.not('kind', 'in', '(voicemail,missed,sms)');
+  // Analytics -> LA asks for LA lines only: filter in the query, not after the limit.
+  if (req.query.la === '1' && auth.role === 'owner') { const la = ['2135793329', '2137226032', '3235701778']; q = q.in('grasshopper_number', [...la, ...la.map(p => '+1' + p)]); }
   // Owner rule (2026-08-26): the WHOLE list — business names, missed calls,
   // history — is scoped to the businesses this person actually runs, not just
   // the interruption banner (which was fixed first, separately, below). Joey
