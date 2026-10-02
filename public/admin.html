@@ -14551,6 +14551,7 @@ const CALL_PERIOD_LABEL={today:'Today',yesterday:'Yesterday','7d':'Last 7 days'}
 let _callsWho='all';
 function callOutcome(r){
   if(r.kind==='live') return 'Live intake';
+  if(r.answered===false&&r.called_back_at) return 'Called back'+(r.called_back_by?' · '+r.called_back_by:'');
   if(r.answered===true) return 'Answered';
   if(r.left_voicemail) return 'Missed · Voicemail';
   return r.answered===false ? 'Missed' : 'Outcome unavailable';

@@ -9269,6 +9269,22 @@ async function calls(req, res, db, auth) {
   const isLA = (r) => LA_LINES.includes(String(r.grasshopper_number || '').replace(/\D/g, '').slice(-10));
   const laOnly = req.query.la === '1' && auth.role === 'owner';
   const shown = laOnly ? mapped.filter(isLA) : mapped.filter(r => !isLA(r));
+  // A call-back from the portal (call_attempts) returns a missed call, even
+  // if the customer didn't pick up (owner 2026-10-02).
+  try {
+    const missedRows = shown.filter(r => r.answered === false && r.kind !== 'live' && !r.called_back_at);
+    const nums = [...new Set(missedRows.map(r => callerDigits(r.caller_phone)).filter(d => d.length === 10))];
+    if (nums.length) {
+      const oldest = missedRows.reduce((m, r) => (r.occurred_at < m ? r.occurred_at : m), missedRows[0].occurred_at);
+      const { data: atts, error: attErr } = await db.from('call_attempts').select('phone, started_at, staff_name')
+        .in('phone', nums).gte('started_at', oldest).order('started_at');
+      if (attErr) throw attErr;
+      for (const r of missedRows) {
+        const a = (atts || []).find(x => callerDigits(x.phone) === callerDigits(r.caller_phone) && x.started_at > r.occurred_at);
+        if (a) { r.called_back_at = a.started_at; r.called_back_by = r.called_back_by || a.staff_name; }
+      }
+    }
+  } catch (e) { console.warn('[calls] call-back lookup failed:', e.message); }
   const open = shown.filter(r => CALL_OPEN_STATUSES.includes(r.status));
   // A live-call row is created the INSTANT "Take a Call" opens (callLiveStart),
   // before anything about the customer is known, on purpose, so an abandoned
@@ -9310,6 +9326,7 @@ async function calls(req, res, db, auth) {
   // calls nobody returned).
   const returnedLater = (r) => {
     const d = callerDigits(r.caller_phone);
+    if (r.called_back_at) return true;
     return shown.some(x => x !== r && callerDigits(x.caller_phone) === d && x.occurred_at > r.occurred_at && (x.kind === 'live' || x.answered === true || x.called_back_at));
   };
   // Today only, Denver work day (owner 2026-10-02).
