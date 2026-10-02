@@ -9305,7 +9305,16 @@ async function calls(req, res, db, auth) {
     const d = callerDigits(r.caller_phone);
     return shown.some(x => x !== r && callerDigits(x.caller_phone) === d && x.occurred_at > r.occurred_at && (x.kind === 'live' || x.answered === true || x.called_back_at));
   };
-  const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r) && !returnedLater(r));
+  // Today only, Denver work day (owner 2026-10-02).
+  const denverDayStartIso = (() => {
+    const now = new Date();
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const off = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'shortOffset' }).formatToParts(now).find(p => p.type === 'timeZoneName').value.replace('GMT', '') || '+0';
+    const m = off.match(/^([+-])(\d{1,2})(?::(\d\d))?$/);
+    const hh = m ? `${m[1]}${m[2].padStart(2, '0')}:${m[3] || '00'}` : '-07:00';
+    return new Date(`${ymd}T00:00:00${hh}`).toISOString();
+  })();
+  const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r) && !returnedLater(r) && r.occurred_at >= denverDayStartIso);
   return res.status(200).json({
     open,
     handled: shown.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
