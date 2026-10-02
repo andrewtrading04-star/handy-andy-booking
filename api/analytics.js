@@ -412,8 +412,37 @@ async function handleVoiceWhisper(req, res) {
 // off in My Availability, the lines that ring her handset ring the owner
 // instead, all day. The next day they go back to her automatically.
 const SECRETARY_HANDSETS = { '7207223653': 'handy-andy', '3032190118': 'doms' };
+// Shift routing (owner 2026-10-02): a line with route_team rings whoever is
+// scheduled TODAY in staff_schedules (day read in the line's own time zone).
+// Two people on one day: lowest priority wins (Alex before Joe). Nobody
+// scheduled: the after-hours number (the owner). The 8am-8pm window and the
+// after-hours split still come from destinationFor() below, unchanged.
+const DOW_SHORT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+async function applyShiftRouting(db, line) {
+  if (!line || !line.route_team) return line;
+  try {
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: line.hours_timezone || 'America/Chicago', weekday: 'short' }).format(new Date());
+    const dow = DOW_SHORT[wd];
+    if (dow == null) return line;
+    const { data, error } = await db.from('staff_schedules').select('name, phone, priority')
+      .eq('business_slug', line.route_team).eq('day_of_week', dow).not('phone', 'is', null)
+      .order('priority', { ascending: true }).order('name', { ascending: true });
+    // supabase-js returns errors instead of throwing: a failed read keeps the
+    // line's own forward_to rather than looking like "nobody scheduled".
+    if (error) throw new Error(error.message);
+    const p = (data || []).find(r => tenDigits(r.phone).length === 10);
+    const ownerDigits = tenDigits(process.env.OWNER_PHONE_NUMBER || '');
+    const fallback = line.after_hours_forward_to || (ownerDigits.length === 10 ? '+1' + ownerDigits : null);
+    return { ...line, forward_to: p ? '+1' + tenDigits(p.phone) : (fallback || line.forward_to) };
+  } catch (e) {
+    console.error('[shift_routing] failed (keeps the line\'s own forward_to):', e.message);
+    return line;
+  }
+}
+
 async function applyTimeOff(db, line) {
   if (!line) return line;
+  line = await applyShiftRouting(db, line);
   const slug = SECRETARY_HANDSETS[tenDigits(line.forward_to)];
   const ownerDigits = tenDigits(process.env.OWNER_PHONE_NUMBER || '');
   const ownerTo = line.after_hours_forward_to || (ownerDigits.length === 10 ? '+1' + ownerDigits : null);
@@ -592,7 +621,7 @@ async function handleVoiceInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, ivr_gate_enabled, ai_bot_enabled, route_team')
       .eq('phone', to).maybeSingle();
     line = await applyTimeOff(db, data && data.active ? data : null);
 
@@ -663,7 +692,7 @@ async function handleVoiceGather(req, res) {
   const db = serviceClient();
   try {
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, route_team')
       .eq('phone', to).maybeSingle();
     line = await applyTimeOff(db, data && data.active ? data : null);
   } catch (e) {
@@ -1340,9 +1369,9 @@ async function handleVoiceBotStart(req, res) {
   let line = null;
   try {
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone, ai_bot_enabled')
+      .select('phone, label, business_slug, market, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone, ai_bot_enabled, route_team')
       .eq('phone', to).maybeSingle();
-    line = data || null;
+    line = await applyShiftRouting(db, data || null);
     // Safety net: got redirected here but the flag is off (race with someone
     // flipping it mid-call) — fall back to the normal human-forwarding path
     // rather than dead-ending the caller.
@@ -1408,9 +1437,10 @@ async function handleVoiceBotTurn(req, res) {
 
   // Line row, re-fetched fresh (needed for any transfer on this turn — never
   // trust a stale copy of forward_to/recording settings from session start).
-  const { data: line } = await db.from('tracking_numbers')
-    .select('phone, label, business_slug, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+  const { data: lineRow } = await db.from('tracking_numbers')
+    .select('phone, label, business_slug, forward_to, ring_seconds, record_calls, after_hours_forward_to, hours_start, hours_end, hours_timezone, route_team')
     .eq('phone', session.tracking_number).maybeSingle();
+  const line = await applyShiftRouting(db, lineRow);
 
   // 3 misses tolerated (owner request, 2026-09-03 — escalating after just 2
   // felt instant/abrupt on a real call) before handing off to a human.
@@ -1780,9 +1810,9 @@ async function handleSmsInbound(req, res) {
   try {
     const db = serviceClient();
     const { data } = await db.from('tracking_numbers')
-      .select('phone, label, business_slug, forward_to, active, after_hours_forward_to, hours_start, hours_end, hours_timezone')
+      .select('phone, label, business_slug, forward_to, active, after_hours_forward_to, hours_start, hours_end, hours_timezone, route_team')
       .eq('phone', to).maybeSingle();
-    line = data && data.active ? data : null;
+    line = await applyShiftRouting(db, data && data.active ? data : null);
 
     // Same blocked_numbers table the voice path checks (handleVoiceInbound
     // above) and the Messages "Block" button writes to — one block covers

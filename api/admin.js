@@ -14982,11 +14982,26 @@ async function officePayRows(db, weekStart) {
     const total = workDays * SECRETARY_RATE[slug].daily;
     return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: true, work_days: workDays, currency, usd_equivalent: usdEq(total), fx_rate: currency === 'PHP' ? effectiveRate : null };
   };
+  // Alex / Joe (owner 2026-10-02): ₱2,000 for each day they are scheduled
+  // (staff_schedules), nothing for days off. Read-only, no override.
+  const team = async (name) => {
+    const { data: days, error } = await db.from('staff_schedules').select('day_of_week').eq('name', name);
+    if (error) throw error;   // never show a fake ₱0
+    const set = new Set((days || []).map(d => d.day_of_week));
+    let workDays = 0;
+    for (let i = 0; i < 7; i++) { const d = addDaysStr(weekStart, i); if (d >= STAFF_PAY_FROM && set.has(dayOfWeekFor(d))) workDays++; }
+    const total = workDays * STAFF_DAY_RATE_PHP;
+    return { name, jobs: [], deferred: [], total, is_office: true, is_suggested: true, read_only: true, work_days: workDays, daily_rate: STAFF_DAY_RATE_PHP, currency: 'PHP', usd_equivalent: Math.round(total / effectiveRate * 100) / 100, fx_rate: effectiveRate };
+  };
   return Promise.all([
     mk('Heather', 'handy-andy', row?.heather_pay),
     mk('Joey', 'doms', row?.joey_pay),
+    team('Alex'),
+    team('Joe'),
   ]);
 }
+const STAFF_DAY_RATE_PHP = 2000;
+const STAFF_PAY_FROM = '2026-10-02';   // first day Alex/Joe take calls
 
 // Owner-only: set the PHP->USD reference rate for one pay week. Independent
 // of the pay amount override — the owner can correct the exchange rate
@@ -15056,7 +15071,7 @@ async function payroll(req, res, db, auth) {
   // Andy, Joey for Dom's), not both, so a single-business view never shows
   // someone who doesn't work there.
   const officeRows = (await officePayRows(db, parsedWeek))
-    .filter(r => (biz.slug === 'handy-andy' && r.name === 'Heather') || (biz.slug === 'doms' && r.name === 'Joey'));
+    .filter(r => (biz.slug === 'handy-andy' && r.name === 'Heather') || (biz.slug === 'doms' && ['Joey', 'Alex', 'Joe'].includes(r.name)));
   const allRows = sortForPayroll([...data, ...officeRows]);
 
   return res.status(200).json({

@@ -9362,6 +9362,15 @@ function renderPayrollData(d){
     // their pay is a hand-entered weekly number instead of computed from a
     // job list, so they get an inline editable field right in this row
     // instead of the Jobs/Deferred columns.
+    // Alex / Joe: ₱2,000 per scheduled day, read-only (owner 2026-10-02).
+    if(t.is_office && t.read_only){
+      html+=`<tr class="${i%2?'z':''}"><td colspan="4" style="padding:14px 12px;"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div><div class="pr-name">${esc(t.name)} <span class="meta" style="font-weight:400;">(office · PHP)</span></div>
+        <div style="color:var(--mute);font-size:12.5px;margin-top:2px;">${t.work_days??0} day${t.work_days===1?'':'s'} scheduled × ₱${Number(t.daily_rate||2000).toLocaleString()}/day</div></div>
+        <div style="font-weight:800;">₱${Number(t.total||0).toLocaleString()} <span style="font-size:12px;color:var(--mute);font-weight:400;">≈ ${payFmtUSD(t.usd_equivalent??0)} USD</span></div>
+      </div></td></tr>`;
+      return;
+    }
     if(t.is_office){
       const field=t.name==='Heather'?'heather_pay':'joey_pay';
       const isPhp=t.currency==='PHP';
