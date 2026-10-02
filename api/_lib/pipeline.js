@@ -75,7 +75,7 @@ const CARD_CAP = 600;
 const TIMELINE_CAP = 40;
 const AUTO_TEXT_OTHER_CAP = 3;           // on-the-way / review / auto-ack texts shown per card
 const CHICAGO = 'America/Chicago';       // "today" on the board (owner, 2026-09-24)
-const RANGE_DAYS = { today: 0, 2: 1, yesterday: 1, 7: 6, 30: 29 };   // '2' = today + yesterday (owner 2026-09-29 default)
+const RANGE_DAYS = { today: 0, 2: 1, 3: 2, yesterday: 1, 7: 6, 30: 29 };   // '3' = today + the 2 days before (owner 2026-10-02 default)   // '2' = today + yesterday (owner 2026-09-29 default)
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CARD_KEY = /^c_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TEST_NAME = /\(ignore\)|e2e test/i;
