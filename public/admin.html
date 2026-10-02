@@ -654,6 +654,12 @@
   .tk-title{font-weight:800;font-size:15px;} .tk-meta{font-size:12px;color:var(--mute);margin-top:2px;}
   .tk-job{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
   .tk-notes{display:block;width:100%;box-sizing:border-box;margin-top:6px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:rgba(255,255,255,.7);resize:vertical;}
+  .tk-row{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#fff;}
+  .tk-sum{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;list-style:none;} .tk-sum::-webkit-details-marker{display:none;}
+  .tk-sum input{width:18px;height:18px;flex:none;cursor:pointer;} .tk-dot{width:10px;height:10px;border-radius:50%;flex:none;}
+  .tk-sum .tk-title{flex:1;min-width:0;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .tk-ico{font-size:12px;flex:none;}
+  .tk-car{color:var(--mute);flex:none;transition:transform .15s;} .tk-row[open] .tk-car{transform:rotate(90deg);} .tk-row[open] .tk-sum .tk-title{white-space:normal;}
+  .tk-row .tk-body{padding:0 12px 12px 48px;} .tk-row.done{opacity:.7;} .tk-row.done .tk-title{text-decoration:line-through;color:var(--mute);}
   .tk-link{display:inline-block;margin:6px 8px 0 0;font-size:13px;font-weight:700;color:var(--accent);}
   .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
   .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
@@ -10559,7 +10565,7 @@ function paintMyDay(){
 // Red = urgent, yellow = today, green = when you can. Colors never change;
 // a done task is crossed out on white. Optional linked job + notes per task.
 const TASK_COL={ red:{ bar:'#dc2626', ink:'#991b1b', bg:'#fef2f2', label:'Urgent' }, yellow:{ bar:'#f59e0b', ink:'#92400e', bg:'#fffbeb', label:'Today' }, green:{ bar:'#16a34a', ink:'#166534', bg:'#f0fdf4', label:'When you can' } };
-let _tk={ tasks:[], color:'yellow', job:null };
+let _tk={ tasks:[], color:'yellow', job:null, open:new Set() };
 async function renderTasks(){
   const view=document.getElementById('view');
   if(!_tk.tasks.length) view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
@@ -10578,17 +10584,17 @@ function paintTasks(){
   const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
   const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   const card=t=>{ const c=TASK_COL[t.color]||TASK_COL.green, d=!!t.done_at;
-    return `<div class="tk-card${d?' done':''}" style="${d?'':`border-left-color:${c.bar};background:${c.bg};`}" data-tk="${esc(t.id)}">
-      <label class="tk-check"><input type="checkbox" data-tk-done ${d?'checked':''}></label>
+    // List row; tap to open the details (owner 2026-10-02).
+    return `<details class="tk-row${d?' done':''}" data-tk="${esc(t.id)}" ${_tk.open.has(t.id)?'open':''}>
+      <summary class="tk-sum"><input type="checkbox" data-tk-done ${d?'checked':''}><span class="tk-dot" style="background:${d?'#cbd5e1':c.bar};"></span><span class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</span>${t.booking_id?'<span class="tk-ico">🔗</span>':''}${t.notes?'<span class="tk-ico">📝</span>':''}<span class="tk-car">▸</span></summary>
       <div class="tk-body">
-        <div class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</div>
         <div class="tk-meta">${d?`Done · ${esc(W(t.done_at))}${t.done_by?' · '+esc(t.done_by):''}`:`${esc(c.label)} · from ${esc(t.created_by||'')} · ${esc(W(t.created_at))}`}</div>
         ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
         ${[...new Set(String(t.notes||'').match(/https?:\/\/[^\s<>"]+/g)||[])].map(u=>`<a class="tk-link" href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/,''))} ↗</a>`).join('')}
         <textarea class="tk-notes" data-tk-notes rows="${Math.min(14,Math.max(1,String(t.notes||'').split(String.fromCharCode(10)).length))}" placeholder="Notes…">${esc(t.notes||'')}</textarea>
+      ${(role==='owner'||t.created_by===userName)?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
       </div>
-      ${(role==='owner'||t.created_by===userName)?'<button type="button" class="tk-x" data-tk-del title="Delete">✕</button>':''}
-    </div>`; };
+    </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:760px;">
     <h2 style="margin:0 0 12px;">Task</h2>
     <div class="tk-add">
@@ -10599,7 +10605,7 @@ function paintTasks(){
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
     ${open.length?open.map(card).join(''):'<div class="empty" style="margin:14px 0;">No open tasks.</div>'}
-    ${done.length?`<div class="side-section" style="padding:16px 0 6px;">Done</div>${done.map(card).join('')}`:''}
+    ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
   view.querySelectorAll('[data-tk-color]').forEach(b=>b.onclick=()=>{ _tk.color=b.dataset.tkColor; view.querySelectorAll('[data-tk-color]').forEach(x=>x.classList.toggle('on',x===b)); });
@@ -10615,6 +10621,8 @@ function paintTasks(){
       _tk.job=null; await renderTasks(); }catch(e){ toast(e.message); }
   };
   view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
+    el.addEventListener('toggle',()=>{ if(el.open) _tk.open.add(id); else _tk.open.delete(id); });
+    el.querySelector('[data-tk-done]').addEventListener('click',e=>e.stopPropagation());
     el.querySelector('[data-tk-done]').onchange=async e=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'done', id, done:e.target.checked } }); await renderTasks(); }catch(err){ toast(err.message); } };
     const n=el.querySelector('[data-tk-notes]'); n.onchange=async()=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'notes', id, notes:n.value } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.notes=n.value; toast('Note saved'); }catch(err){ toast(err.message); } };
     const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
