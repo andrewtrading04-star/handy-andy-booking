@@ -7741,6 +7741,21 @@ async function techInvites(req, res, db, auth) {
     id: a.id, name: a.name, unstaffed: !!a.unstaffed,
     techs: (techs || []).filter(t => t.service_area_id === a.id).map(t => t.name),
   }));
+  // Owner 2026-10-02: Handy Andy's picker also lists Dom's metros (OKC, Tulsa)
+  // so a Dom's hire can be invited without switching business.
+  if (biz.slug === 'handy-andy') {
+    const { data: domsBiz } = await db.from('businesses').select('id').eq('slug', 'doms').maybeSingle();
+    if (domsBiz) {
+      const [{ data: dAreas }, { data: dTechs }] = await Promise.all([
+        db.from('service_areas').select('id, name, unstaffed, active').eq('business_id', domsBiz.id).order('name'),
+        db.from('technicians').select('name, service_area_id').eq('business_id', domsBiz.id).eq('active', true),
+      ]);
+      for (const a of (dAreas || []).filter(x => x.active)) {
+        metros.push({ id: a.id, name: "Dom's · " + a.name, unstaffed: !!a.unstaffed, business: 'doms',
+          techs: (dTechs || []).filter(t => t.service_area_id === a.id).map(t => t.name) });
+      }
+    }
+  }
 
   const { data: rows, error } = await db.from('tech_invites')
     .select('id, code, status, expires_at, invitee_name, invitee_phone, max_jobs_per_day, service_area_id, created_at, sent_at, send_count, last_sms_log_id, opened_at, open_count, joined_at, technician_id')

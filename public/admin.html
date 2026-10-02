@@ -10070,7 +10070,7 @@ function openTechInviteModal(){
     const btns=modal.querySelectorAll('#tinvForm button'); btns.forEach(b=>b.disabled=true);
     busy=true;
     try{
-      const d=await api('tech_invite_create',{ method:'POST', body:{ business:current.slug, service_area_id:areaId, name, phone:phoneRaw, max_jobs_per_day:cap, send_sms:sendSms }});
+      const d=await api('tech_invite_create',{ method:'POST', body:{ business:((metros.find(m=>m.id===areaId)||{}).business)||current.slug, service_area_id:areaId, name, phone:phoneRaw, max_jobs_per_day:cap, send_sms:sendSms }});
       busy=false; created=true;
       if(!modal.isConnected) return;   // signed out mid-request: dismissAllOverlays already removed the sheet
       try{ localStorage.setItem('tinv_area_'+current.slug, areaId); }catch{}
