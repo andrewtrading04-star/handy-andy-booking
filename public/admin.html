@@ -654,6 +654,7 @@
   .tk-title{font-weight:800;font-size:15px;} .tk-meta{font-size:12px;color:var(--mute);margin-top:2px;}
   .tk-job{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
   .tk-notes{display:block;width:100%;box-sizing:border-box;margin-top:6px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:rgba(255,255,255,.7);resize:vertical;}
+  .tk-link{display:inline-block;margin:6px 8px 0 0;font-size:13px;font-weight:700;color:var(--accent);}
   .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
   .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
   /* Pipeline timeline (owner 2026-10-01, namethatui 'timeline'): time on the left, small dot on the line, text on the right. */
@@ -10574,7 +10575,8 @@ function paintTasks(){
         <div class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</div>
         <div class="tk-meta">${d?`Done · ${esc(W(t.done_at))}${t.done_by?' · '+esc(t.done_by):''}`:`${esc(c.label)} · from ${esc(t.created_by||'')} · ${esc(W(t.created_at))}`}</div>
         ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
-        <textarea class="tk-notes" data-tk-notes rows="1" placeholder="Notes…">${esc(t.notes||'')}</textarea>
+        ${[...new Set(String(t.notes||'').match(/https?:\/\/[^\s<>"]+/g)||[])].map(u=>`<a class="tk-link" href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/,''))} ↗</a>`).join('')}
+        <textarea class="tk-notes" data-tk-notes rows="${Math.min(14,Math.max(1,String(t.notes||'').split(String.fromCharCode(10)).length))}" placeholder="Notes…">${esc(t.notes||'')}</textarea>
       </div>
       ${(role==='owner'||t.created_by===userName)?'<button type="button" class="tk-x" data-tk-del title="Delete">✕</button>':''}
     </div>`; };
