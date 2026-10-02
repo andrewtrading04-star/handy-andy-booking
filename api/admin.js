@@ -17536,7 +17536,8 @@ async function assistantTasks(req, res, db, auth, body) {
   const op = String(body.op || '');
   if (op === 'add') {
     const title = String(body.title || '').trim().slice(0, 300);
-    const color = ['red', 'yellow', 'green'].includes(body.color) ? body.color : null;
+    // Joey's own tasks go in their own list, no color pick (owner 2026-10-02).
+    const color = auth.role !== 'owner' ? 'joey' : ['red', 'yellow', 'green'].includes(body.color) ? body.color : null;
     if (!title) return res.status(400).json({ error: 'Write the task first.' });
     if (!color) return res.status(400).json({ error: 'Pick a color.' });
     const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who };
@@ -17563,7 +17564,7 @@ async function assistantTasks(req, res, db, auth, body) {
   if (op === 'delete') {
     const { data: t } = await db.from('assistant_tasks').select('created_by').eq('id', id).maybeSingle();
     if (!t) return res.status(404).json({ error: 'Not found' });
-    if (auth.role !== 'owner' && t.created_by !== who) return res.status(403).json({ error: 'Only Andrew can delete his tasks.' });
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Only Andrew can delete tasks.' });
     const { error } = await db.from('assistant_tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
     return res.status(200).json({ ok: true });

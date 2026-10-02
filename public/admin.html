@@ -10564,7 +10564,7 @@ function paintMyDay(){
 // ── Task list (owner 2026-10-02): Andrew gives Joey tasks; Joey adds her own.
 // Red = urgent, yellow = today, green = when you can. Colors never change;
 // a done task is crossed out on white. Optional linked job + notes per task.
-const TASK_COL={ red:{ bar:'#dc2626', ink:'#991b1b', bg:'#fef2f2', label:'Urgent' }, yellow:{ bar:'#f59e0b', ink:'#92400e', bg:'#fffbeb', label:'Today' }, green:{ bar:'#16a34a', ink:'#166534', bg:'#f0fdf4', label:'When you can' } };
+const TASK_COL={ red:{ bar:'#dc2626', ink:'#991b1b', bg:'#fef2f2', label:'Urgent' }, yellow:{ bar:'#f59e0b', ink:'#92400e', bg:'#fffbeb', label:'Today' }, green:{ bar:'#16a34a', ink:'#166534', bg:'#f0fdf4', label:'When you can' }, joey:{ bar:'#6366f1', ink:'#3730a3', bg:'#eef2ff', label:"Joey's task" } };
 let _tk={ tasks:[], color:'yellow', job:null, open:new Set() };
 async function renderTasks(){
   const view=document.getElementById('view');
@@ -10579,7 +10579,7 @@ function tasksBadge(){
 }
 function paintTasks(){
   const view=document.getElementById('view'); if(!onScreen('tasks')) return;
-  const rank={red:0,yellow:1,green:2};
+  const rank={red:0,yellow:1,green:2,joey:3};
   const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||(a.created_at<b.created_at?-1:1));
   const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
   const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -10592,19 +10592,20 @@ function paintTasks(){
         ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
         ${[...new Set(String(t.notes||'').match(/https?:\/\/[^\s<>"]+/g)||[])].map(u=>`<a class="tk-link" href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/,''))} ↗</a>`).join('')}
         <textarea class="tk-notes" data-tk-notes rows="${Math.min(14,Math.max(1,String(t.notes||'').split(String.fromCharCode(10)).length))}" placeholder="Notes…">${esc(t.notes||'')}</textarea>
-      ${(role==='owner'||t.created_by===userName)?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
+      ${role==='owner'?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
       </div>
     </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:760px;">
     <h2 style="margin:0 0 12px;">Task</h2>
     <div class="tk-add">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
-      <div class="tk-colors">${['red','yellow','green'].map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};">${TASK_COL[k].label}</button>`).join('')}</div>
+      ${role!=='owner'?'':`<div class="tk-colors">${['red','yellow','green'].map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};">${TASK_COL[k].label}</button>`).join('')}</div>`}
       <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
       <textarea id="tkNotes" rows="2" placeholder="Notes (optional)"></textarea>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
-    ${open.length?open.map(card).join(''):'<div class="empty" style="margin:14px 0;">No open tasks.</div>'}
+    ${open.filter(t=>t.color!=='joey').map(card).join('')||'<div class="empty" style="margin:14px 0;">No open tasks.</div>'}
+    ${open.some(t=>t.color==='joey')?`<div class="side-section" style="padding:16px 0 6px;">Joey's tasks</div>${open.filter(t=>t.color==='joey').map(card).join('')}`:''}
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
