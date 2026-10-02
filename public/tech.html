@@ -855,7 +855,32 @@ function setBottomTab(which){
   const onTabView=BOTTOM_TAB_VIEWS.includes(which);
   bar.classList.toggle('hidden',!onTabView);
   document.body.classList.toggle('has-bottombar',onTabView);
+  if(onTabView) setTimeout(techTour,600);
   bar.querySelectorAll('.bbtab').forEach(b=>b.classList.toggle('active',b.dataset.view===which));
+}
+
+// First-login tour (owner 2026-10-02): three one-time pop-ups pointing at the
+// tabs. Seen once per tech on this phone, never again.
+function techTour(){
+  const key='tech_tour_done_'+((tech&&(tech.id||tech.name))||'');
+  if(lsGet(key)||document.getElementById('techTour')) return;
+  const steps=[['jobsView','New jobs go here'],['availabilityView','Edit your schedule'],['payrollView','This is your income']];
+  const el=document.createElement('div'); el.id='techTour'; document.body.appendChild(el);
+  let i=0;
+  const paint=()=>{
+    const [view,txt]=steps[i];
+    const tab=document.querySelector('#bottomTabBar .bbtab[data-view="'+view+'"]');
+    if(!tab){ el.remove(); return; }
+    const r=tab.getBoundingClientRect();
+    document.querySelectorAll('#bottomTabBar .bbtab').forEach(b=>b.style.outline=b===tab?'3px solid #2563eb':'');
+    const last=i===steps.length-1;
+    const w=Math.min(260,window.innerWidth-24), left=Math.max(12,Math.min(r.left+r.width/2-w/2,window.innerWidth-w-12));
+    const arrow=Math.max(14,Math.min(r.left+r.width/2-left-7,w-28));
+    el.style.cssText='position:fixed;z-index:9999;left:'+left+'px;bottom:'+(window.innerHeight-r.top+14)+'px;width:'+w+'px;background:#2563eb;color:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:16px;font-weight:700;';
+    el.innerHTML='<div>'+txt+'</div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;"><span style="font-size:12px;opacity:.8;font-weight:400;">'+(i+1)+' of '+steps.length+'</span><button type="button" style="background:#fff;color:#1d4ed8;border:none;border-radius:8px;padding:6px 14px;font:inherit;font-size:14px;cursor:pointer;">'+(last?'Got it':'Next')+'</button></div><div style="position:absolute;bottom:-7px;left:'+arrow+'px;width:14px;height:14px;background:#2563eb;transform:rotate(45deg);"></div>';
+    el.querySelector('button').onclick=()=>{ if(last){ lsSet(key,'1'); document.querySelectorAll('#bottomTabBar .bbtab').forEach(b=>b.style.outline=''); el.remove(); } else { i++; paint(); } };
+  };
+  paint();
 }
 
 // All day math runs in the BUSINESS timezone so the tech app's calendar lines
