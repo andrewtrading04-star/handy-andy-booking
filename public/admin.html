@@ -500,6 +500,7 @@
   .pl-list{display:flex;flex-direction:column;gap:8px;}
   body.sec-nav #navPipeline, body.sec-nav [data-nav="brackets"], body.sec-nav #navMyAvailability, body.sec-nav #navTechnicians, body.sec-nav [data-nav="customers"], body.sec-nav #navGallery{display:none !important;}
   body.sec-nav #navOther{display:flex !important;}
+  body.sec-nav.gal-on #navGallery{display:flex !important;}   /* Joey sees Photos (owner 2026-10-02) */
   /* Jiyah's read-only copy of Calls/Messages inside her audit portal (owner 2026-09-28). */
   body.ro-embed #sidebar, body.ro-embed .mobilebar, body.ro-embed #navScrim, body.ro-embed #takeCallBtn{display:none !important;}
   body.ro-embed .rc-btn, body.ro-embed .rc-btn-row, body.ro-embed .rc-actions, body.ro-embed .msg-reply, body.ro-embed [data-bkc],
@@ -3458,6 +3459,7 @@ function enterApp(){
   // Secretaries (owner, 2026-09-24): no Pipeline; Bracket Inventory, My
   // Availability, Technicians, Customers and Photos move under their own Other tab.
   document.body.classList.toggle('sec-nav', role==='secretary');
+  document.body.classList.toggle('gal-on', role==='secretary'&&userName==='Joey');
   // Pipeline for secretaries, one at a time (owner 2026-09-27: Heather first).
   document.body.classList.toggle('pl-on', role==='secretary');
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
@@ -18741,7 +18743,8 @@ async function renderGreeting(){
     // already uses, so this reads exactly the same calls with exactly the
     // same booked/worked-the-script rules -- no second definition of
     // "conversion" to drift out of sync with that screen or the owner's ranking.
-    const wantsCallPerf = role==='secretary' && ['handy-andy','doms'].includes(scope);
+    // Not for Joey (owner 2026-10-02).
+    const wantsCallPerf = role==='secretary' && ['handy-andy','doms'].includes(scope) && userName!=='Joey';
     if(wantsCallPerf){
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:0 }}).catch(()=>null));
       reqs.push(api('my_call_performance',{ params:{ days:7, offset:-7 }}).catch(()=>null));
