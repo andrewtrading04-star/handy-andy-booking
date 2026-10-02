@@ -526,7 +526,7 @@
   .cv-sub{color:#536277;font-size:14px;margin-top:2px;}
   .cv-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
   .cv-pill{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;}
-  .cv-pill.green{background:#dcfce7;color:#15803d;border-color:#bbf7d0;} .cv-pill.red{background:#fee2e2;color:#b91c1c;border-color:#fecaca;}
+  .cv-pill.green{background:#dcfce7;color:#15803d;border-color:#bbf7d0;} .cv-pill.white{background:#fff;color:#334155;border-color:#e2e8f0;} .cv-pill.red{background:#fee2e2;color:#b91c1c;border-color:#fecaca;}
   .cv-pill.blue{background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe;} .cv-pill.amber{background:#fef3c7;color:#92400e;border-color:#fde68a;}
   .cv-pill.purple{background:#ede9fe;color:#6d28d9;border-color:#ddd6fe;cursor:pointer;}
   .cv-head-btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
@@ -14471,7 +14471,7 @@ function callCard(r,handled,g,v2){
     : null;
   if(v2&&g){
     const missed=r.answered===false&&!isLive;
-    const pills=[`<span class="cv-pill ${missed?'red':'green'}">${missed?CV_ICON.miss:CV_ICON.ok} ${esc(callOutcome(r))}</span>`];
+    const pills=[`<span class="cv-pill ${missed&&r.called_back_at?'white':missed?'red':'green'}">${missed&&!r.called_back_at?CV_ICON.miss:CV_ICON.ok} ${esc(callOutcome(r))}</span>`];
     if(g.recordings) pills.push(`<span class="cv-pill blue">🎙 ${g.recordings} ${g.recordings>1?'recordings':'recording'}</span>`);
     if(g.voicemails) pills.push(`<span class="cv-pill amber">📨 ${g.voicemails} ${g.voicemails>1?'voicemails':'voicemail'}</span>`);
     if(g.texts) pills.push(g.latest.text_our&&g.latest.caller_phone
