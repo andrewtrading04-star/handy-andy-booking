@@ -17540,7 +17540,7 @@ async function assistantTasks(req, res, db, auth, body) {
     const color = auth.role !== 'owner' ? 'joey' : ['red', 'yellow', 'green'].includes(body.color) ? body.color : null;
     if (!title) return res.status(400).json({ error: 'Write the task first.' });
     if (!color) return res.status(400).json({ error: 'Pick a color.' });
-    const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who };
+    const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who, photo_urls: cleanNotePhotos(body.photos) };
     if (body.booking_id && /^[0-9a-f-]{36}$/i.test(String(body.booking_id))) {
       row.booking_id = body.booking_id; row.job_slug = String(body.job_slug || '').slice(0, 60) || null; row.job_label = String(body.job_label || '').slice(0, 200) || null;
     }
@@ -17558,6 +17558,12 @@ async function assistantTasks(req, res, db, auth, body) {
   }
   if (op === 'notes') {
     const { error } = await db.from('assistant_tasks').update({ notes: String(body.notes || '').slice(0, 4000) || null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  if (op === 'photos') {
+    // Pictures on a task (owner 2026-10-02): the full list, already uploaded via notes_photo.
+    const { error } = await db.from('assistant_tasks').update({ photo_urls: cleanNotePhotos(body.photos) }).eq('id', id);
     if (error) throw error;
     return res.status(200).json({ ok: true });
   }

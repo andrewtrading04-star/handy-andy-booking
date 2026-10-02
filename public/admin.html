@@ -10592,6 +10592,8 @@ function paintTasks(){
         ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
         ${[...new Set(String(t.notes||'').match(/https?:\/\/[^\s<>"]+/g)||[])].map(u=>`<a class="tk-link" href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/,''))} ↗</a>`).join('')}
         <textarea class="tk-notes" data-tk-notes rows="${Math.min(14,Math.max(1,String(t.notes||'').split(String.fromCharCode(10)).length))}" placeholder="Notes…">${esc(t.notes||'')}</textarea>
+        ${notePhotosHtml(t.photo_urls)}
+        ${(t.photo_urls||[]).length<NOTE_MAX_PHOTOS?'<button type="button" class="tk-job" data-tk-photo>📷 Add photo</button><input type="file" accept="image/*" multiple data-tk-file style="display:none;">':''}
       ${role==='owner'?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
       </div>
     </details>`; };
@@ -10602,6 +10604,7 @@ function paintTasks(){
       ${role!=='owner'?'':`<div class="tk-colors">${['red','yellow','green'].map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};">${TASK_COL[k].label}</button>`).join('')}</div>`}
       <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
       <textarea id="tkNotes" rows="2" placeholder="Notes (optional)"></textarea>
+      <div id="tkPhotoHost"></div>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
     ${open.filter(t=>t.color!=='joey').map(card).join('')||'<div class="empty" style="margin:14px 0;">No open tasks.</div>'}
@@ -10609,6 +10612,7 @@ function paintTasks(){
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
+  const tkPicker=notePhotoPicker(view.querySelector('#tkPhotoHost'), view.querySelector('#tkNotes'));
   view.querySelectorAll('[data-tk-color]').forEach(b=>b.onclick=()=>{ _tk.color=b.dataset.tkColor; view.querySelectorAll('[data-tk-color]').forEach(x=>x.classList.toggle('on',x===b)); });
   const jobIn=view.querySelector('#tkJob'), res=view.querySelector('#tkJobRes'); let tmr=null;
   jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
@@ -10618,7 +10622,7 @@ function paintTasks(){
     }catch(_){} },250); };
   view.querySelector('#tkAdd').onclick=async()=>{
     const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
-    try{ await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
+    try{ await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, photos:tkPicker.urls(), booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
       _tk.job=null; await renderTasks(); }catch(e){ toast(e.message); }
   };
   view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
@@ -10627,6 +10631,13 @@ function paintTasks(){
     el.querySelector('[data-tk-done]').onchange=async e=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'done', id, done:e.target.checked } }); await renderTasks(); }catch(err){ toast(err.message); } };
     const n=el.querySelector('[data-tk-notes]'); n.onchange=async()=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'notes', id, notes:n.value } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.notes=n.value; toast('Note saved'); }catch(err){ toast(err.message); } };
     const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
+    // Pictures on a task (owner 2026-10-02): upload, then save the full list.
+    const pb=el.querySelector('[data-tk-photo]'), pf=el.querySelector('[data-tk-file]');
+    if(pb&&pf){ pb.onclick=()=>pf.click(); pf.onchange=async()=>{ const t=_tk.tasks.find(x=>x.id===id)||{}; const urls=[...(t.photo_urls||[])];
+      const files=[...pf.files].slice(0,NOTE_MAX_PHOTOS-urls.length); pf.value=''; pb.textContent='Uploading…'; pb.disabled=true;
+      try{ for(const f of files){ const dataUrl=await compressImage(f,1400,0.8); const r=await api('notes_photo',{ method:'POST', body:{ image:dataUrl } }); urls.push(r.url); }
+        await api('assistant_tasks',{ method:'POST', body:{ op:'photos', id, photos:urls } }); _tk.open.add(id); await renderTasks();
+      }catch(err){ toast(err.message||'Could not add the photo'); pb.textContent='📷 Add photo'; pb.disabled=false; } }; }
     const x=el.querySelector('[data-tk-del]'); if(x) x.onclick=async()=>{ if(!confirm('Delete this task?')) return; try{ await api('assistant_tasks',{ method:'POST', body:{ op:'delete', id } }); await renderTasks(); }catch(err){ toast(err.message); } };
   });
 }
