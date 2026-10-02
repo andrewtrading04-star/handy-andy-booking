@@ -13,7 +13,7 @@ const QUESTIONS = [
   ['q_discount_source', 'Did they give the "Where did you hear about us?" discount?'],
   ['cust_accepted_discount', 'Did the customer accept the discount?'],
   ['q_info_correct', 'Did they collect the customer\'s information (name, address, phone)?'],
-  ['q_explained_comms', 'Did they explain the texts/emails the customer will get and ask "Is there anything else?"'],
+  ['q_explained_comms', 'Did they explain the follow up email and text the customer will get?'],
 ];
 const ANS = { type: 'string', enum: ['yes', 'no', 'unknown'] };
 const SCHEMA = {
