@@ -1974,6 +1974,8 @@
   .greeting.gl .gstat svg text{fill:#6b7280;}
   .greeting.gl .gstat svg line{stroke:#e5e7eb;}
   .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
+  .dpl .st-new{--st:#93c5fd;} .dpl .st-talked{--st:#fbbf24;} .dpl .st-quoted{--st:#a3d65c;} .dpl .st-booked{--st:#22d3ee;} .dpl .st-completed{--st:#a78bfa;}
+  .dpl .dpl-cell{background:color-mix(in srgb,var(--st) 28%,#fff);border-top:3px solid var(--st);} .dpl .dpl-cell:hover{background:color-mix(in srgb,var(--st) 42%,#fff);}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
   .dpl-cell{border:none;background:#f3f4f8;border-radius:10px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;color:inherit;}
   .dpl-cell:hover{background:#e9ebf3;} .dpl-cell b{font-size:18px;font-weight:850;line-height:1.1;} .dpl-cell span{font-size:10px;color:#6b7280;font-weight:700;text-align:center;line-height:1.15;}
@@ -19094,7 +19096,7 @@ function dashPipelineHtml(){
     api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule') paintGreeting(); });
   }
   const st=_dashPl;
-  const cell=([k,l])=>`<button type="button" class="dpl-cell" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
+  const cell=([k,l])=>`<button type="button" class="dpl-cell st-${k}" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
   return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline · last 3 days</div><div class="dpl-row">${PL_STAGES.map(cell).join('')}</div></div>`;
 }
 function avgTicketBoxHtml(pf, r){
@@ -19384,7 +19386,9 @@ function greetStatsHtml(){
   const revBySlug=r.week_by_slug||null;
   const revTotal=(r.week_total!=null)?r.week_total:(r.week||0);
   // Each secretary's booking rate this week (owner-only data; empty for staff).
-  const secs=Array.isArray(r.week_secretaries)?r.week_secretaries:[];
+  // Joe instead of Joey (owner 2026-10-02); Joe shows even before his first call.
+  const secs=(Array.isArray(r.week_secretaries)?r.week_secretaries:[]).filter(p=>p.person!=='Joey');
+  if(secs.length&&!secs.some(p=>p.person==='Joe')) secs.push({person:'Joe',calls:0,booked:0,conversion:0});
   const secHtml=secs.length?(
     `<div class="rev-sec"><div class="rev-sec-h">Booking rate · last 7 days</div>`+
     // Same bar style as the Avg ticket box (owner 2026-10-02).
