@@ -1962,22 +1962,21 @@
   .greeting.gl::after{display:none;}
   .greeting.gl .greet-line b{color:#534AB7;} .greeting.gl .greet-link{color:#1f2937;}
   .greeting.gl .greet-line b.good{color:#16a34a;} .greeting.gl .greet-line b.urgent{color:#dc2626;}
-  .greeting.gl .greet-stats{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"rev pf inc inc" "pred avg ndp ndp";gap:12px;}
+  .greeting.gl .greet-stats{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"rev avg inc inc" "pred pf ndp ndp";gap:12px;}
   .greeting.gl .greet-stats>.gstat{background:#fff;border:none;border-radius:16px;box-shadow:0 1px 3px rgba(20,30,50,.06);color:#1f2937;height:auto;padding:14px 16px;}
-  .greeting.gl .greet-stats>.gstat:nth-child(1){grid-area:rev;background:#534AB7;color:#fff;}
+  .greeting.gl .greet-stats>.gstat:nth-child(1){grid-area:rev;}
   .greeting.gl .greet-stats>.gstat:nth-child(2){grid-area:pred;}
   .greeting.gl .greet-stats>.gstat:nth-child(3){grid-area:avg;}
   .greeting.gl .greet-stats>.gstat:nth-child(4){grid-area:inc;}
   .greeting.gl .greet-stats>.gstat:nth-child(5){grid-area:pf;}
   .greeting.gl .greet-stats>.gstat:nth-child(6){grid-area:ndp;}
-  .greeting.gl .gstat:not(:first-child) .gstat-l{color:#6b7280;opacity:1;}
-  .greeting.gl .gstat:not(:first-child) svg text{fill:#6b7280;}
-  .greeting.gl .gstat:not(:first-child) svg line{stroke:#e5e7eb;}
-  .greeting.gl .gstat:not(:first-child) .rev-sec-bar{background:#eef0f5;}
+  .greeting.gl .gstat .gstat-l{color:#6b7280;opacity:1;}
+  .greeting.gl .gstat svg text{fill:#6b7280;}
+  .greeting.gl .gstat svg line{stroke:#e5e7eb;}
+  .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
   .greeting.gl .gstat-warn{color:#991b1b;background:#fee2e2;border-color:#fecaca;}
   .greeting.gl .ndp-seg{background:#eef0f5;} .greeting.gl .ndp-seg button{color:#4b5563;} .greeting.gl .ndp-seg button.on{background:#534AB7;color:#fff;}
-  .greeting.gl .gstat:first-child .rev-sec-top b{color:#C0DD97;} .greeting.gl .gstat:first-child .rev-sec-bar i{background:#C0DD97;}
-  @media(max-width:900px){ .greeting.gl .greet-stats{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"rev rev" "pf pred" "avg avg" "inc ndp";} }
+  @media(max-width:900px){ .greeting.gl .greet-stats{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"rev rev" "avg pred" "pf pf" "inc ndp";} }
   .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
     background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
   /* $100 review-program progress, on each tech's card */
@@ -19377,8 +19376,8 @@ function greetStatsHtml(){
       return `<div style="margin-top:9px;">`+
         `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;"><span style="font-weight:800;font-size:12px;">${esc(p.person)}</span>`+
         `<span style="opacity:.75;font-size:11px;font-variant-numeric:tabular-nums;">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls'}</span></div>`+
-        `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:22px;background:rgba(255,255,255,.16);border-radius:7px;overflow:hidden;">`+
-          `<div style="height:100%;width:${w.toFixed(1)}%;background:#C0DD97;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#27500A;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
+        `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:22px;background:#eef0f5;border-radius:7px;overflow:hidden;">`+
+          `<div style="height:100%;width:${w.toFixed(1)}%;background:#4ade80;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#14532d;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
         (inside?'':`<span style="font-weight:800;font-size:13px;min-width:40px;text-align:right;">${pctTxt}</span>`)+`</div></div>`; }).join('')+
     `</div>`):'';
   return `<div class="greet-stats">`+
