@@ -11088,6 +11088,7 @@ async function estimates(req, res, db, auth) {
       .eq('business_id', biz.id).eq('status', 'new')
       .lt('created_at', sevenDaysAgo);
   } catch (e) { console.warn('[admin] estimate auto-archive failed:', e.message); }
+  await autoArchiveSentEstimates(db, biz.id);
 
   // customer_address/city/state: shown on the card and carried into convert-to-job.
   // source: distinguishes a website contact-form lead from a real estimate request.
@@ -11711,8 +11712,26 @@ async function estimateSendSms(req, res, db, auth, body) {
 // Clean slate (owner, 2026-09-22): only estimates sent from this moment on are listed.
 const FOLLOWUP_STARTS = Date.parse('2026-09-22T00:00:00-06:00');
 const FOLLOWUP_AFTER_MS = 24 * 3600000;
+// Owner 2026-10-02: a SENT estimate with no approval leaves Follow up for
+// Archived 3 days after it was last sent. Best-effort; never blocks a list.
+async function autoArchiveSentEstimates(db, bizId) {
+  try {
+    const cut = Date.now() - 3 * 86400000;
+    const { data } = await db.from('estimates').select('id, created_at, contacted_at, texted_at, emailed_at, notes')
+      .eq('business_id', bizId).eq('status', 'contacted').is('approved_at', null)
+      .lt('created_at', new Date(cut).toISOString()).limit(500);
+    const ms = (t) => (t ? Date.parse(t) : 0) || 0;
+    const old = (data || []).filter((e) => (Math.max(ms(e.contacted_at), ms(e.texted_at), ms(e.emailed_at)) || ms(e.created_at)) < cut);
+    const line = `Archived automatically: no approval 3 days after it was sent (${new Date().toISOString().slice(0, 10)}).`;
+    for (let i = 0; i < old.length; i += 25) {
+      await Promise.all(old.slice(i, i + 25).map((e) => db.from('estimates').update({ status: 'archived', notes: [e.notes, line].filter(Boolean).join(String.fromCharCode(10)).slice(0, 2000) })
+        .eq('id', e.id).eq('status', 'contacted').is('approved_at', null).then(() => {}, () => {})));
+    }
+  } catch (e) { console.warn('[admin] sent-estimate auto-archive failed:', e.message); }
+}
 async function estimateFollowups(req, res, db, auth) {
   const biz = await resolveBusiness(db, auth, req.query.business || '');
+  await autoArchiveSentEstimates(db, biz.id);
   const now = Date.now();
   const cols = 'id, customer_name, customer_phone, customer_email, service_label, line_items, tax_rate, sms_consent, notes, source, created_at, contacted_at, texted_at, emailed_at, text_opened_at, email_opened_at, followup_emailed_at';
   const { data, error } = await db.from('estimates').select(cols)
