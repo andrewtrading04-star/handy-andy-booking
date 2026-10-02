@@ -15601,7 +15601,9 @@ async function auditorNoteSend(req, res, db, auth, body) {
   if (recipient === 'andrew') { row.to_owner = true; row.target_slug = null; }
   else if (recipient === 'heather') { row.to_owner = false; row.target_slug = 'handy-andy'; }
   else if (recipient === 'joey') { row.to_owner = false; row.target_slug = 'doms'; }
-  else return res.status(400).json({ error: 'Pick Andrew, Heather, or Joey' });
+  // Alex / Joe, one person each (owner 2026-10-02: Joey is off Jiyah's portal).
+  else if (recipient === 'alex' || recipient === 'joe') { row.to_owner = false; row.target_slug = null; row.target_name = recipient === 'alex' ? 'Alex' : 'Joe'; }
+  else return res.status(400).json({ error: 'Pick Andrew, Heather, Alex or Joe' });
   const { data, error } = await db.from('staff_notes').insert(row).select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
@@ -15611,7 +15613,7 @@ async function auditorNoteSend(req, res, db, auth, body) {
 // tab. Same read-tracking table as everyone else's notes (staff_note_reads).
 async function auditorNotesSent(req, res, db, auth) {
   const { data, error } = await db.from('staff_notes')
-    .select('id, target_slug, to_owner, body, created_at, photo_urls')
+    .select('id, target_slug, target_name, to_owner, body, created_at, photo_urls')
     .eq('created_by', auth.name || 'Jiyah').is('deleted_at', null)
     .order('created_at', { ascending: false }).limit(60);
   if (error) throw error;
@@ -15623,7 +15625,7 @@ async function auditorNotesSent(req, res, db, auth) {
   }
   const notes = (data || []).map(n => ({
     ...n,
-    recipient: n.to_owner ? 'andrew' : n.target_slug === 'handy-andy' ? 'heather' : n.target_slug === 'doms' ? 'joey' : 'both',
+    recipient: n.to_owner ? 'andrew' : n.target_name ? String(n.target_name).toLowerCase() : n.target_slug === 'handy-andy' ? 'heather' : n.target_slug === 'doms' ? 'joey' : 'both',
     reads: (readsBy[n.id] || []).map(r => ({ reader: r.reader, read_at: r.read_at, reply: r.reply || null })),
   }));
   return res.status(200).json({ notes });

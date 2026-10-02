@@ -108,7 +108,7 @@
   /* The line worksheet */
   .line{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;
     padding:9px 11px;margin-bottom:6px;flex-wrap:wrap;}
-  .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;min-width:122px;}
+  .num{font-variant-numeric:tabular-nums;font-size:13.5px;min-width:122px;}
   .tag{font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;}
   .tag.ha{background:#eaf1ff;color:#1d4ed8;} .tag.doms{background:#f3e8ff;color:#6b21a8;}
   .line input[type=number]{width:66px;text-align:center;}
@@ -466,7 +466,7 @@
          have; this is Jiyah's own way in. ══════════ -->
     <section class="page" data-page="notes" id="pageNotes">
       <div class="card" style="max-width:640px;">
-        <div class="sub" style="margin-bottom:10px;">Leave a note for Andrew, Heather, or Joey. It shows on their dashboard until they tick it off, and they can write back.</div>
+        <div class="sub" style="margin-bottom:10px;">Leave a note for Andrew, Heather, Alex or Joe. It shows on their dashboard until they tick it off, and they can write back.</div>
         <label for="noteBody" style="display:block;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;">Note</label>
         <textarea id="noteBody" rows="3" maxlength="2000" placeholder="Anything they need to know…" style="width:100%;min-height:70px;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;resize:vertical;box-sizing:border-box;"></textarea>
         <div id="notePhotoHost" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
@@ -476,7 +476,8 @@
             <select id="noteTarget" style="width:100%;min-height:40px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;">
               <option value="andrew">Andrew</option>
               <option value="heather">Heather</option>
-              <option value="joey">Joey</option>
+              <option value="alex">Alex</option>
+              <option value="joe">Joe</option>
             </select>
           </div>
           <button type="button" class="btn" id="notePost" style="width:auto;">Post note</button>
@@ -544,7 +545,6 @@
           <button type="button" data-f="all" class="on">All</button>
           <button type="button" data-f="flagged">Flagged</button>
           <button type="button" data-f="Heather">Heather</button>
-          <button type="button" data-f="Joey">Joey</button>
           <button type="button" data-f="Alex">Alex</button>
           <button type="button" data-f="Joe">Joe</button>
         </div>
@@ -618,7 +618,7 @@
         <select id="fLine" style="flex:1;min-width:190px;"></select>
         <span class="dtp" data-dtp="time"><input type="hidden" id="fTime" title="Central time, same as Grasshopper shows"></span>
         <select id="fDir"><option value="incoming">Inbound</option><option value="outgoing">Outbound</option></select>
-        <select id="fWho"><option value="">Who answered</option><option>Heather</option><option>Joey</option><option value="Nobody">Nobody (missed)</option></select>
+        <select id="fWho"><option value="">Who answered</option><option>Heather</option><option>Alex</option><option>Joe</option><option value="Nobody">Nobody (missed)</option></select>
         <select id="fSvc"><option value="TV Mounting">TV mounting</option><option value="Handyman">Handyman</option><option value="unknown">Never got that far</option></select>
       </div>
       <p class="sub" style="margin:0 0 10px;">Time is Central, exactly as Grasshopper shows it, no matter what timezone you're in.</p>
@@ -1361,7 +1361,7 @@ function renderLogTable(){
     const d=new Date(a.audit_date+'T12:00:00Z');
     const wd=DAY_ABBR[(d.getUTCDay()+6)%7];
     const t=centralTime(a);
-    const caller=[a.caller_name,a.caller_phone].filter(Boolean).map(esc).join('<br>')||'<span class="sub">unknown</span>';
+    const caller=[a.caller_name,a.caller_phone&&prettyPhone(a.caller_phone)].filter(Boolean).map(esc).join('<br>')||'<span class="sub">unknown</span>';
     const svc=a.service==='unknown'?'Not reached':(a.service||'');
     return '<tr>'+
       '<td class="num">'+wd+(t?' '+esc(t):'')+'</td>'+
@@ -1390,7 +1390,7 @@ function openView(id){
   const ov=document.createElement('div'); ov.id='viewOverlay';
   ov.innerHTML='<div id="viewCard">'+
     '<div class="spread" style="margin-bottom:8px;">'+
-      '<h2>'+esc(a.caller_name||a.caller_phone||'Graded call')+'</h2>'+
+      '<h2>'+esc(a.caller_name||(a.caller_phone&&prettyPhone(a.caller_phone))||'Graded call')+'</h2>'+
       '<button type="button" class="btn ghost" id="viewClose">Close</button></div>'+
     '<div class="sub" style="margin-bottom:10px;">'+
       esc(new Date(a.audit_date+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',timeZone:'UTC'}))+
@@ -2146,7 +2146,7 @@ async function gradeFromCall(r){
   if(line) $('fLine').value=line.number;
   if((data.calls||[]).some(c=>c.id===r.id)) $('fCall').value=r.id;
   const who=whoLabel(r);
-  $('fWho').value=['Heather','Joey'].includes(who)?who:(r.answered===false?'Nobody':'');
+  $('fWho').value=['Heather','Alex','Joe'].includes(who)?who:(r.answered===false?'Nobody':'');
   $('fTime').value=ctTimeHM(r.occurred_at);
   $('fCallerPhone').value=String(r.caller_phone||'').replace(/\D/g,'').slice(-10);
   if(r.customer&&r.customer.name) $('fCallerName').value=r.customer.name;
@@ -2185,6 +2185,8 @@ async function loadQueue(){
     .filter(r=>STAFFED_MARKETS.has(r.market) && r.recording_url && (r.kind==='live'||r.answered===true)
       && !r.left_voicemail && (Number(r.duration_sec)||0)>=20
       && r.occurred_at>=from.toISOString()
+      // Calls Andrew answered himself are not graded (owner 2026-10-02).
+      && qWho(r)!=='Andrew'
       && !r.blocked && !graded.has(r.id) && !qSkipped.has(r.id))
     .sort((a,b)=>a.occurred_at<b.occurred_at?-1:1);
   return qList;
@@ -2456,7 +2458,7 @@ $('notePost').onclick=async()=>{
 // shared", owner rule 2026-09-23 -- reuses the SAME auditor_notes_sent
 // fetch her Sent list already makes below, just flattened into a grid; no
 // second round trip.
-const notesWhoLabel={andrew:'Andrew',heather:'Heather',joey:'Joey',both:'Both secretaries'};
+const notesWhoLabel={andrew:'Andrew',heather:'Heather',joey:"Dom's",alex:'Alex',joe:'Joe',both:'Both secretaries'};
 function renderNotesPhotoGrid(notes){
   const grid=$('notesPhotoGrid'); if(!grid) return;
   const photos=[];

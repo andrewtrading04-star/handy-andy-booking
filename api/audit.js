@@ -110,7 +110,7 @@ export default async function handler(req, res) {
 // Counts and percentages only. No money, no customer names.
 const SECRETARIES = [
   { slug: 'handy-andy', business: 'Handy Andy', name: process.env.HANDY_ANDY_SECRETARY_NAME || 'Heather' },
-  { slug: 'doms',       business: "Dom's",      name: process.env.DOMS_SECRETARY_NAME || 'Joey' },
+  // Joey removed from Jiyah's portal (owner 2026-10-02): she no longer takes calls.
   // Own logins replacing Joey (owner, 2026-09-26).
   { slug: 'doms',       business: "Dom's",      name: 'Alex' },
   { slug: 'doms',       business: "Dom's",      name: 'Joe' },

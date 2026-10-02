@@ -2912,8 +2912,9 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp
 // (xxx) xxx-xxxx for display only — never touches what's stored or dialed. A
 // non-US or partial number (not exactly 10 digits) is returned unchanged
 // rather than mangled into a fake-looking format.
+// Always "(xxx) xxx-xxxx" (owner 2026-10-02), including +1 numbers.
 function fmtPhone(p){
-  const d=String(p||'').replace(/\D/g,'');
+  let d=String(p||'').replace(/\D/g,''); if(d.length===11&&d[0]==='1') d=d.slice(1);
   return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (p||'');
 }
 // A slot's label plus a green "+$N bonus" badge when the slot pays a bonus
@@ -3608,7 +3609,7 @@ function renderBadAlerts(alerts){
       <div class="ba-ico">⚠️</div>
       <div class="ba-main">
         <div class="ba-title">ATTENTION: ${esc(a.technician_name)} got a ${n} star review${bizTag}</div>
-        <div class="ba-meta">${esc(a.customer_name)} · ${esc(phone)} · Appt ${esc(appt)}</div>
+        <div class="ba-meta">${esc(a.customer_name)} · ${esc(fmtPhone(phone))} · Appt ${esc(appt)}</div>
       </div>
       <div class="ba-arrow">›</div>
       <button type="button" class="ba-x" data-dismiss="1" aria-label="Dismiss">×</button>
@@ -9939,7 +9940,7 @@ function applicantsBlockHtml(app){
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${r.passed?'<span style="color:#16a34a;font-weight:800;font-size:12px;">PASSED</span>':'<span style="color:#dc2626;font-weight:800;font-size:12px;">FAILED</span>'}
         <b style="font-size:14px;">${esc(r.name)}</b>
-        <span class="meta">${r.score}/${r.total} · ${esc(r.phone)} · ${esc(r.email)}</span>
+        <span class="meta">${r.score}/${r.total} · ${esc(fmtPhone(r.phone))} · ${esc(r.email)}</span>
       </div>
       <div class="meta" style="font-size:12.5px;margin-top:4px;">${new Date(r.created_at).toLocaleString()}</div>
       ${saHtml}
@@ -13337,7 +13338,7 @@ async function renderCallAudit(){
       </div>
       ${(f.caller_name||f.caller_phone)?`<div style="font-size:12.5px;margin-top:6px;">
         ${f.caller_name?`<span style="font-weight:700;">${esc(f.caller_name)}</span> `:''}
-        ${f.caller_phone?`<a href="tel:${esc(f.caller_phone)}" style="color:var(--accent);text-decoration:none;font-family:ui-monospace,Menlo,monospace;">📞 ${esc(f.caller_phone)}</a>`:'<span style="color:var(--mute);">no caller number saved</span>'}
+        ${f.caller_phone?`<a href="tel:${esc(f.caller_phone)}" style="color:var(--accent);text-decoration:none;font-family:ui-monospace,Menlo,monospace;">📞 ${esc(fmtPhone(f.caller_phone))}</a>`:'<span style="color:var(--mute);">no caller number saved</span>'}
       </div>`:`<div style="font-size:12.5px;margin-top:6px;color:var(--mute);">no caller number saved</div>`}
       ${f.notes?`<div style="font-size:13px;color:var(--ink-2);margin-top:5px;line-height:1.5;">${esc(f.notes)}</div>`:''}
       ${audio}
@@ -13599,7 +13600,7 @@ async function renderMyCallPerformance(){
   const auditNotes=(audit.notes||[]).map(n=>{
     const c=n.call||{};
     const who=c.caller_name||c.caller_phone
-      ? `${c.caller_name?`<b>${esc(c.caller_name)}</b>`:''}${c.caller_name&&c.caller_phone?' · ':''}${c.caller_phone?esc(c.caller_phone):''}`
+      ? `${c.caller_name?`<b>${esc(c.caller_name)}</b>`:''}${c.caller_name&&c.caller_phone?' · ':''}${c.caller_phone?esc(fmtPhone(c.caller_phone)):''}`
       : '<span style="color:var(--mute);">Caller not recorded</span>';
     const meta=[c.service,c.line].filter(Boolean).map(esc).join(' · ');
     const missed=(c.script_missed||[]);
@@ -14580,7 +14581,7 @@ function callSplitView(g){
   };
   return `<div style="border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;background:#f8fafc;">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
-      <div><div style="font-size:20px;font-weight:800;">${vipPre(g.latest.caller_phone)+esc(name||phone)}${vipStar(g.latest.caller_phone)}</div>${name?`<div style="color:var(--mute);">${esc(phone)}</div>`:''}</div>
+      <div><div style="font-size:20px;font-weight:800;">${vipPre(g.latest.caller_phone)+esc(name||phone)}${vipStar(g.latest.caller_phone)}</div>${name?`<div style="color:var(--mute);">${esc(fmtPhone(phone))}</div>`:''}</div>
       <div style="font-weight:800;color:#b45309;">Called ${brands.length} of your companies</div>
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:10px 0;">${journey}</div>
@@ -15619,6 +15620,30 @@ function plWhySeen(key){
   api('pipeline',{ method:'POST', body:{ op:'why_seen', card_key:key } }).catch(()=>{});
 }
 setTimeout(refreshPlWhyBadge,3000);
+// Review-call time pop-up (owner 2026-10-02): Joey, Joe and Alex, 11 AM-4 PM
+// Central. 2-3 PM is bright green "BEST TIME TO CALL" (from our own call
+// data: most pick-ups at 2 PM, most reviews at 3 PM). Tap opens Review Calls;
+// x hides it for an hour.
+let _rcPopCount=null, _rcPopCountAt=0;
+async function rcTimePop(){
+  let el=document.getElementById('rcTimePop');
+  const who=role==='secretary'&&['Joey','Joe','Alex'].includes(userName);
+  const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',hourCycle:'h23',hour:'2-digit',minute:'2-digit'}).formatToParts(new Date());
+  const hh=Number(p.find(x=>x.type==='hour').value), mm=Number(p.find(x=>x.type==='minute').value);
+  let snooze=0; try{ snooze=Number(localStorage.getItem('rc_pop_snooze')||0); }catch(_){}
+  if(!who||hh<11||hh>=16||Date.now()<snooze){ if(el) el.remove(); return; }
+  if(Date.now()-_rcPopCountAt>10*60000){ _rcPopCountAt=Date.now(); try{ const d=await api('review_calls',{ params:{ days:7 } }); _rcPopCount=(d.counts&&d.counts.to_call)??null; }catch(_){} }
+  const best=hh===14;
+  const t=`${hh%12||12}:${String(mm).padStart(2,'0')} ${hh<12?'AM':'PM'}`;
+  if(!el){ el=document.createElement('div'); el.id='rcTimePop'; document.body.appendChild(el);
+    el.addEventListener('click',e=>{ if(e.target.closest('[data-rcx]')){ try{ localStorage.setItem('rc_pop_snooze',String(Date.now()+36e5)); }catch(_){} el.remove(); return; }
+      callHubTab='reviewcalls'; navTo('callhub'); }); }
+  el.style.cssText=`position:fixed;right:16px;bottom:16px;z-index:8999;width:200px;border-radius:12px;padding:${best?'11px 13px':'9px 11px'};font-size:12.5px;line-height:1.4;cursor:pointer;box-shadow:0 8px 24px rgba(20,30,50,.18);`+(best?'background:#16a34a;color:#fff;border:none;':'background:#fff;color:#374151;border:1px solid var(--line);');
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:${best?'15px':'13px'};">${best?'BEST TIME TO CALL':'Review calls'}</b><span data-rcx title="Hide for an hour" style="padding:0 2px;opacity:.7;">✕</span></div>
+    <div>${best?'Review calls · ':'Good time to call · '}${t} CT</div>${_rcPopCount!=null?`<div>${_rcPopCount} customer${_rcPopCount===1?'':'s'} to call ›</div>`:''}`;
+}
+setTimeout(rcTimePop,4000);
+setInterval(()=>{ if(!document.hidden) rcTimePop(); },60000);
 setInterval(()=>{ if(!document.hidden&&current) refreshPlWhyBadge(); }, 120000);
 async function refreshMessagesBadge(){
   try{
@@ -15734,7 +15759,7 @@ async function renderReviewCallReport(){
     return `<div class="rc-card" style="align-items:flex-start;">
       <div class="rc-main">
         <div class="rc-name">${esc(c.customer_name)} <span class="rc-biz ${c.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(c.business_slug))}</span> <span class="rc-badge ${st.cls}">${esc(st.label)}</span>${c.reviewed?' <span class="rc-badge green">✅ review in</span>':''}</div>
-        <div class="rc-meta">${esc(c.service_name)} · ${esc(c.technician_name)} · job ${esc(rcRel(c.job_at))}${c.phone?` · ${esc(c.phone)}`:''}</div>
+        <div class="rc-meta">${esc(c.service_name)} · ${esc(c.technician_name)} · job ${esc(rcRel(c.job_at))}${c.phone?` · ${esc(fmtPhone(c.phone))}`:''}</div>
         ${c.tags.length?`<div class="rc-badges">${c.tags.map(t=>`<span class="rc-badge red">${esc(t)}</span>`).join('')}</div>`:''}
         ${c.notes?`<div class="rc-note">“${esc(c.notes)}”</div>`:''}
       </div>
@@ -15919,7 +15944,7 @@ function rcFolderCard(r){
   const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
   const callBtn = r.call_status==='do_not_contact'
     ? `<span class="rc-call disabled">🚫 Do not contact</span>`
-    : (tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>` : `<span class="rc-call disabled">No phone on file</span>`);
+    : (tel ? `<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(fmtPhone(r.phone))}</a>` : `<span class="rc-call disabled">No phone on file</span>`);
   const resend=(r.has_email && r.has_review_link && !r.reviewed && r.call_status!=='do_not_contact')
     ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
   const noteBox = r.call_notes ? `<div class="rc-note">“${esc(r.call_notes)}”</div>` : '';
@@ -16006,7 +16031,7 @@ function rcCard(r){
   h+=`${rcTimeBandHtml(r)}
     <div class="rc-step">1 · Say this</div>
     <div class="rc-say"><i></i><p>${esc(rcScript(r))}</p></div>
-    ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(r.phone)}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
+    ${tel?`<a class="rc-call" href="tel:${esc(tel)}">📞 Call ${esc(fmtPhone(r.phone))}</a>`:`<span class="rc-call disabled">No phone on file</span>`}`;
 
   // 3. how it went
   h+=`<div style="text-align:center;font-size:28px;line-height:1;color:var(--mute);margin:18px 0;" aria-hidden="true">↓</div><div class="rc-step">2 · How did it go?</div><div class="rc-opts">`
@@ -18715,7 +18740,7 @@ function addressAlertHtml(){
   return list.map(a=>`<div class="crit-alert">
     <div class="ca-h">⚠ Attention — action needed</div>
     <div class="ca-b">${esc(a.name||'Customer')} for ${esc(a.when||'')} has no address on file. Call the customer immediately to get the address.</div>
-    ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(a.phone)}</a>`:''}
+    ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(fmtPhone(a.phone))}</a>`:''}
   </div>`).join('');
 }
 // Approved-estimate reminder banner: a customer approved their estimate but the
@@ -18729,7 +18754,7 @@ function estimateAlertHtml(){
     <div class="ca-h">⚠ Approved estimate — book this job ASAP</div>
     <div class="ca-b"><strong>${esc(a.name||'Customer')}</strong> approved their estimate${a.no_address?' — <strong>no card on file and no address</strong>. Get both before booking':''}. Book this job as soon as possible.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(a.phone)}</a>`:''}
+      ${a.phone?`<a class="ca-call" href="tel:${esc(a.phone)}">📞 Call ${esc(fmtPhone(a.phone))}</a>`:''}
       <button type="button" class="ca-call" style="border:none;cursor:pointer;" onclick="goToEstimates()">📋 Go to estimate →</button>
     </div>
   </div>`).join('');
