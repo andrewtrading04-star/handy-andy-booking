@@ -9298,7 +9298,14 @@ async function calls(req, res, db, auth) {
     }
     return true;
   };
-  const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r));
+  // Returned = a later call with the same number was answered (either way) or
+  // logged as called back (owner 2026-10-02: the badge counts only missed
+  // calls nobody returned).
+  const returnedLater = (r) => {
+    const d = callerDigits(r.caller_phone);
+    return shown.some(x => x !== r && callerDigits(x.caller_phone) === d && x.occurred_at > r.occurred_at && (x.kind === 'live' || x.answered === true || x.called_back_at));
+  };
+  const interrupting = openVoicemails.filter(r => r.status === 'new' && !claimIsHot(r) && interruptsMe(r) && !returnedLater(r));
   return res.status(200).json({
     open,
     handled: shown.filter(r => !CALL_OPEN_STATUSES.includes(r.status)),
