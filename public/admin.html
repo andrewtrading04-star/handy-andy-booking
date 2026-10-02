@@ -643,6 +643,18 @@
   .ps-s{font-size:12.5px;color:#4b5563;margin-top:2px;line-height:1.4;}
   .ps-when{font-size:11.5px;color:#6b7280;text-align:right;white-space:nowrap;line-height:1.35;}
   .ps-link{display:inline-block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:700;}
+  .tk-add{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;}
+  .tk-add input,.tk-add textarea{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%;box-sizing:border-box;}
+  .tk-colors{display:flex;gap:6px;} .tk-colors button{flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-weight:700;font-size:13px;color:var(--c);cursor:pointer;}
+  .tk-colors button.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);}
+  .tk-res{position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border-radius:8px;box-shadow:0 8px 22px rgba(20,30,50,.14);} .tk-res button{display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer;} .tk-res button:hover{background:var(--line2);}
+  .tk-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-left:5px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .tk-card.done{background:#fff;opacity:.7;} .tk-card.done .tk-title{text-decoration:line-through;color:var(--mute);}
+  .tk-check input{width:20px;height:20px;margin-top:2px;cursor:pointer;} .tk-body{flex:1;min-width:0;}
+  .tk-title{font-weight:800;font-size:15px;} .tk-meta{font-size:12px;color:var(--mute);margin-top:2px;}
+  .tk-job{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
+  .tk-notes{display:block;width:100%;box-sizing:border-box;margin-top:6px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:rgba(255,255,255,.7);resize:vertical;}
+  .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
   .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
   /* Pipeline timeline (owner 2026-10-01, namethatui 'timeline'): time on the left, small dot on the line, text on the right. */
   .tl2.ps-list{gap:14px;}
@@ -2364,7 +2376,7 @@
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="askandrew" id="navAskAndrew" style="display:none;"><span class="ic" data-ico="other">🤖</span> Ask Andrew</button>
-      <button data-nav="myday" id="navMyDay"><span class="ic" data-ico="other">📝</span> Tasks</button>
+      <button data-nav="tasks" id="navTasks"><span class="ic" data-ico="other">📝</span> Task <span class="nav-badge" id="tasksBadge" style="display:none;"></span></button>
       <button data-nav="notes" id="navNotes" style="display:none;"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
@@ -3373,13 +3385,15 @@ function enterApp(){
   const navLaunch=document.getElementById('navLaunch');
   if(navLaunch) navLaunch.style.display = role==='owner' ? '' : 'none';
   // My Day: the owner's personal planner -- nobody else ever sees it.
-  const navMyDay=document.getElementById('navMyDay');
-  if(navMyDay) navMyDay.style.display = role==='owner' ? '' : 'none';
+  // Task (owner 2026-10-02): Andrew + Joey only. Replaces the old Tasks screen.
+  const navTasks=document.getElementById('navTasks');
+  if(navTasks) navTasks.style.display = (role==='owner'||(role==='secretary'&&userName==='Joey')) ? '' : 'none';
+  if(role==='secretary'&&userName==='Joey') api('assistant_tasks').then(d=>{ _tk.tasks=d.tasks||[]; tasksBadge(); }).catch(()=>{});
   // Ask Andrew (owner, 2026-09-24): owner-only while he teaches it.
   const navAsk=document.getElementById('navAskAndrew');
   if(navAsk){ navAsk.style.display = (role==='owner'||role==='secretary') ? '' : 'none'; navAsk.innerHTML='<span class="ic" data-ico="other">🤖</span> '+(role==='owner'?'Ask Andrew':'Ask the Owner'); }
   if(role==='owner') askRefreshBadge();
-  if(role==='owner') startMyDayNudge();
+  // Old Tasks nudge removed with the old Tasks screen (owner 2026-10-02).
   // Pipeline: owner and both secretaries (they call back from it on their
   // phones). Never the auditor -- the server refuses that role too, and the
   // audit box inside a card is owner-only on the server side as well.
@@ -3757,7 +3771,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'Tasks',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'Tasks',tasks:'Task',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -3780,6 +3794,7 @@ function navTo(s){
     else if(s==='launch') renderLaunch();
     else if(s==='notes') renderNotes();
     else if(s==='myday') renderMyDay();
+    else if(s==='tasks') renderTasks();
     else if(s==='pipeline') renderPipeline();
     else if(s==='askandrew') renderAskAndrew();
   }
@@ -3812,6 +3827,7 @@ function refreshCurrent(){
   else if(section==='other') renderOther();
   else if(section==='notes') renderNotes();
   else if(section==='myday') renderMyDay();
+  else if(section==='tasks') renderTasks();
   else if(section==='pipeline') renderPipeline();
 }
 
@@ -10529,6 +10545,71 @@ function paintMyDay(){
 }
 // Once a day at/after 6 PM Bangkok (until the page turns at 5 AM): if any
 // habit is still open, one popup. Remembered per page so it never repeats.
+// ── Task list (owner 2026-10-02): Andrew gives Joey tasks; Joey adds her own.
+// Red = urgent, yellow = today, green = when you can. Colors never change;
+// a done task is crossed out on white. Optional linked job + notes per task.
+const TASK_COL={ red:{ bar:'#dc2626', ink:'#991b1b', bg:'#fef2f2', label:'Urgent' }, yellow:{ bar:'#f59e0b', ink:'#92400e', bg:'#fffbeb', label:'Today' }, green:{ bar:'#16a34a', ink:'#166534', bg:'#f0fdf4', label:'When you can' } };
+let _tk={ tasks:[], color:'yellow', job:null };
+async function renderTasks(){
+  const view=document.getElementById('view');
+  if(!_tk.tasks.length) view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{ const d=await api('assistant_tasks'); _tk.tasks=d.tasks||[]; }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  paintTasks();
+}
+function tasksBadge(){
+  const el=document.getElementById('tasksBadge'); if(!el) return;
+  const n=_tk.tasks.filter(t=>!t.done_at).length;
+  el.textContent=n; el.style.display=(n&&role!=='owner')?'':'none';
+}
+function paintTasks(){
+  const view=document.getElementById('view'); if(!onScreen('tasks')) return;
+  const rank={red:0,yellow:1,green:2};
+  const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||(a.created_at<b.created_at?-1:1));
+  const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
+  const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  const card=t=>{ const c=TASK_COL[t.color]||TASK_COL.green, d=!!t.done_at;
+    return `<div class="tk-card${d?' done':''}" style="${d?'':`border-left-color:${c.bar};background:${c.bg};`}" data-tk="${esc(t.id)}">
+      <label class="tk-check"><input type="checkbox" data-tk-done ${d?'checked':''}></label>
+      <div class="tk-body">
+        <div class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</div>
+        <div class="tk-meta">${d?`Done · ${esc(W(t.done_at))}${t.done_by?' · '+esc(t.done_by):''}`:`${esc(c.label)} · from ${esc(t.created_by||'')} · ${esc(W(t.created_at))}`}</div>
+        ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
+        <textarea class="tk-notes" data-tk-notes rows="1" placeholder="Notes…">${esc(t.notes||'')}</textarea>
+      </div>
+      ${(role==='owner'||t.created_by===userName)?'<button type="button" class="tk-x" data-tk-del title="Delete">✕</button>':''}
+    </div>`; };
+  view.innerHTML=`<div class="wrap" style="max-width:760px;">
+    <h2 style="margin:0 0 12px;">Task</h2>
+    <div class="tk-add">
+      <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
+      <div class="tk-colors">${['red','yellow','green'].map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};">${TASK_COL[k].label}</button>`).join('')}</div>
+      <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
+      <textarea id="tkNotes" rows="2" placeholder="Notes (optional)"></textarea>
+      <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
+    </div>
+    ${open.length?open.map(card).join(''):'<div class="empty" style="margin:14px 0;">No open tasks.</div>'}
+    ${done.length?`<div class="side-section" style="padding:16px 0 6px;">Done</div>${done.map(card).join('')}`:''}
+  </div>`;
+  tasksBadge();
+  view.querySelectorAll('[data-tk-color]').forEach(b=>b.onclick=()=>{ _tk.color=b.dataset.tkColor; view.querySelectorAll('[data-tk-color]').forEach(x=>x.classList.toggle('on',x===b)); });
+  const jobIn=view.querySelector('#tkJob'), res=view.querySelector('#tkJobRes'); let tmr=null;
+  jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
+    tmr=setTimeout(async()=>{ try{ const d=await api('assistant_tasks',{ params:{ q } });
+      res.innerHTML=(d.jobs||[]).map((j,i)=>`<button type="button" data-i="${i}">${esc(j.label)}</button>`).join('')||'<div style="padding:6px 8px;color:var(--mute);">No jobs found.</div>';
+      res.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ _tk.job=d.jobs[+b.dataset.i]; jobIn.value=_tk.job.label; res.innerHTML=''; });
+    }catch(_){} },250); };
+  view.querySelector('#tkAdd').onclick=async()=>{
+    const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
+    try{ await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
+      _tk.job=null; await renderTasks(); }catch(e){ toast(e.message); }
+  };
+  view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
+    el.querySelector('[data-tk-done]').onchange=async e=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'done', id, done:e.target.checked } }); await renderTasks(); }catch(err){ toast(err.message); } };
+    const n=el.querySelector('[data-tk-notes]'); n.onchange=async()=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'notes', id, notes:n.value } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.notes=n.value; toast('Note saved'); }catch(err){ toast(err.message); } };
+    const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
+    const x=el.querySelector('[data-tk-del]'); if(x) x.onclick=async()=>{ if(!confirm('Delete this task?')) return; try{ await api('assistant_tasks',{ method:'POST', body:{ op:'delete', id } }); await renderTasks(); }catch(err){ toast(err.message); } };
+  });
+}
 function startMyDayNudge(){
   return; // habits removed (owner 2026-09-27)
   if(role!=='owner'||window._myDayNudgeOn) return; window._myDayNudgeOn=true;

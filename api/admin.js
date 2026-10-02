@@ -655,6 +655,7 @@ export default async function handler(req, res) {
       case 'secretary_changes_seen': return await secretaryChangesSeen(req, res, db, auth, body);
       case 'secretaries_list': return await secretariesList(req, res, db, auth);
       case 'notes_active': return await notesActive(req, res, db, auth);
+      case 'assistant_tasks': return await assistantTasks(req, res, db, auth, body);
       case 'notes_read':   return await notesRead(req, res, db, auth, body);
       case 'notes_list':   return await notesList(req, res, db, auth);
       case 'notes_add':    return await notesAdd(req, res, db, auth, body);
@@ -17482,3 +17483,76 @@ async function messagesBlock(req, res, db, auth, body) {
   if (error) throw error;
   return res.status(200).json({ ok: true, phone: customer });
 }
+
+// ── Task list: Andrew gives Joey (his assistant) tasks (owner 2026-10-02) ────
+// Red = urgent, yellow = today, green = when you can. A task keeps its color
+// until done; done tasks show crossed out. Joey can add her own. Optional
+// linked job opens the job ticket. Only the owner and Joey see this.
+function taskAccess(auth) {
+  return auth && (auth.role === 'owner' || (auth.role === 'secretary' && auth.name === 'Joey'));
+}
+async function assistantTasks(req, res, db, auth, body) {
+  if (!taskAccess(auth)) return res.status(403).json({ error: 'Not available for this login' });
+  const who = auth.name || (auth.role === 'owner' ? 'Andrew' : 'Joey');
+  if (req.method === 'GET') {
+    if (req.query.q != null) {
+      // Job search for linking: customer name or phone, newest first.
+      const q = String(req.query.q || '').trim();
+      if (q.length < 2) return res.status(200).json({ jobs: [] });
+      const digits = q.replace(/\D/g, '');
+      let cq = db.from('customers').select('id').limit(40);
+      cq = digits.length >= 4 ? cq.ilike('phone', `%${digits.slice(-10)}%`) : cq.ilike('name', `%${q.replace(/[%,()]/g, '')}%`);
+      const { data: cs } = await cq;
+      const ids = (cs || []).map(c => c.id);
+      if (!ids.length) return res.status(200).json({ jobs: [] });
+      const { data: bks } = await db.from('bookings').select('id, scheduled_at, price, customer:customers(name), business:businesses(slug, name)')
+        .in('customer_id', ids).order('scheduled_at', { ascending: false }).limit(10);
+      const jobs = (bks || []).map(b => ({ id: b.id, slug: b.business?.slug || null,
+        label: `${b.customer?.name || 'Customer'} · ${b.scheduled_at ? new Date(b.scheduled_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }) : ''}${b.price ? ' · $' + Math.round(Number(b.price)) : ''} · ${b.business?.name || ''}` }));
+      return res.status(200).json({ jobs });
+    }
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    const { data, error } = await db.from('assistant_tasks').select('*').is('deleted_at', null)
+      .or(`done_at.is.null,done_at.gte.${since}`).order('created_at', { ascending: true }).limit(300);
+    if (error) throw error;
+    return res.status(200).json({ tasks: data || [] });
+  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const op = String(body.op || '');
+  if (op === 'add') {
+    const title = String(body.title || '').trim().slice(0, 300);
+    const color = ['red', 'yellow', 'green'].includes(body.color) ? body.color : null;
+    if (!title) return res.status(400).json({ error: 'Write the task first.' });
+    if (!color) return res.status(400).json({ error: 'Pick a color.' });
+    const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who };
+    if (body.booking_id && /^[0-9a-f-]{36}$/i.test(String(body.booking_id))) {
+      row.booking_id = body.booking_id; row.job_slug = String(body.job_slug || '').slice(0, 60) || null; row.job_label = String(body.job_label || '').slice(0, 200) || null;
+    }
+    const { data, error } = await db.from('assistant_tasks').insert(row).select('*').maybeSingle();
+    if (error) throw error;
+    return res.status(200).json({ ok: true, task: data });
+  }
+  const id = String(body.id || '');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
+  if (op === 'done') {
+    const done = !!body.done;
+    const { error } = await db.from('assistant_tasks').update(done ? { done_at: new Date().toISOString(), done_by: who } : { done_at: null, done_by: null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  if (op === 'notes') {
+    const { error } = await db.from('assistant_tasks').update({ notes: String(body.notes || '').slice(0, 4000) || null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  if (op === 'delete') {
+    const { data: t } = await db.from('assistant_tasks').select('created_by').eq('id', id).maybeSingle();
+    if (!t) return res.status(404).json({ error: 'Not found' });
+    if (auth.role !== 'owner' && t.created_by !== who) return res.status(403).json({ error: 'Only Andrew can delete his tasks.' });
+    const { error } = await db.from('assistant_tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(400).json({ error: 'Unknown op' });
+}
+
