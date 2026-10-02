@@ -491,7 +491,10 @@ function dialTwiml(line, callerFrom, sid) {
   // whichever states the next 10-20 numbers land in). Announcing whenever
   // recording is on costs nothing in one-party states and is correct
   // everywhere, with no state lookup table to maintain as the fleet grows.
-  const disclosure = line.record_calls
+  // Owner 2026-10-02: announce recording on California lines only (his call,
+  // after being told the two-party-consent risk for out-of-state callers).
+  const caLine = /los angeles|california/i.test(String(line.market || '')) || /^(213|310|323|424|562|626|657|661|714|747|760|805|818|858|909|916|949|951|415|510|408|650|619)/.test(tenDigits(line.phone || ''));
+  const disclosure = line.record_calls && caLine
     ? '<Say voice="Polly.Joanna-Generative">This call may be recorded for quality and training purposes.</Say>'
     : '';
   // The whisper: because callerId is the customer's number, the handset cannot
