@@ -1957,6 +1957,25 @@
   .greeting{margin:14px 16px 2px;padding:18px 20px;border-radius:16px;color:#fff;
     background:radial-gradient(120% 160% at 0% 0%, rgba(255,255,255,.14), transparent 60%), var(--gnavy,#0b1f3a);
     box-shadow:0 10px 28px rgba(11,31,58,.22);position:relative;overflow:hidden;}
+  /* ── Owner dashboard, light card layout (owner 2026-10-02, from his example) ── */
+  .greeting.gl{background:#f1f3f8;color:#1f2937;box-shadow:none;border:1px solid #e5e7eb;}
+  .greeting.gl::after{display:none;}
+  .greeting.gl .greet-line b{color:#534AB7;} .greeting.gl .greet-link{color:#1f2937;}
+  .greeting.gl .greet-stats{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"rev pf inc inc" "pred avg inc inc" "ndp ndp ndp ndp";gap:12px;}
+  .greeting.gl .greet-stats>.gstat{background:#fff;border:none;border-radius:16px;box-shadow:0 1px 3px rgba(20,30,50,.06);color:#1f2937;height:auto;padding:14px 16px;}
+  .greeting.gl .greet-stats>.gstat:nth-child(1){grid-area:rev;background:#534AB7;color:#fff;}
+  .greeting.gl .greet-stats>.gstat:nth-child(2){grid-area:pred;}
+  .greeting.gl .greet-stats>.gstat:nth-child(3){grid-area:avg;}
+  .greeting.gl .greet-stats>.gstat:nth-child(4){grid-area:inc;}
+  .greeting.gl .greet-stats>.gstat:nth-child(5){grid-area:pf;}
+  .greeting.gl .greet-stats>.gstat:nth-child(6){grid-area:ndp;}
+  .greeting.gl .gstat:not(:first-child) .gstat-l{color:#6b7280;opacity:1;}
+  .greeting.gl .gstat:not(:first-child) svg text{fill:#6b7280;}
+  .greeting.gl .gstat:not(:first-child) svg line{stroke:#e5e7eb;}
+  .greeting.gl .gstat:not(:first-child) .rev-sec-bar{background:#eef0f5;}
+  .greeting.gl .ndp-seg{background:#eef0f5;} .greeting.gl .ndp-seg button{color:#4b5563;} .greeting.gl .ndp-seg button.on{background:#534AB7;color:#fff;}
+  .greeting.gl .gstat:first-child .rev-sec-top b{color:#C0DD97;} .greeting.gl .gstat:first-child .rev-sec-bar i{background:#C0DD97;}
+  @media(max-width:900px){ .greeting.gl .greet-stats{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"rev rev" "pf pred" "avg avg" "inc inc" "ndp ndp";} }
   .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
     background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
   /* $100 review-program progress, on each tech's card */
@@ -18830,6 +18849,7 @@ let netDailyChartCache={};
 function paintGreeting(){
   const el=document.getElementById('greeting');
   if(!el || !greetingData) return;
+  el.classList.toggle('gl', role==='owner');   // light card layout (owner 2026-10-02)
   el.style.setProperty('--gnavy', (current&&current.brand_navy)||'#0A1628');
   el.style.setProperty('--gaccent', bizTheme(current&&current.slug).onDark);
   const z=greetingData.tz||tz(), now=new Date();
