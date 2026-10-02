@@ -14986,7 +14986,7 @@ async function refreshCallsBadge(){
     // lite: counts + banner only, no customer history (much faster).
     const d=(onScreen('calllog')&&_callsData?.open_count!=null) ? _callsData : await api('calls',{ params:{ limit:100, lite:1 }});
     const n=d.open_count||0;
-    const el=document.getElementById('callsBadge');
+    const el=document.getElementById('callsBadge')||document.getElementById('rcBadge');
     if(el){ el.textContent=n; el.style.display=n?'':'none'; }
     paintCallBanner(d.banner||null);
   }catch(_){ /* endpoint not deployed yet — leave the badge hidden */ }
@@ -15787,8 +15787,7 @@ function paintReviewCalls(){
     rcAction(s.dataset.rcId, v, s.dataset.rcBiz);
     s.value='';
   }));
-  const badge=document.getElementById('rcBadge');
-  if(badge){ if(isToCall && toCall>0){ badge.textContent=toCall; badge.style.display=''; } else if(isToCall) badge.style.display='none'; }
+  // The Calls badge shows missed calls only (owner 2026-10-02), not review calls.
   // Keep the time-band pills honest while she works the list without a full
   // reload. Cleared and restarted on every paint rather than left running
   // forever, since navigating elsewhere replaces this view's DOM entirely and
@@ -18579,7 +18578,7 @@ async function renderGreeting(){
       callPerf,
     };
     paintGreeting();
-    { const n=greetingData.reviewCalls||0; const rb=document.getElementById('rcBadge'); if(rb){ if(n>0){ rb.textContent=n; rb.style.display=''; } else rb.style.display='none'; } }
+    /* Calls badge = missed calls only (owner 2026-10-02); see refreshCallsBadge. */
     if(section==='schedule') el.classList.remove('hidden');
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
