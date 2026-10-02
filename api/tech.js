@@ -2830,6 +2830,18 @@ async function joinComplete(req, res, body) {
   // this retry must match the account, and only within 30 minutes of joining.
   // Anything else is "already used": sign in with phone + PIN instead.
   let slotCount = slots.length;
+  // Per-tech travel radius (0170): the owner may set the zip list on the
+  // invite; it lands on the new technician row. Best-effort: on failure the
+  // tech covers the whole area (null) and the owner can set it by hand.
+  if (outcome === 'joined') {
+    try {
+      const { data: invZ } = await db.from('tech_invites').select('service_zips').eq('code', code).maybeSingle();
+      if (Array.isArray(invZ?.service_zips)) {
+        const { error: zErr } = await db.from('technicians').update({ service_zips: invZ.service_zips }).eq('id', t.id);
+        if (zErr) console.error('[join] service_zips copy failed:', zErr.message);
+      }
+    } catch (e) { console.error('[join] service_zips copy failed:', e.message); }
+  }
   if (outcome === 'replay') {
     const used = () => res.status(409).json({ code: 'INVITE_USED', error: JOIN_OUTCOME.used[2] });
     if (!t.active || digits10(t.phone) !== digits10(phone)) return used();

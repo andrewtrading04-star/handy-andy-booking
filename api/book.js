@@ -719,9 +719,9 @@ async function idempotentPrior(db, bizId, idempotencyKey) {
 // that tech, so a different tech can still come back), updates the row, and if
 // nobody is left it alerts the office immediately so a human assigns or calls
 // the customer while they are still at their screen.
-async function recoverUnassignedBooking(db, { slug, bizId, bookingId, dateStr, slotKey, serviceAreaId = null, timezone = null, businessName, customerName, whenStr }) {
+async function recoverUnassignedBooking(db, { slug, bizId, bookingId, dateStr, slotKey, serviceAreaId = null, timezone = null, zip = null, businessName, customerName, whenStr }) {
   let rescueId = null;
-  try { rescueId = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone, crossHire: true }); }
+  try { rescueId = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone, crossHire: true, zip }); }
   catch (e) { console.warn('[book] rescue pick failed:', e.message); }
   if (rescueId) {
     try {
@@ -903,10 +903,10 @@ async function bookDoms(req, res) {
   // must never be created without a technician. One retry so a transient
   // database hiccup does not turn into a lost booking.
   let technician_id = null, pickBroken = false;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true, zip }); }
   catch (e) {
     console.warn('[book-doms] tech pick failed, retrying once:', e.message);
-    try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true }); }
+    try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true, zip }); }
     catch (e2) { pickBroken = true; console.error('[book-doms] tech pick failed twice:', e2.message); }
   }
   if (!technician_id) {
@@ -1044,7 +1044,7 @@ async function bookDoms(req, res) {
   // assign a different free tech, and failing that alert the office right now.
   if (bookingId && !result.technician_id) {
     result.technician_id = await recoverUnassignedBooking(db, {
-      slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz,
+      slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, zip,
       businessName: "Dom's TV Mounting",
       customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
       whenStr: fmtWhen(startUTC, tz, dateStr),
@@ -1324,10 +1324,10 @@ async function bookNative(req, res, slug) {
   // as bookDoms above (see the comment there): the customer's slot list is a
   // snapshot, and a job must never be created without a technician.
   let technician_id = null, pickBroken = false;
-  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, zip }); }
   catch (e) {
     console.warn('[book-ha] tech pick failed, retrying once:', e.message);
-    try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+    try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, zip }); }
     catch (e2) { pickBroken = true; console.error('[book-ha] tech pick failed twice:', e2.message); }
   }
   if (!technician_id) {
@@ -1448,7 +1448,7 @@ async function bookNative(req, res, slug) {
   // technician-less job must never sit in the CRM silently.
   if (bookingId && !result.technician_id) {
     result.technician_id = await recoverUnassignedBooking(db, {
-      slug, bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId, timezone: tz,
+      slug, bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId, timezone: tz, zip,
       businessName: DISPLAY.name,
       customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
       whenStr: fmtWhen(startUTC, tz, dateStr),

@@ -44,7 +44,7 @@ import { isBotUserAgent, isInternalContact, isUsTimezone, isBlogPath } from './_
 import { capacityOverview } from './_lib/capacity.js';
 import { phoneDesk } from './_lib/phone-desk.js';
 import { estimateCheckFor, setExcuse } from './_lib/estimate-check.js';
-import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot } from './_lib/availability.js';
+import { SLOTS, SLOT_KEYS, DAYS, normalizeSlots, assertDate, dayOfWeekFor, computeExceptionRows, publicOpenSlots, parseSlotId, slotStartUTC, slotEndUTC, pickOpenTech, applySoleTech, techIsOpenForSlot, filterTechsByZip } from './_lib/availability.js';
 import { parseDomainList, runDomainWatch } from './_lib/domain-watch.js';
 import { formatAddress, isLikelyStreetAddress, hasDigits } from './_lib/address.js';
 import { stripe, stripeConfigured, findCardOnFileByEmail, defaultPaymentMethod, businessSecretKey, saveCardOnFile as saveCardOnFileAcct, retrieveCard, resolveChargeablePm, stripeUploadFile, listOpenDisputes, submitDisputeEvidence, findLandedCharge, chargeCardOnFile, pendingIntentState } from './_lib/stripe.js';
@@ -201,7 +201,7 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
     : (zip ? await serviceAreaIdFromPostal(db, hostBiz.id, zip) : null);
   // soleTechOf = the BOOKING's brand, so scopedRosterTechs can apply the
   // SOLE_TECH lock to whichever roster (own or partner) it ends up reading.
-  const host = { bizId: hostBiz.id, serviceAreaId: hostArea, soleTechOf: hostBiz.slug };
+  const host = { bizId: hostBiz.id, serviceAreaId: hostArea, soleTechOf: hostBiz.slug, zip };
   // Owner rule, 2026-09-29, CRM-wide: in DENVER, "any tech" means the whole
   // Denver crew across both companies (TK + Greg on Dom's, Kregg + Steve on
   // Handy Andy), not just the booking's own company. So for a Handy Andy or
@@ -213,7 +213,7 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   const p = await partnerBusiness(db, hostBiz.slug);
   if (!p) return [host];
   const partnerArea = zip ? await serviceAreaIdFromPostal(db, p.id, zip) : null;
-  const partnerScope = { bizId: p.id, serviceAreaId: partnerArea, soleTechOf: hostBiz.slug };
+  const partnerScope = { bizId: p.id, serviceAreaId: partnerArea, soleTechOf: hostBiz.slug, zip };
   if (pool === 'partner') return [partnerScope];
   return [host, partnerScope];
 }
@@ -3313,7 +3313,8 @@ async function scopedRosterTechs(db, scopes, cols = 'id') {
     // booking on those brands could auto-pick them. A no-op for every other
     // brand, and for callers that pass bare business ids (no soleTechOf).
     // Every caller's cols include `id`, which the lock filters on.
-    lists.push(sc.soleTechOf ? applySoleTech(sc.soleTechOf, data || []) : (data || []));
+    // Per-tech travel radius (0170): drop techs whose service_zips lacks the job zip.
+    lists.push(await filterTechsByZip(db, sc.soleTechOf ? applySoleTech(sc.soleTechOf, data || []) : (data || []), sc.zip && zip5(sc.zip)));
   }
   return lists;
 }
@@ -3468,7 +3469,8 @@ async function pickScheduledSecondary(db, scopes, dateStr, slotKey, tz, excludeT
       .eq('business_id', sc.bizId).eq('active', true)
       .order('created_at', { ascending: true });
     if (sc.serviceAreaId) query = query.eq('service_area_id', sc.serviceAreaId);
-    const { data: techs } = await query;
+    const { data: techs0 } = await query;
+    const techs = await filterTechsByZip(db, techs0 || [], sc.zip && zip5(sc.zip));
     for (const t of (techs || [])) {
       if (excludeTechId && t.id === excludeTechId) continue;
       if (isSecondaryIneligibleName(t.name)) continue;
@@ -3491,8 +3493,8 @@ async function resolveDefaultSecondary(db, biz, postalCode, dateStr, slotKey, tz
     const haArea  = await serviceAreaIdFromPostal(db, partner.id, postalCode);
     const ownArea = await serviceAreaIdFromPostal(db, biz.id, postalCode);
     return await pickScheduledSecondary(db, [
-      { bizId: partner.id, serviceAreaId: haArea },   // Handy Andy first — the new default
-      { bizId: biz.id,     serviceAreaId: ownArea },   // fallback: any available Dom's tech
+      { bizId: partner.id, serviceAreaId: haArea, zip: postalCode },   // Handy Andy first — the new default
+      { bizId: biz.id,     serviceAreaId: ownArea, zip: postalCode },   // fallback: any available Dom's tech
     ], dateStr, slotKey, tz, primaryTechId);
   }
   // Each scope carries its own business's area id for this zip (the old code
@@ -13588,7 +13590,7 @@ async function estimateSlots(req, res) {
     return res.status(200).json({ days: [], timezone: est.business?.timezone || 'America/Denver' });
   }
   try {
-    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, onlyTechId: est.technician_id || null });
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, onlyTechId: est.technician_id || null, zip: est.customer_zip });
     return res.status(200).json({ days: result.days || [], timezone: result.timezone || 'America/Denver' });
   } catch (e) {
     console.warn('[estimate_slots] availability lookup failed:', e.message);
@@ -13778,7 +13780,7 @@ async function rescheduleInfo(req, res, body) {
 
   let days = [];
   try {
-    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, timezone: tz, crossHire: true });
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, timezone: tz, crossHire: true, zip: b.postal_code });
     days = result.days || [];
   } catch (e) { console.warn('[reschedule_info] availability lookup failed:', e.message); }
 
@@ -13832,7 +13834,7 @@ async function rescheduleSubmit(req, res, body) {
   }
 
   let technician_id = null;
-  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: slug, dateStr, slotKey, serviceAreaId, timezone: tz, crossHire: true, zip: b.postal_code }); }
   catch (e) { console.warn('[reschedule_submit] tech pick failed:', e.message); }
   if (!technician_id) {
     // Hard rule: a job never lands on a slot no tech marked available, and a
@@ -14280,7 +14282,7 @@ async function bookEstimateAppointment(db, biz, est, combinedItems, totals, slot
   // someone else, or the customer would be told Steve and get a stranger).
   const technician_id = est.technician_id
     ? ((await techIsOpenForSlot(db, est.technician_id, slot.date, slot.slot_key, areaTz)) ? est.technician_id : null)
-    : await pickAvailableTech(db, [{ bizId: biz.id, serviceAreaId: bookingAreaId }], slot.date, slot.slot_key, areaTz, null, false, true);
+    : await pickAvailableTech(db, [{ bizId: biz.id, serviceAreaId: bookingAreaId, zip: est.customer_zip }], slot.date, slot.slot_key, areaTz, null, false, true);
   if (!technician_id) {
     const e = new Error("That time isn't available anymore — please pick another time.");
     e.conflict = true;

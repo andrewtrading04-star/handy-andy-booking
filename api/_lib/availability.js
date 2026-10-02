@@ -212,6 +212,20 @@ async function crossHirePartner(db, businessSlug, serviceAreaId) {
   return { partnerSlug, partnerBizId: partnerBiz.id, partnerServiceAreaId: partnerArea.id };
 }
 
+// Per-tech travel radius (migration 0170): technicians.service_zips. NULL =
+// the tech covers their whole service area (every tech before 0170). When the
+// job's zip is known, drop any tech whose list is set and lacks it. No zip =
+// list unchanged. A lookup error (e.g. column not applied) also leaves the
+// list unchanged, i.e. the pre-0170 behavior.
+export async function filterTechsByZip(db, techs, zip) {
+  const z = String(zip || '').trim().slice(0, 5);
+  if (!/^\d{5}$/.test(z) || !techs || !techs.length) return techs;
+  const { data, error } = await db.from('technicians').select('id, service_zips').in('id', techs.map(t => t.id));
+  if (error) return techs;
+  const zipsOf = new Map((data || []).map(r => [r.id, r.service_zips]));
+  return techs.filter(t => { const list = zipsOf.get(t.id); return !Array.isArray(list) || list.includes(z); });
+}
+
 // 'YYYY-MM-DD' for "today" in a timezone.
 export function todayStr(tz) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -294,7 +308,7 @@ export async function techIsOpenForSlot(db, techId, dateStr, slotKey, tz) {
 
 // `onlyTechId` narrows the pool to that ONE technician (whatever business or
 // metro they belong to) — an estimate the office tied to a specific tech.
-export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null, crossHire = false, onlyTechId = null }) {
+export async function publicOpenSlots(db, { businessSlug, days = 30, serviceAreaId = null, timezone = null, crossHire = false, onlyTechId = null, zip = null }) {
   // Allow booking up to ~3 months out (cap kept as a sanity bound on the batched queries).
   const horizon = Math.max(1, Math.min(Number(days) || 30, 95));
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
@@ -336,6 +350,7 @@ export async function publicOpenSlots(db, { businessSlug, days = 30, serviceArea
   // Sole-technician lock, applied AFTER the cross-hire fold so it also strips
   // any partner-roster tech that borrowing would otherwise have added.
   techs = applySoleTech(businessSlug, techs);
+  techs = await filterTechsByZip(db, techs, zip);
 
   // Office picked one tech for this customer: only they can be offered, even
   // if they belong to the partner company, and the sole-tech lock is the
@@ -603,7 +618,7 @@ async function pickFairest(db, eligible, dateStr, tz) {
 // exact date+slot, so a public booking actually OCCUPIES the slot (prevents
 // two customers grabbing the same window). Falls back to any tech free that slot,
 // else null (the office will assign). Returns a CRM technician id.
-export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false }) {
+export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, serviceAreaId = null, timezone = null, crossHire = false, zip = null }) {
   const { data: biz } = await db.from('businesses').select('id, timezone').eq('slug', businessSlug).single();
   if (!biz) return null;
   let areaTz = null;
@@ -622,7 +637,7 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
   // Sole-technician lock: for a locked brand this leaves at most one tech, and
   // the cross-hire fallback below is likewise filtered, so no path can assign
   // anyone else.
-  const list = applySoleTech(businessSlug, techs);
+  const list = await filterTechsByZip(db, applySoleTech(businessSlug, techs), zip);
   // A tech at their daily job cap is not eligible for this date. Counts JOBS
   // (bookedSlotsOneTech's jobCount), not slots — see that function's comment.
   // Previously this compared against `booked.size` (a slot-KEY count), which
@@ -665,7 +680,7 @@ export async function pickOpenTech(db, { businessSlug, dateStr, slotKey, service
       let { data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day, booking_priority');
       if (pErr && /booking_priority/.test(pErr.message || '')) ({ data: pTechs, error: pErr } = await pBaseQ('id, max_jobs_per_day'));
       if (pErr && /max_jobs_per_day/.test(pErr.message || '')) ({ data: pTechs } = await pBaseQ('id'));
-      const partnerEligible = await eligibleFrom(applySoleTech(businessSlug, pTechs || []));
+      const partnerEligible = await eligibleFrom(await filterTechsByZip(db, applySoleTech(businessSlug, pTechs || []), zip));
       const partnerPick = await pickFairest(db, partnerEligible, dateStr, tz);
       if (partnerPick) return partnerPick;
     }
