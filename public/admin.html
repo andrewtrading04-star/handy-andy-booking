@@ -19390,12 +19390,13 @@ function greetStatsHtml(){
     // Same bar style as the Avg ticket box (owner 2026-10-02).
     secs.map(p=>{ const pctTxt=p.calls?(Math.round(p.conversion*10)/10).toString().replace(/\.0$/,'')+'%':'–';
       const w=p.calls?Math.min(Math.max(Number(p.conversion)||0,6),100):0, inside=w>=26;
+      const hue=`hsl(${convHue(Number(p.conversion)||0)} 70% 50%)`;   // same red→amber→green as the secretaries' card
       return `<div style="margin-top:9px;">`+
         `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;"><span style="font-weight:800;font-size:12px;">${esc(p.person)}</span>`+
         `<span style="opacity:.75;font-size:11px;font-variant-numeric:tabular-nums;">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls'}</span></div>`+
         `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:22px;background:#eef0f5;border-radius:7px;overflow:hidden;">`+
-          `<div style="height:100%;width:${w.toFixed(1)}%;background:#4ade80;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#14532d;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
-        (inside?'':`<span style="font-weight:800;font-size:13px;min-width:40px;text-align:right;">${pctTxt}</span>`)+`</div></div>`; }).join('')+
+          `<div style="height:100%;width:${w.toFixed(1)}%;background:${hue};border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
+        (inside?'':`<span style="font-weight:800;font-size:13px;min-width:40px;text-align:right;color:${hue};">${pctTxt}</span>`)+`</div></div>`; }).join('')+
     `</div>`):'';
   return `<div class="greet-stats">`+
     `<div class="gstat gstat-rev"><div class="rev-split${secs.length?' has-sec':''}"><div class="rev-left"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
