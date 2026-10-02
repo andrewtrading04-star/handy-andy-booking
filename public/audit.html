@@ -2203,12 +2203,15 @@ function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount
 // staff member it was forwarded to.
 function qWho(r){ const h=r.handled_by; return (h&&h!=='Answered'&&h!=='Booked')?h:(r.routed_to_name||h||''); }
 function qSlug(r){ const s=r.business&&r.business.slug; if(s) return s; return /dom/i.test((r.business&&r.business.name)||'')?'doms':'handy-andy'; }
+function qPrevSkipped(){ for(let i=qIdx-1;i>=0;i--) if(qList[i]&&qSkipped.has(qList[i].id)) return i; return -1; }
 function qShow(){
   const ov=$('qOverlay'); if(!ov) return;
   const r=qList[qIdx];
   if(!r){
-    ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button></div>';
-    $('qEnd').onclick=qClose; return;
+    ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button>'+(qPrevSkipped()>=0?' <button class="btn ghost" id="qBack">‹ Back to skipped call</button>':'')+'</div>';
+    $('qEnd').onclick=qClose;
+    if($('qBack')) $('qBack').onclick=()=>{ const i=qPrevSkipped(); if(i<0) return; qSkipped.delete(qList[i].id); qIdx=i; qShow(); };
+    return;
   }
   const who=qWho(r);
   qState={ r, svc: r.service==='Handyman'?'Handyman':'TV Mounting', ratings:{}, answers:{} };
@@ -2244,10 +2247,12 @@ function qShow(){
       '<input type="text" id="qWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">'+
       '<h3 style="margin-top:12px;">📝 Notes</h3><textarea id="qNotes" rows="2" placeholder="Anything else (optional)"></textarea>'+
     '</div><div class="err" id="qErr"></div></div>'+
-    '<div class="qw-bar"><button class="btn ghost" id="qVm" title="Voicemail or not a real conversation. Removes it from the list for good.">🔇 Voicemail</button><button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
+    '<div class="qw-bar"><button class="btn ghost" id="qVm" title="Voicemail or not a real conversation. Removes it from the list for good.">🔇 Voicemail</button>'+(qPrevSkipped()>=0?'<button class="btn ghost" id="qBack" title="Go back to the call you skipped">‹ Back</button>':'')+'<button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
   ov.scrollTop=0;
   $('qExit').onclick=qClose;
   $('qSkip').onclick=()=>{ qSkipped.add(r.id); qIdx++; qShow(); };
+  // Back to the last call she skipped (owner 2026-10-02). Graded calls are never reopened.
+  if($('qBack')) $('qBack').onclick=()=>{ const i=qPrevSkipped(); if(i<0) return; qSkipped.delete(qList[i].id); qIdx=i; qShow(); };
   $('qSave').onclick=qSave;
   $('qVm').onclick=async()=>{
     if(!confirm('Only for a voicemail or a call with no real conversation. Remove this call from the list for good?')) return;
