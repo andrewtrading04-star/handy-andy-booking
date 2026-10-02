@@ -32,6 +32,27 @@ async function domsServiceArea(req, res) {
     const { data: z } = await db.from('service_area_zips')
       .select('*').eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
     if (!z) return res.status(200).json({ in_service_area: false, territory_id: null });
+    // Second metro (Oklahoma City, 2026-10): a zip in any non-Denver Doms area
+    // answers with that area's id/tz/city. Denver zips keep the exact legacy
+    // 'doms-denver' response below.
+    const { data: zArea } = z.service_area_id
+      ? await db.from('service_areas').select('id, name, state, timezone, unstaffed').eq('id', z.service_area_id).maybeSingle()
+      : { data: null };
+    if (zArea && zArea.name !== 'Denver') {
+      return res.status(200).json({
+        in_service_area: true,
+        territory_id:    zArea.id,
+        service_area_id: zArea.id,
+        territory_name:  zArea.name,
+        unstaffed:       !!zArea.unstaffed,
+        surcharge:       Number(z.surcharge) || 0,
+        timezone:        zArea.timezone || 'America/Denver',
+        city:            zArea.name,
+        state:           zArea.state || null,
+        lat:             null,
+        lng:             null,
+      });
+    }
     return res.status(200).json({
       in_service_area: true,
       territory_id:    'doms-denver',   // sentinel: Doms has no Zenbooker territory

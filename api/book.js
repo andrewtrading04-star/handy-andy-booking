@@ -771,7 +771,34 @@ async function bookDoms(req, res) {
     return res.status(400).json({ error: 'A valid time slot is required' });
   }
   const { dateStr, slotKey } = parsed;
-  const tz = 'America/Denver';
+
+  let db;
+  try { db = serviceClient(); }
+  catch (e) { return res.status(500).json({ error: 'Booking storage not configured', message: e.message }); }
+
+  // Resolve Doms business + the per-zip surcharge + the zip's service area
+  // (Denver, or Oklahoma City since 2026-10). No zip row = Denver, as before.
+  const { data: biz } = await db.from('businesses').select('id').eq('slug', 'doms').single();
+  if (!biz) return res.status(500).json({ error: 'Doms business not configured' });
+
+  const zip = zip5(b.postal_code || customer.zip || '');
+  let surcharge = 0, zipAreaId = null;
+  if (zip) {
+    const { data: z } = await db.from('service_area_zips').select('*')
+      .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
+    surcharge = Number(z?.surcharge) || 0;
+    zipAreaId = z?.service_area_id || null;
+  }
+  let area = null;
+  if (zipAreaId) ({ data: area } = await db.from('service_areas')
+    .select('id, name, state, timezone').eq('id', zipAreaId).eq('business_id', biz.id).maybeSingle());
+  if (!area) ({ data: area } = await db.from('service_areas')
+    .select('id, name, state, timezone').eq('business_id', biz.id).eq('name', 'Denver').maybeSingle());
+  const isDenver = !area || area.name === 'Denver';
+  const tz = isDenver ? 'America/Denver' : (area.timezone || 'America/Denver');
+  const defCity = isDenver ? 'Denver' : area.name;
+  const defState = isDenver ? 'CO' : (area.state || 'CO');
+
   const startUTC = slotStartUTC(tz, dateStr, slotKey);
   const endUTC   = slotEndUTC(tz, dateStr, slotKey);
   if (!startUTC) return res.status(400).json({ error: 'Invalid time slot' });
@@ -782,24 +809,6 @@ async function bookDoms(req, res) {
   // more than 60 min out", matching the listing filter exactly.
   if (startUTC.getTime() - Date.now() <= 60 * 60 * 1000) {
     return res.status(409).json({ error: "That time is too soon to book now. Please pick a later time.", conflict: true });
-  }
-
-  let db;
-  try { db = serviceClient(); }
-  catch (e) { return res.status(500).json({ error: 'Booking storage not configured', message: e.message }); }
-
-  // Resolve Doms business + its Denver service area + the per-zip surcharge.
-  const { data: biz } = await db.from('businesses').select('id').eq('slug', 'doms').single();
-  if (!biz) return res.status(500).json({ error: 'Doms business not configured' });
-  const { data: area } = await db.from('service_areas')
-    .select('id').eq('business_id', biz.id).eq('name', 'Denver').maybeSingle();
-
-  const zip = zip5(b.postal_code || customer.zip || '');
-  let surcharge = 0;
-  if (zip) {
-    const { data: z } = await db.from('service_area_zips').select('*')
-      .eq('business_id', biz.id).eq('postal_code', zip).maybeSingle();
-    surcharge = Number(z?.surcharge) || 0;
   }
 
   // Coupon (validated server-side; unknown codes are ignored, never trusted).
@@ -894,10 +903,10 @@ async function bookDoms(req, res) {
   // must never be created without a technician. One retry so a transient
   // database hiccup does not turn into a lost booking.
   let technician_id = null, pickBroken = false;
-  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
+  try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true }); }
   catch (e) {
     console.warn('[book-doms] tech pick failed, retrying once:', e.message);
-    try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, crossHire: true }); }
+    try { technician_id = await pickOpenTech(db, { businessSlug: 'doms', dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz, crossHire: true }); }
     catch (e2) { pickBroken = true; console.error('[book-doms] tech pick failed twice:', e2.message); }
   }
   if (!technician_id) {
@@ -1006,7 +1015,7 @@ async function bookDoms(req, res) {
         name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
         email: customer.email, phone: customer.phone,
       },
-      address: { line1: customer.address, line2: customer.address_line2 || null, city: b.city || 'Denver', state: b.state || 'CO', postal_code: zip },
+      address: { line1: customer.address, line2: customer.address_line2 || null, city: isDenver ? (b.city || 'Denver') : defCity, state: isDenver ? (b.state || 'CO') : defState, postal_code: zip },
       line_items: lines, subtotal, price, tip,
       payment_status: paymentStatus,
       stripe_customer_id: stripeCustomerId,
@@ -1035,7 +1044,7 @@ async function bookDoms(req, res) {
   // assign a different free tech, and failing that alert the office right now.
   if (bookingId && !result.technician_id) {
     result.technician_id = await recoverUnassignedBooking(db, {
-      slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, timezone: tz,
+      slug: 'doms', bizId: biz.id, bookingId, dateStr, slotKey, serviceAreaId: area?.id || null, timezone: tz,
       businessName: "Dom's TV Mounting",
       customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
       whenStr: fmtWhen(startUTC, tz, dateStr),
@@ -1090,7 +1099,7 @@ async function bookDoms(req, res) {
     await sendCardSaveFailedAlert({
       slug: 'doms', businessName: "Dom's TV Mounting",
       customer: { name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(), phone: customer.phone, email: customer.email },
-      when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
+      when: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' }); } catch { return dateStr; } })(),
       reason: cardNote, bookingId,
     });
   }
@@ -1115,7 +1124,7 @@ async function bookDoms(req, res) {
         technicianPhotoUrl: technicianPhoto?.photo_url || null,
         technicianBioYears: technicianPhoto?.bio_years || null,
         technicianBioBlurb: technicianPhoto?.bio_blurb || null,
-        address:     { line1: customer.address, city: b.city || 'Denver', state: b.state || 'CO', zip },
+        address:     { line1: customer.address, city: isDenver ? (b.city || 'Denver') : defCity, state: isDenver ? (b.state || 'CO') : defState, zip },
         lines:       emailLines,
         total:       price,
         tip,

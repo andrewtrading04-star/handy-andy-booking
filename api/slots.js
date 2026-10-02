@@ -23,7 +23,19 @@ export default async function handler(req, res) {
   if (src.business === 'doms') {
     try {
       const db = serviceClient();
-      const result = await publicOpenSlots(db, { businessSlug: 'doms', days: src.days, crossHire: true });
+      // Multi-metro since OKC (2026-10): the widget echoes the zip check's
+      // service_area_id/territory_id. The legacy 'doms-denver' sentinel (or
+      // nothing) means Denver's own area, resolved by name.
+      let serviceAreaId = src.service_area_id || src.territory_id || null;
+      if (!serviceAreaId || serviceAreaId === 'doms-denver') {
+        const { data: biz } = await db.from('businesses').select('id').eq('slug', 'doms').single();
+        // The Dom's widget may send the customer's zip instead of an area id.
+        const zip = String(src.postal_code || src.zip || '').trim().slice(0, 5);
+        const { data: zr } = (biz && /^\d{5}$/.test(zip)) ? await db.from('service_area_zips').select('service_area_id').eq('business_id', biz.id).eq('postal_code', zip).maybeSingle() : { data: null };
+        const { data: den } = biz ? await db.from('service_areas').select('id').eq('business_id', biz.id).eq('name', 'Denver').maybeSingle() : { data: null };
+        serviceAreaId = zr?.service_area_id || den?.id || null;
+      }
+      const result = await publicOpenSlots(db, { businessSlug: 'doms', days: src.days, serviceAreaId, crossHire: true });
       return res.status(200).json(result);
     } catch (err) {
       return res.status(500).json({ error: 'Availability lookup failed', message: err.message });

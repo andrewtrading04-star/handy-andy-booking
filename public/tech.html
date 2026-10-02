@@ -863,8 +863,11 @@ function setBottomTab(which){
 // tabs. Seen once per tech on this phone, never again.
 function techTour(){
   const key='tech_tour_done_'+((tech&&(tech.id||tech.name))||'');
+  // Only new techs (owner 2026-10-02): everyone already on the team skips it.
+  const OLD_TECHS=['1af25436-7a71-4fb4-80fc-db424b64e8a6','a03d09e2-2099-4e49-b4b2-c6b34be4abc8','125da96c-6289-43a3-b711-ae3a8bcb5555','d9084eb2-755c-43cc-9a41-cfa2ffd583bf','5a3b7ee8-2ba6-4bac-a07a-1774ae430c81','5a443792-2868-46ef-a45e-4b26b7de3006'];
+  if(!tech||!tech.id||OLD_TECHS.includes(tech.id)||['Gregory','Juan','Kregg','Steve','TK','Zach'].includes(tech.name)) return;
   if(lsGet(key)||document.getElementById('techTour')) return;
-  const steps=[['jobsView','New jobs go here'],['availabilityView','Edit your schedule'],['payrollView','This is your income']];
+  const steps=[['jobsView','New jobs go here'],['availabilityView','Edit your schedule'],['payrollView','This is your income'],['reviewsView','Your reviews']];
   const el=document.createElement('div'); el.id='techTour'; document.body.appendChild(el);
   let i=0;
   const paint=()=>{
