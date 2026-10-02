@@ -2167,6 +2167,9 @@ const Q_RATINGS=[
   ['clear','Spoke clearly and confidently'],
 ];
 let qList=[], qIdx=0, qDone=0, qSkipped=new Set(), qState=null;
+// Calls she saved in this run: call id -> what she saved (owner 2026-10-02:
+// Back must reach a call she already saved, to fix it).
+let qSaved={};
 async function loadQueue(){
   const from=dayStartCT(-6);
   const [d,g]=await Promise.all([
@@ -2203,14 +2206,15 @@ function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount
 // staff member it was forwarded to.
 function qWho(r){ const h=r.handled_by; return (h&&h!=='Answered'&&h!=='Booked')?h:(r.routed_to_name||h||''); }
 function qSlug(r){ const s=r.business&&r.business.slug; if(s) return s; return /dom/i.test((r.business&&r.business.name)||'')?'doms':'handy-andy'; }
-function qPrevSkipped(){ for(let i=qIdx-1;i>=0;i--) if(qList[i]&&qSkipped.has(qList[i].id)) return i; return -1; }
+// Back = the previous call in this run, saved or skipped.
+function qBack(){ if(qIdx<=0) return; qIdx=Math.min(qIdx,qList.length)-1; const p=qList[qIdx]; if(p) qSkipped.delete(p.id); qShow(); }
 function qShow(){
   const ov=$('qOverlay'); if(!ov) return;
   const r=qList[qIdx];
   if(!r){
-    ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button>'+(qPrevSkipped()>=0?' <button class="btn ghost" id="qBack">‹ Back to skipped call</button>':'')+'</div>';
+    ov.innerHTML='<div class="qw" style="text-align:center;padding-top:80px;"><div style="font-size:54px;">🎉</div><h2>All done!</h2><p class="sub">'+qDone+' call'+(qDone===1?'':'s')+' graded. No more calls waiting.</p><button class="btn" id="qEnd">Back to dashboard</button>'+(qIdx>0?' <button class="btn ghost" id="qBack">‹ Back to the last call</button>':'')+'</div>';
     $('qEnd').onclick=qClose;
-    if($('qBack')) $('qBack').onclick=()=>{ const i=qPrevSkipped(); if(i<0) return; qSkipped.delete(qList[i].id); qIdx=i; qShow(); };
+    if($('qBack')) $('qBack').onclick=qBack;
     return;
   }
   const who=qWho(r);
@@ -2247,12 +2251,11 @@ function qShow(){
       '<input type="text" id="qWhy" placeholder="Why should he listen? (e.g. rude to customer at 1:20)" hidden style="margin-top:6px;">'+
       '<h3 style="margin-top:12px;">📝 Notes</h3><textarea id="qNotes" rows="2" placeholder="Anything else (optional)"></textarea>'+
     '</div><div class="err" id="qErr"></div></div>'+
-    '<div class="qw-bar"><button class="btn ghost" id="qVm" title="Voicemail or not a real conversation. Removes it from the list for good.">🔇 Voicemail</button>'+(qPrevSkipped()>=0?'<button class="btn ghost" id="qBack" title="Go back to the call you skipped">‹ Back</button>':'')+'<button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">Save &amp; next ›</button></div>';
+    '<div class="qw-bar"><button class="btn ghost" id="qVm" title="Voicemail or not a real conversation. Removes it from the list for good.">🔇 Voicemail</button>'+(qIdx>0?'<button class="btn ghost" id="qBack" title="Go back to the last call">‹ Back</button>':'')+'<button class="btn ghost" id="qSkip">Skip</button><button class="btn go" id="qSave">'+(qSaved[r.id]?'Save changes ›':'Save &amp; next ›')+'</button></div>';
   ov.scrollTop=0;
   $('qExit').onclick=qClose;
   $('qSkip').onclick=()=>{ qSkipped.add(r.id); qIdx++; qShow(); };
-  // Back to the last call she skipped (owner 2026-10-02). Graded calls are never reopened.
-  if($('qBack')) $('qBack').onclick=()=>{ const i=qPrevSkipped(); if(i<0) return; qSkipped.delete(qList[i].id); qIdx=i; qShow(); };
+  if($('qBack')) $('qBack').onclick=qBack;
   $('qSave').onclick=qSave;
   $('qVm').onclick=async()=>{
     if(!confirm('Only for a voicemail or a call with no real conversation. Remove this call from the list for good?')) return;
@@ -2275,7 +2278,15 @@ function qShow(){
   }));
   $('qSvc').querySelectorAll('button').forEach(b=>b.onclick=()=>{ qState.svc=b.dataset.s; qRenderQs(); });
   qRenderQs();
-  qPrefill(r);
+  const sv=qSaved[r.id];
+  if(sv){
+    // Already saved in this run: show exactly what she saved; saving again updates it.
+    qState.svc=sv.svc; qState.answers={...sv.answers}; qState.ratings={...sv.ratings};
+    Object.entries(qState.ratings).forEach(([k,n])=>{ const g=document.querySelector('[data-rk="'+k+'"]'); if(g) g.querySelectorAll('button').forEach(x=>x.classList.toggle('on',Number(x.dataset.n)<=n)); });
+    $('qComplaint').value=sv.complaint||''; $('qNotes').value=sv.notes||''; $('qFlag').checked=!!sv.flagged; $('qWhy').hidden=!sv.flagged; $('qWhy').value=sv.why||'';
+    qRenderQs();
+    $('qAi').innerHTML='<div class="card" style="background:#ecfdf5;border-color:#a7f3d0;"><b>✓ Already saved.</b> Change anything, then tap Save changes.</div>';
+  } else qPrefill(r);
 }
 // AI pre-fill (owner, 2026-09-25): Opus 5.5 reads the transcript and suggests
 // answers and stars; she checks and changes anything before saving. Only
@@ -2349,8 +2360,11 @@ async function qSave(){
   };
   const btn=$('qSave'); btn.disabled=true; btn.textContent='Saving…';
   try{
-    await api('audit_save',{method:'POST',body});
-    gradedIds.add(r.id); qDone++; qIdx++; qShow();
+    const prev=qSaved[r.id];
+    if(prev) body.id=prev.id;
+    const out=await api('audit_save',{method:'POST',body});
+    qSaved[r.id]={ id:(out&&out.id)||(prev&&prev.id), svc:qState.svc, answers:{...answers}, ratings:{...qState.ratings}, complaint:body.complaint, notes:body.notes, flagged, why:body.listen_reason };
+    gradedIds.add(r.id); if(!prev) qDone++; qIdx++; qShow();
   }catch(e){ err.textContent=e.message||'Could not save'; btn.disabled=false; btn.textContent='Save & next ›'; }
 }
 
