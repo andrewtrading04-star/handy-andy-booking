@@ -10741,9 +10741,10 @@ function paintTasks(){
   const jobIn=view.querySelector('#tkJob'), res=view.querySelector('#tkJobRes'); let tmr=null;
   jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
     tmr=setTimeout(async()=>{ try{ const d=await api('assistant_tasks',{ params:{ q } });
-      res.innerHTML=(d.jobs||[]).map((j,i)=>`<button type="button" data-i="${i}">${esc(j.label)}</button>`).join('')||'<div style="padding:6px 8px;color:var(--mute);">No jobs found.</div>';
+      res.innerHTML=(d.jobs||[]).map((j,i)=>`<button type="button" data-i="${i}">${esc(j.label)}</button>`).join('');
       res.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ _tk.job=d.jobs[+b.dataset.i]; jobIn.value=_tk.job.label; res.innerHTML=''; });
     }catch(_){} },250); };
+  jobIn.onblur=()=>setTimeout(()=>{ res.innerHTML=''; },200);   // never cover the notes box
   view.querySelector('#tkAdd').onclick=async()=>{
     const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
     try{ await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, photos:tkPicker.urls(), booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
