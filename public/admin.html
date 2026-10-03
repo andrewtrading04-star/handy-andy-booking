@@ -10745,14 +10745,15 @@ let _plScrollTo=null;
 let _plTab='ov';
 let _plBookedOpen=false, _plLeakOnly=false, _plEstOpen=false, _plWhy=null;   // card pop-up tab: ov | hist | more   // board column to bring into view after a stage tap
 let _plLost=null;   // {key, reason, note} while one card's Lost reason picker is open
+let _plMarked=null, _plView='board';   // owner: leads staff marked Lost / Not a lead (30 days)
 const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
 // login's cached cards -- the owner's audit notes and full scoreboard -- must
 // never be painted for a secretary session, not even until the refetch lands.
-function plReset(){ _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; }
+function plReset(){ _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; _plMarked=null; _plView='board'; }
 
 const plStageLabel=s=>(PL_STAGES.find(x=>x[0]===s)||[s,s])[1];
-function plCard(key){ return ((_pl&&Array.isArray(_pl.cards))?_pl.cards:[]).find(c=>c&&c.key===key)||null; }
+function plCard(key){ return ((_pl&&Array.isArray(_pl.cards))?_pl.cards:[]).find(c=>c&&c.key===key)||((_plView==='marked'&&_plMarked&&_plMarked.rows)||[]).map(r=>r.card).find(c=>c&&c.key===key)||null; }
 function plMoney(n){ const v=Number(n); return Number.isFinite(v)&&v>0 ? '$'+Math.round(v).toLocaleString('en-US') : ''; }
 function plAgo(iso){
   const ms=Date.now()-Date.parse(iso||''); if(!Number.isFinite(ms)) return '';
@@ -10884,6 +10885,7 @@ async function plLoad(force){
     const d=await api('pipeline',{ params, timeoutMs:30000 });
     if(req!==_plReq) return;
     _pl=d||{}; _plErr=null;
+    if(role==='owner' && (_plView==='marked' || !_plMarked)){ try{ const mk=await api('pipeline',{ params:{ marked:'1' }, timeoutMs:30000 }); if(req===_plReq) _plMarked=mk||{ rows:[] }; }catch(_){} }
   }catch(e){
     if(req!==_plReq) return;
     _plErr=e.message||'Could not load the pipeline';
@@ -11000,9 +11002,10 @@ function paintPipeline(){
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
     <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
-    ${chev}${kpis}
+    ${plMarkedTabs()}
+    ${_plView==='marked'?plMarkedHtml():chev+kpis}
     ${''/* Sales funnel + talked-to bars removed (owner 2026-10-03) */}
-    <div class="plv-board">${PL_STAGES.map(colHtml).join('')}</div>
+    ${_plView==='marked'?'':`<div class="plv-board">${PL_STAGES.map(colHtml).join('')}</div>`}
     ${modal}
   </div>`;
   if(_plScrollTo){ const col=document.getElementById('plcol-'+_plScrollTo); _plScrollTo=null; if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }
@@ -11017,6 +11020,22 @@ function paintPipeline(){
     note.addEventListener('input',()=>{ if(_plLost) _plLost.note=note.value; });
     note.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const c=_plLost&&plCard(_plLost.key); if(c) plSaveLost(c); } });
   }
+}
+
+// Owner only (2026-10-03): leads Joey/Heather/etc. marked Lost or Not a lead.
+function plMarkedTabs(){
+  if(role!=='owner') return '';
+  const n=(_plMarked&&Array.isArray(_plMarked.rows))?_plMarked.rows.length:0;
+  if(!n && _plView!=='marked') return '';
+  return `<div class="plt-tabs" role="tablist" style="margin:0 0 12px;">${[['board','Board'],['marked',`Marked by staff (${n})`]].map(([k,l])=>`<button type="button" role="tab" class="${_plView===k?'on':''}" data-pl="view" data-view="${k}" aria-selected="${_plView===k}">${l}</button>`).join('')}</div>`;
+}
+function plMarkedHtml(){
+  const rows=(_plMarked&&Array.isArray(_plMarked.rows))?_plMarked.rows:[];
+  return `<div class="plv-marked" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">${rows.filter(r=>r&&r.card).map(r=>{
+    const c=r.card, sub=plPhoneSub(c), biz=c.business&&c.business.name;
+    const what=r.kind==='not_a_lead'?'Not a lead':'Lost'+(r.reason?' · '+r.reason:'')+(r.note?' — '+r.note:'');
+    return `<button type="button" class="plv-tile" data-plkey="${esc(c.key)}" data-pl="toggle" style="padding:9px 12px;"><b>${esc(plTitle(c))}</b>${sub?` <span style="color:var(--mute);font-size:12.5px;">${esc(sub)}</span>`:''}${biz?` <span style="color:var(--mute);font-size:12.5px;">· ${esc(biz)}</span>`:''}<div style="font-size:13px;margin-top:2px;">${esc(what)}</div><div style="font-size:12px;color:var(--mute);margin-top:2px;">${esc(r.by||'')} · ${esc(plWhen(r.at,c.tz))}</div></button>`;
+  }).join('')}</div>`;
 }
 
 // Board tile: name, where it came from, value, and a colored next-step icon.
@@ -11407,6 +11426,7 @@ function plClick(e){
   const act=b.dataset.pl;
   if(act==='stage'){ _plStage=b.dataset.stage; _plScrollTo=_plStage; paintPipeline(); return; }
   if(act==='bktoggle'){ _plBookedOpen=!_plBookedOpen; paintPipeline(); return; }
+  if(act==='view'){ _plView=b.dataset.view==='marked'?'marked':'board'; _plOpen=null; paintPipeline(); if(_plView==='marked') plLoad(true); return; }
   if(act==='tab'){ _plTab=b.dataset.tab||'ov'; paintPipeline(); return; }
   if(act==='leaks'){
     // Owner 2026-09-27: tapping Leaks filters the board to just the leaks.

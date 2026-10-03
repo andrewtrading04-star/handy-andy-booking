@@ -1252,6 +1252,11 @@ export async function pipelineHandler(req, res, db, auth, body) {
     const { data } = await db.from('pipeline_ask_why').select('answer, created_at, for_name, seen_at').eq('card_key', String(req.query.why_for)).maybeSingle();
     return res.status(200).json(data && data.answer ? { ...data.answer, at: data.created_at, for_name: data.for_name, seen_at: data.seen_at } : {});
   }
+  // Owner only (2026-10-03): leads staff marked Lost / Not a lead, last 30 days.
+  if (req.method === 'GET' && req.query.marked === '1') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+    return res.status(200).json(await markedByStaff(db));
+  }
   if (req.method === 'GET') {
     const nowMs = Date.now();
     const isOwner = auth.role === 'owner';
@@ -1287,6 +1292,38 @@ export async function pipelineHandler(req, res, db, auth, body) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     throw e;
   }
+}
+
+// A mark by the owner himself (auth.name 'Andrew', or no name -> 'owner').
+const OWNER_MARK = /^(owner|andrew\b)/i;
+async function markedByStaff(db) {
+  const nowMs = Date.now(), fromMs = nowMs - 30 * DAY;
+  const raw = await loadPipelineRaw(db, { nowMs, withAudits: true });
+  const { cards, ctx } = computeCards(raw, nowMs);
+  const markBy = new Map((raw.marks || []).map((m) => [m.card_key, m]));
+  const auditsBy = attachAudits(raw.audits, cards);
+  const picks = [];
+  for (const c of cards) {
+    const m = markBy.get(c.key); if (!m) continue;
+    let row = null;
+    if (c.st.stage === 'hidden' && m.not_a_lead) row = { kind: 'not_a_lead', reason: '', note: '', by: m.not_a_lead_by || '', atMs: msOf(m.not_a_lead_at) };
+    else if (c.st.stage === 'lost' && c.st.lost && !c.st.lost.auto) row = { kind: 'lost', reason: c.st.lost.reason || '', note: c.st.lost.note || '', by: c.st.lost.by || '', atMs: c.st.lost.atMs };
+    if (!row || !row.by || OWNER_MARK.test(row.by) || row.atMs == null || row.atMs < fromMs) continue;
+    picks.push({ c, m, row });
+  }
+  const hist = historyIndex(await loadHistory(db, [...new Set(picks.map((p) => p.c.phone).filter(Boolean))]), ctx);
+  const notesBy = new Map();
+  for (const n of raw.notes || []) (notesBy.get(n.card_key) || notesBy.set(n.card_key, []).get(n.card_key)).push({ id: n.id, body: n.body, by: n.created_by || null, at: n.created_at });
+  const rows = [];
+  for (const { c, m, row } of picks) {
+    let card;
+    try { card = shapeCard(c, ctx, { nowMs, isOwner: true, mark: m, history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }); } catch { continue; }
+    if (row.kind === 'not_a_lead') { card.stage = 'lost'; card.lost = { reason: 'Not a lead', auto: false, note: '', by: row.by, at: iso(row.atMs) }; }
+    card.notes = notesBy.get(c.key) || [];
+    rows.push({ key: c.key, kind: row.kind, reason: row.reason, note: row.note, by: row.by, at: iso(row.atMs), card });
+  }
+  rows.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  return { rows };
 }
 
 async function pipelineOp(res, db, auth, body) {
