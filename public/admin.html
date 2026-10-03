@@ -92,6 +92,13 @@
   .lg-group-label:first-child{padding-top:2px;}
   .lg>.lg-main{border-radius:16px 0 0 16px;}
   .lg>.lg-cx{border-radius:0 16px 16px 0;margin-left:-1px;padding:5px 8px;font-size:9px;}
+  /* Switcher as tabs (owner pick #3, 2026-10-03): plain text, purple underline on the selected one. */
+  .switcher{gap:0 18px;border-bottom:1px solid var(--line);padding-bottom:0;margin:0 14px 10px;padding-left:0;padding-right:0;}
+  .switcher .lg{display:inline-flex;align-items:stretch;}
+  .switcher .lg>.lg-main,.switcher .lg>.lg-cx{background:transparent;border:none;border-bottom:2px solid transparent;border-radius:0;margin:0 0 -1px;color:#6b7280;font-size:14px;font-weight:600;padding:9px 2px;}
+  .switcher .lg>.lg-cx{padding:9px 2px 9px 5px;font-size:10px;}
+  .switcher .lg>.lg-main.on,.switcher .lg>.lg-cx.on{background:transparent;color:#111827;border-bottom-color:#534AB7;}
+  .switcher .lg>.lg-main:hover,.switcher .lg>.lg-cx:hover{color:#111827;}
 
   .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
   .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
