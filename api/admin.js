@@ -1469,7 +1469,7 @@ async function calendar(req, res, db, auth) {
       if (!(slug && mayViewJobs(auth, slug))) return {};
       // Owner, 2026-10-03: Joey sees every business's jobs as full jobs, not
       // faded ghosts. Customer price + status only -- never pay/profit.
-      return isAllJobsViewer(auth)
+      return (isAllJobsViewer(auth) || (auth && auth.role === 'owner'))
         ? { booking_id: b.id, open_slug: slug, full: true, status: b.status, price: b.price, tip: b.tip, payment_status: b.payment_status }
         : { booking_id: b.id, open_slug: slug };
     };
