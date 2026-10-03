@@ -4110,6 +4110,9 @@ function ghostEvtCard(g){
   // Owner, 2026-09-29: when this login may also work the other company (Joey
   // on Handy Andy), the server sends the real booking -- click opens that job.
   const canOpen=!!(g.booking_id&&g.open_slug&&businesses.concat(viewBusinesses).some(x=>x.slug===g.open_slug));
+  // Owner, 2026-10-03: Joey sees every business's jobs as normal full jobs
+  // (server sets full). Read-only open via the view gate; no pay/profit.
+  if(canOpen&&g.full) return `<div class="evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}">${evtCard({id:g.booking_id,status:g.status,price:g.price,tip:g.tip,payment_status:g.payment_status,scheduled_at:g.scheduled_at,customer:{name:g.customer_name},technician:t||(g.technician_id?{id:g.technician_id,name:techName}:null)})}</div>`;
   if(canOpen) return `<div class="evt evt-ghost evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}" title="Open this ${esc(g.partner_company||'partner')} job${who}">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
     <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
@@ -4130,7 +4133,7 @@ function dayColumn(ds){
   const isToday=ds===todayStr();
   return `<div class="daycol">
     <div class="dayhead ${isToday?'today':''}">${isToday?'<span class="todot"></span>':''}${h.dow}, ${h.md}</div>
-    <div class="daycount">${items.length} JOB${items.length===1?'':'S'}</div>
+    <div class="daycount">${items.length+ghosts.filter(g=>g.full).length} JOB${(items.length+ghosts.filter(g=>g.full).length)===1?'':'S'}</div>
     <div class="daybody">${items.map(evtCard).join('')}${ghosts.map(ghostEvtCard).join('')}${(!items.length&&!ghosts.length)?'<div class="dayempty"></div>':''}</div>
   </div>`;
 }
@@ -19372,7 +19375,10 @@ function joeyCardsHtml(){
   const covHtml=`<div style="font-size:13px;line-height:1.5;"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
   const u=Number(j.urgent_tasks)||0;
   const secs=(j.secretaries||[]).map(p=>{ const c=Number(p.conversion)||0;
-    return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;"><span>${esc(p.person)}</span><b style="color:${p.calls?`hsl(${convHue(c)} 70% 56%)`:'inherit'};">${p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–'}</b></div>`; }).join('');
+    // Bars like the owner's booking-rate box (owner 2026-10-03).
+    const pct=p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–', hue=`hsl(${convHue(c)} 70% 50%)`, w=p.calls?Math.min(Math.max(c,6),100):0;
+    return `<div style="margin-top:7px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><b>${esc(p.person)}</b><span style="color:#6b7280;">${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>`+
+      `<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:18px;background:#fff;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${hue};border-radius:6px;"></div></div><b style="font-size:12px;color:${p.calls?hue:'#6b7280'};min-width:34px;text-align:right;">${pct}</b></div></div>`; }).join('');
   return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
     card('Covering today',covHtml)+
     card('Jobs today',big(Number(j.jobs_today)||0))+

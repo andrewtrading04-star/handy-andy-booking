@@ -1466,14 +1466,19 @@ async function calendar(req, res, db, auth) {
     // booking id + slug so the card can open that job. Never sent otherwise.
     const openRef = (b) => {
       const slug = otherBizById[b.business_id]?.slug;
-      return (slug && mayViewJobs(auth, slug)) ? { booking_id: b.id, open_slug: slug } : {};
+      if (!(slug && mayViewJobs(auth, slug))) return {};
+      // Owner, 2026-10-03: Joey sees every business's jobs as full jobs, not
+      // faded ghosts. Customer price + status only -- never pay/profit.
+      return isAllJobsViewer(auth)
+        ? { booking_id: b.id, open_slug: slug, full: true, status: b.status, price: b.price, tip: b.tip, payment_status: b.payment_status }
+        : { booking_id: b.id, open_slug: slug };
     };
     // Ghosts already added for a booking, so the lead-gen sweep below can't
     // repeat one that source 1 surfaced through a shared tech.
     const ghostedBookingIds = new Set();
     if (ownTechIds.length && otherBizIds.length) {
       const { data: pbk, error: pbkErr } = await db.from('bookings')
-        .select('id, business_id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
+        .select('id, business_id, technician_id, secondary_technician_id, scheduled_at, duration_minutes, status, price, tip, payment_status, customer:customers ( name )')
         .in('business_id', otherBizIds)
         .or(`technician_id.in.(${ownTechIds.join(',')}),secondary_technician_id.in.(${ownTechIds.join(',')})`)
         .not('status', 'in', '(cancelled,no_show)')
@@ -1506,10 +1511,11 @@ async function calendar(req, res, db, auth) {
     if (['handy-andy', 'doms'].includes(biz.slug)) {
       // Owner, 2026-09-24: for the OWNER only, the other staffed brand too (Dom's
       // jobs faded on Handy Andy and vice versa). Secretaries keep lead-gen only.
-      const leadGenIds = auth && auth.role === 'owner' ? otherBizIds : otherBizIds.filter(id => !['handy-andy', 'doms'].includes(otherBizById[id].slug));
+      // Joey (all-jobs viewer) also gets every other business, Handy Andy included.
+      const leadGenIds = auth && (auth.role === 'owner' || isAllJobsViewer(auth)) ? otherBizIds : otherBizIds.filter(id => !['handy-andy', 'doms'].includes(otherBizById[id].slug));
       if (leadGenIds.length) {
         const { data: lgbk, error: lgErr } = await db.from('bookings')
-          .select('id, business_id, technician_id, scheduled_at, duration_minutes, status, customer:customers ( name )')
+          .select('id, business_id, technician_id, scheduled_at, duration_minutes, status, price, tip, payment_status, customer:customers ( name )')
           .in('business_id', leadGenIds)
           .not('status', 'in', '(cancelled,no_show)')
           .gte('scheduled_at', from).lt('scheduled_at', to)
