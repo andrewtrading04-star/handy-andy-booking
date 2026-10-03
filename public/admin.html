@@ -11001,7 +11001,7 @@ function paintPipeline(){
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
     <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
     ${chev}${kpis}
-    <div class="plv-mid"><div class="plv-panel"><div class="plv-panel-h">Sales funnel</div>${funnel}</div>${bars?`<div class="plv-panel">${bars}</div>`:''}</div>
+    ${''/* Sales funnel + talked-to bars removed (owner 2026-10-03) */}
     <div class="plv-board">${PL_STAGES.map(colHtml).join('')}</div>
     ${modal}
   </div>`;

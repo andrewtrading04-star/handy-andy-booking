@@ -39,7 +39,8 @@ import { paymentState } from './payroll.js';
 import { allowedSlugsFor, mayUseBusiness, SECRETARY_EXTRA_BUSINESSES } from './staff-access.js';
 // Pipeline = own business + its family only, never access-only brands
 // (owner 2026-09-30: Dom's staff see Dom's family, not Handy Andy).
-const pipelineSlugsFor = (auth) => { const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
+// Joey sees every brand's Pipeline (owner 2026-10-03).
+const pipelineSlugsFor = (auth) => { if (auth && auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey') return null; const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
 import { localDayStartUTC } from './time.js';
 
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
