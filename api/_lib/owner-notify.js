@@ -47,10 +47,15 @@ export function bracketCountFromLines(lines) {
     return isBracket ? n + (Number(l.quantity ?? l.qty) || 1) : n;
   }, 0);
 }
-export function maybeSendBigBracketAlert({ lines, customerName, whenStr }) {
+export async function maybeSendBigBracketAlert({ lines, customerName, whenStr, db, technicianId }) {
   try {
     const count = bracketCountFromLines(lines);
     if (count < BIG_BRACKET_THRESHOLD) return;
+    // Inventory-exempt assigned tech (migration 0171): no bracket alert.
+    if (db && technicianId) {
+      const { data: t } = await db.from('technicians').select('skip_inventory').eq('id', technicianId).maybeSingle();
+      if (t?.skip_inventory) return;
+    }
     sendOwnerAlertEmail('Big bracket job booked',
       `Job with ${customerName || 'a customer'} has ${count} brackets on it. Scheduled for ${whenStr || 'an upcoming date'}.`);
   } catch (e) { console.warn('[big-bracket] alert error:', e.message); }

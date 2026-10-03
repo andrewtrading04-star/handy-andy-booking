@@ -13,7 +13,7 @@
 import { serviceClient } from './_lib/supabase.js';
 import { signToken, verifyToken, getBearer, applyCors, refreshToken, TECH_SESSION_MAX } from './_lib/auth.js';
 import { ensureReviewToken, reviewRequestSms } from './_lib/review-token.js';
-import { debitForJob, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
+import { debitForJob, adjust as ledgerAdjust, isInventoryExempt } from './_lib/bracket-moves.js';
 import { smsNotificationsOn } from './_lib/notify.js';
 import { demoMode } from './_lib/demo.js';
 import { toE164, sendSMS, sendSMSResult, logAutomatedMessage } from './_lib/sms.js';
@@ -549,7 +549,8 @@ async function job(req, res, db, auth) {
   // the assigned tech is obviously the supplier, so no card and no completion gate.
   shaped.bracket = null;
   const need = detectBracketQtys(data.line_items || []);
-  if (data.secondary_technician_id && bracketTotal(need) > 0) {
+  // Inventory-exempt viewer (0171): no bracket card, box reminder, or supplier gate.
+  if (data.secondary_technician_id && bracketTotal(need) > 0 && !(await isInventoryExempt(db, auth.tech_id))) {
     try {
       const { data: bs, error: bsErr } = await db.from('bookings').select('bracket_supplied_by').eq('id', id).maybeSingle();
       if (!bsErr) {
@@ -985,7 +986,7 @@ async function status(req, res, db, auth, body) {
     }
     // Gate completion on recording who supplied the bracket — on a two-person job
     // only one tech supplies it, and that tech's inventory must be the one counted.
-    if (await jobNeedsBracketSupplier(db, id)) {
+    if (!(await isInventoryExempt(db, auth.tech_id)) && await jobNeedsBracketSupplier(db, id)) {
       return res.status(400).json({ error: 'Select which technician supplied the bracket before completing this job.' });
     }
     const en = existing.metadata && existing.metadata.estimate_visit_notes;
@@ -1945,7 +1946,8 @@ function detectWirePlateQty(lineItems) {
 // above: the STOCK row lives under the tech's own home business, never the job's.
 async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) {
   if (!qty || !techId) return;
-  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const { data: techRow } = await db.from('technicians').select('business_id, skip_inventory').eq('id', techId).maybeSingle();
+  if (techRow?.skip_inventory) return; // inventory-exempt tech (0171)
   const homeBizId = techRow?.business_id || businessId;
   let { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty')
@@ -1994,7 +1996,8 @@ function detectAppleTvBracketQty(lineItems) {
 // subtracts. Same cross-hire fix as adjustWirePlateInventory above.
 async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookingId) {
   if (!qty || !techId) return;
-  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const { data: techRow } = await db.from('technicians').select('business_id, skip_inventory').eq('id', techId).maybeSingle();
+  if (techRow?.skip_inventory) return; // inventory-exempt tech (0171)
   const homeBizId = techRow?.business_id || businessId;
   let { data: inv, error } = await db.from('bracket_inventory')
     .select('id, appletv_bracket_qty')
@@ -2835,7 +2838,11 @@ async function joinComplete(req, res, body) {
   // tech covers the whole area (null) and the owner can set it by hand.
   if (outcome === 'joined') {
     try {
-      const { data: invZ } = await db.from('tech_invites').select('service_zips').eq('code', code).maybeSingle();
+      const { data: invZ } = await db.from('tech_invites').select('service_zips, skip_inventory').eq('code', code).maybeSingle();
+      if (invZ?.skip_inventory) {
+        const { error: sErr } = await db.from('technicians').update({ skip_inventory: true }).eq('id', t.id);
+        if (sErr) console.error('[join] skip_inventory copy failed:', sErr.message);
+      }
       if (Array.isArray(invZ?.service_zips)) {
         const { error: zErr } = await db.from('technicians').update({ service_zips: invZ.service_zips }).eq('id', t.id);
         if (zErr) console.error('[join] service_zips copy failed:', zErr.message);
@@ -3054,6 +3061,10 @@ async function bracketInventorySet(req, res, db, auth, body) {
 }
 
 async function bracketInventory(req, res, db, auth) {
+  // Inventory-exempt tech (0171): tech app hides Stock + bracket nags on this flag.
+  if (await isInventoryExempt(db, auth.tech_id)) {
+    return res.status(200).json({ skip_inventory: true, flat: 0, tilting: 0, full_motion: 0, total: 0, wire_plate: 0, updated_at: null, in_route: [] });
+  }
   const sel = (withWp) => db.from('bracket_inventory')
     .select(`flat_qty, tilting_qty, full_motion_qty, updated_at${withWp ? ', wire_plate_qty' : ''}`)
     .eq('technician_id', auth.tech_id)

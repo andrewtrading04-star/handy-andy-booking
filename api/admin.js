@@ -56,7 +56,7 @@ import { BROKER_SECTIONS, brokerResolveSpec, brokerQuoteLineItems, normalizeCust
 import { digitsOf, prettyPhone, GRASSHOPPER_LINES } from './_lib/grasshopper.js';
 import { SECRETARY_EXTRA_BUSINESSES, allowedSlugsFor, mayUseBusiness } from './_lib/staff-access.js';
 import { canonicalizeLineItems, recalcTaxLine, isTaxLine, casBumpLiRev, bumpLiRev, clampBracketQtysToTvCount, LI_CONFLICT_CODE } from './_lib/line-items.js';
-import { bracketTotal as bracketMoveTotal, debitForJob, reconcileJobEdit, creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, recount as ledgerRecount, adjust as ledgerAdjust } from './_lib/bracket-moves.js';
+import { bracketTotal as bracketMoveTotal, debitForJob, reconcileJobEdit, creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, recount as ledgerRecount, adjust as ledgerAdjust, isInventoryExempt } from './_lib/bracket-moves.js';
 
 // Search Console domain per business — the free "what did people search to
 // find us" data source (see api/_lib/gsc.js).
@@ -4373,6 +4373,7 @@ async function bookingCreate(req, res, db, auth, body) {
 
   // Owner SMS when this ticket carries 4+ brackets (same alert as widget bookings).
   maybeSendBigBracketAlert({
+    db, technicianId: technician_id,
     lines: selections,
     customerName: c.name || '',
     whenStr: (() => {
@@ -16101,8 +16102,15 @@ async function bracketInventory(req, res, db, auth) {
   if (error) throw error;
 
   // Ensure every active tech (on ANY business) has an inventory row (create if missing)
-  const { data: techs } = await db.from('technicians')
+  let { data: techs } = await db.from('technicians')
     .select('id, name, business_id').in('business_id', bizIds).eq('active', true).order('name');
+  // Inventory-exempt techs (0171) never appear on inventory screens or counts.
+  const { data: exemptRows } = await db.from('technicians').select('id').eq('skip_inventory', true);
+  const exemptIds = new Set((exemptRows || []).map(r => r.id));
+  if (exemptIds.size) {
+    inv = (inv || []).filter(i => !exemptIds.has(i.technician_id));
+    techs = (techs || []).filter(t => !exemptIds.has(t.id));
+  }
 
   const invByTech = new Map((inv || []).map(i => [i.technician_id, i]));
   const missing = (techs || []).filter(t => !invByTech.has(t.id));
@@ -16234,6 +16242,7 @@ async function bracketPurchases(req, res, db, auth) {
 // sync if this ever changes).
 async function creditWirePlateInv(db, businessId, technicianId, delta) {
   if (!delta) return;
+  if (await isInventoryExempt(db, technicianId)) return; // 0171
   const { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty').eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();
   if (error) { if (/wire_plate_qty/.test(error.message || '')) return; throw error; }
@@ -16578,7 +16587,8 @@ function bracketTotal(q) { return (q.flat || 0) + (q.tilting || 0) + (q.full_mot
 // STOCK row lives under the tech's own home business, never the job's.
 async function adjustWirePlateInventory(db, businessId, techId, qty, bookingId) {
   if (!qty || !techId) return;
-  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const { data: techRow } = await db.from('technicians').select('business_id, skip_inventory').eq('id', techId).maybeSingle();
+  if (techRow?.skip_inventory) return; // inventory-exempt tech (0171)
   const homeBizId = techRow?.business_id || businessId;
   let { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty')
@@ -16628,7 +16638,8 @@ function detectAppleTvBracketQty(lineItems) {
 // the STOCK row lives under the tech's own home business, never the job's.
 async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookingId) {
   if (!qty || !techId) return;
-  const { data: techRow } = await db.from('technicians').select('business_id').eq('id', techId).maybeSingle();
+  const { data: techRow } = await db.from('technicians').select('business_id, skip_inventory').eq('id', techId).maybeSingle();
+  if (techRow?.skip_inventory) return; // inventory-exempt tech (0171)
   const homeBizId = techRow?.business_id || businessId;
   let { data: inv, error } = await db.from('bracket_inventory')
     .select('id, appletv_bracket_qty')

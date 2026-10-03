@@ -16,7 +16,7 @@ import { sendSMSResult, smsConfigured } from './_lib/sms.js';
 import { bookingConfirmMessage } from './_lib/booking-confirm-sms.js';
 import { enRouteMessage } from './_lib/en-route.js';
 import { reviewRequestSms } from './_lib/review-token.js';
-import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery } from './_lib/bracket-moves.js';
+import { creditDelivery as ledgerCreditDelivery, adjustDelivery as ledgerAdjustDelivery, isInventoryExempt } from './_lib/bracket-moves.js';
 import { ingestBracketSyncReport, bracketSyncWatchdog } from './_lib/bracket-sync-health.js';
 import { isGibberish } from './_lib/lead-guard.js';
 import { isBlockedPhone } from './_lib/blocked.js';
@@ -328,6 +328,7 @@ const PLATES_PER_UNIT = parseInt(process.env.PLATES_PER_UNIT) || 5;
 // a later email. Silently no-ops if migration 0039 isn't applied yet.
 async function adjustWirePlateInv(db, businessId, technicianId, delta) {
   if (!delta) return;
+  if (await isInventoryExempt(db, technicianId)) return; // 0171
   const { data: inv, error } = await db.from('bracket_inventory')
     .select('id, wire_plate_qty')
     .eq('business_id', businessId).eq('technician_id', technicianId).maybeSingle();

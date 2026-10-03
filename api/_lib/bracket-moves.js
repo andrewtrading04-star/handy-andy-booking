@@ -11,6 +11,16 @@
 // This does NOT cover wire_plate_qty or appletv_bracket_qty yet -- those still
 // go through the old direct-write helpers. Same bug class, follow-up work.
 
+// Owner 2026-10-03: some techs are outside the inventory system entirely
+// (technicians.skip_inventory, migration 0171). True = skip every stock touchpoint.
+export async function isInventoryExempt(db, technicianId) {
+  if (!technicianId) return false;
+  try {
+    const { data } = await db.from('technicians').select('skip_inventory').eq('id', technicianId).maybeSingle();
+    return !!data?.skip_inventory;
+  } catch { return false; }
+}
+
 export function bracketTotal(q) { return Math.abs(q.flat || 0) + Math.abs(q.tilting || 0) + Math.abs(q.full_motion || 0); }
 
 async function callBracketMove(db, { businessId, technicianId, kind, flat, tilting, fullMotion, idempotencyKey, bookingId, purchaseId, orderNum, reason, actor }) {
@@ -26,7 +36,9 @@ async function callBracketMove(db, { businessId, technicianId, kind, flat, tilti
   let homeBizId = businessId;
   if (technicianId) {
     const { data: techRow } = await db.from('technicians')
-      .select('business_id').eq('id', technicianId).maybeSingle();
+      .select('business_id, skip_inventory').eq('id', technicianId).maybeSingle();
+    // Inventory-exempt tech (migration 0171): no ledger move, no counter change.
+    if (techRow?.skip_inventory) return null;
     if (techRow?.business_id) homeBizId = techRow.business_id;
   }
   const { data, error } = await db.rpc('bracket_move', {

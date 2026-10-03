@@ -823,7 +823,7 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
     const d=await api('login',{method:'POST',body:{phone:document.getElementById('phone').value.trim(),pin:document.getElementById('pin').value.trim()}});
     token=d.token; tech=d.technician;
     lsSet('ha_tech_token',token||''); lsSet('ha_tech_info',JSON.stringify(tech||null));
-    showJobs();
+    hideStockIfExempt(); showJobs();
   }catch(e2){ err.textContent=e2.message; }
 });
 function logout(opts){
@@ -2615,12 +2615,17 @@ function renderReviews(data){
 // ── Bracket inventory (read-only) ─────────────────────────────────────────────
 // Techs can SEE their bracket stock but not edit it — counts are managed by the
 // office. Mirrors the Reviews/Payroll screens (load → render, back to jobs).
+// Inventory-exempt tech (owner 2026-10-03, migration 0171): no Stock tab at all.
+function hideStockIfExempt(){
+  api('bracket_inventory').then(d=>{ if(d&&d.skip_inventory){ const t=document.querySelector('#bottomTabBar .bbtab[data-view="inventoryView"]'); if(t) t.style.display='none'; } }).catch(()=>{});
+}
 async function showInventory(){
   show('inventoryView');
   const v=document.getElementById('inventoryView');
   v.innerHTML='<div class="detail"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('bracket_inventory');
+    if(d&&d.skip_inventory){ hideStockIfExempt(); showJobs(); return; }
     renderInventory(d);
   }catch(e){
     v.innerHTML=`<div class="detail"><div class="empty" style="color:var(--red);">${esc(e.message)}</div></div>`;
@@ -2970,7 +2975,7 @@ document.getElementById('calBtn')?.addEventListener('click',openCalendarSheet);
   // The #reviews deep link routes past showJobs(), which is where the icon
   // theme and the overdue-payment bar normally initialize at boot. Run them
   // here so the deep-linked view isn't missing them until the tech taps Jobs.
-  const route=()=>{ applyIconTheme(); renderOverdueBar(); if(wantReviews) showReviews(); else showJobs(); };
+  const route=()=>{ applyIconTheme(); renderOverdueBar(); hideStockIfExempt(); if(wantReviews) showReviews(); else showJobs(); };
   if(magic){
     // Validate BEFORE committing anything: the magic token is only trusted
     // once 'me' accepts it. Nothing is written to localStorage until then,

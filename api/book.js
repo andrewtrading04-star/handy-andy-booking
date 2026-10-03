@@ -1077,6 +1077,7 @@ async function bookDoms(req, res) {
   }
 
   maybeSendBigBracketAlert({
+    db, technicianId: result.technician_id,
     lines,
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
@@ -1475,6 +1476,7 @@ async function bookNative(req, res, slug) {
   }
 
   maybeSendBigBracketAlert({
+    db, technicianId: result.technician_id,
     lines,
     customerName: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
     whenStr: (() => { try { return startUTC.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' }); } catch { return dateStr; } })(),
