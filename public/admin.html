@@ -10693,7 +10693,7 @@ function paintMyDay(){
 // Red = urgent, yellow = today, green = when you can. Colors never change;
 // a done task is crossed out on white. Optional linked job + notes per task.
 // Task colors (owner 2026-10-03), same palette as the Pipeline bar. Red texts Joey.
-const TASK_COL={ red:{ bar:'#f87171', ink:'#991b1b', bg:'#fef2f2', label:'Drop everything' }, yellow:{ bar:'#fbbf24', ink:'#92400e', bg:'#fffbeb', label:'ASAP' }, green:{ bar:'#a3d65c', ink:'#3f6212', bg:'#f7fee7', label:'Soon' }, white:{ bar:'#cbd5e1', ink:'#374151', bg:'#fff', label:'Whenever' }, joey:{ bar:'#a78bfa', ink:'#5b21b6', bg:'#f5f3ff', label:"Joey's own" } };
+const TASK_COL={ red:{ bar:'#f87171', ink:'#991b1b', bg:'#fef2f2', label:'Drop everything' }, yellow:{ bar:'#fbbf24', ink:'#92400e', bg:'#fffbeb', label:'ASAP' }, green:{ bar:'#a3d65c', ink:'#3f6212', bg:'#f7fee7', label:'Soon' }, white:{ bar:'#94a3b8', ink:'#374151', bg:'#fff', label:'Whenever' }, joey:{ bar:'#a78bfa', ink:'#5b21b6', bg:'#f5f3ff', label:"Joey's own" } };
 const TASK_ORDER=['red','yellow','green','white'];
 let _tk={ tasks:[], color:'yellow', job:null, open:new Set(), filter:null };
 async function renderTasks(){
