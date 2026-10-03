@@ -661,6 +661,9 @@
   .tk-colors button.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 30%,#fff);}
   .tk-edit{display:block;width:100%;box-sizing:border-box;margin:2px 0 6px;font:inherit;font-size:14px;font-weight:700;border:1px solid var(--line);border-radius:7px;padding:6px 8px;}
   .tk-chev .plv-chev-i{flex:1 0 96px;}
+  .tk-board .plv-col{flex:1 0 230px;} .tk-board .plv-col-b{min-height:40px;} .tk-board .tk-row{margin-bottom:0;}
+  .tk-board .tk-sum{padding:9px 10px;gap:8px;} .tk-board .tk-sum .tk-title{white-space:normal;font-size:13.5px;}
+  .tk-board .tk-row .tk-body{padding:0 10px 10px;}
   .tk-res{position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border-radius:8px;box-shadow:0 8px 22px rgba(20,30,50,.14);} .tk-res button{display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer;} .tk-res button:hover{background:var(--line2);}
   .tk-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-left:5px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
   .tk-card.done{background:#fff;opacity:.7;} .tk-card.done .tk-title{text-decoration:line-through;color:var(--mute);}
@@ -10743,7 +10746,8 @@ function paintTasks(){
   const rank={red:0,yellow:1,green:2,white:3,joey:4};
   const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||(a.created_at<b.created_at?-1:1));
   const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
-  const shown=_tk.filter?open.filter(t=>t.color===_tk.filter):open;   // tap a bar segment to show only that color
+  // Board like the Pipeline (owner 2026-10-03): one column per color; the bar on top jumps to a column.
+  const cols=[...TASK_ORDER,...(open.some(t=>t.color==='joey')?['joey']:[])];
   const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   const card=t=>{ const c=TASK_COL[t.color]||TASK_COL.green, d=!!t.done_at;
     // List row; tap to open the details (owner 2026-10-02).
@@ -10761,10 +10765,10 @@ function paintTasks(){
       ${role==='owner'?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
       </div>
     </details>`; };
-  view.innerHTML=`<div class="wrap" style="max-width:760px;">
+  view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
-    <div class="plv-chev tk-chev">${[...TASK_ORDER,...(open.some(t=>t.color==='joey')?['joey']:[])].map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b><span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span></button>`).join('')}</div>
-    <div class="tk-add">
+    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b><span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span></button>`).join('')}</div>
+    <div class="tk-add" style="max-width:760px;">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
       ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
       <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
@@ -10772,13 +10776,16 @@ function paintTasks(){
       <div id="tkPhotoHost"></div>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
-    ${shown.filter(t=>t.color!=='joey').map(card).join('')}
-    ${shown.some(t=>t.color==='joey')?`<div class="side-section" style="padding:16px 0 6px;">Joey's tasks</div>${shown.filter(t=>t.color==='joey').map(card).join('')}`:''}
+    <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k);
+      return `<div class="plv-col${_tk.filter===k?' on':''}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}</div></div>`; }).join('')}</div>
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
   const tkPicker=notePhotoPicker(view.querySelector('#tkPhotoHost'), view.querySelector('#tkNotes'));
-  view.querySelectorAll('[data-tk-filter]').forEach(b=>b.onclick=()=>{ _tk.filter=_tk.filter===b.dataset.tkFilter?null:b.dataset.tkFilter; paintTasks(); });
+  view.querySelectorAll('[data-tk-filter]').forEach(b=>b.onclick=()=>{ const k=b.dataset.tkFilter; _tk.filter=_tk.filter===k?null:k;
+    view.querySelectorAll('[data-tk-filter]').forEach(x=>x.classList.toggle('on',x.dataset.tkFilter===_tk.filter));
+    view.querySelectorAll('.tk-board .plv-col').forEach(c=>c.classList.toggle('on',c.id==='tkcol-'+_tk.filter));
+    const col=_tk.filter&&document.getElementById('tkcol-'+_tk.filter); if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); });
   view.querySelectorAll('[data-tk-color]').forEach(b=>b.onclick=()=>{ _tk.color=b.dataset.tkColor; view.querySelectorAll('[data-tk-color]').forEach(x=>x.classList.toggle('on',x===b)); });
   const jobIn=view.querySelector('#tkJob'), res=view.querySelector('#tkJobRes'); let tmr=null;
   jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
