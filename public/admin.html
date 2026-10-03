@@ -3462,7 +3462,7 @@ function enterApp(){
   if(navRev) navRev.style.display = role==='owner' ? '' : 'none';
   // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
   // his on Dom's — same per-business login scoping the whole feature rides
-  // on). Secretaries: owner only, read-only view of both.
+  // on). Joey can also open the read-only team roster under Other.
   const navMyAvail=document.getElementById('navMyAvailability');
   if(navMyAvail) navMyAvail.style.display = role==='secretary' ? '' : 'none';
   // Collapsible menu for every login (owner 2026-10-01). Collapse is remembered per browser.
@@ -3472,7 +3472,7 @@ function enterApp(){
   if(sbC && !sbC._wired){ sbC._wired=true; sbC.addEventListener('click',()=>{ const on=!document.body.classList.contains('sb-mini'); document.body.classList.toggle('sb-mini',on); sbC.textContent=on?'›':'‹'; try{ localStorage.setItem('sb_mini',on?'1':'0'); }catch(_){} }); }
   if(sbC) sbC.textContent=document.body.classList.contains('sb-mini')?'›':'‹';
   const navOther=document.getElementById('navOther');
-  if(navOther) navOther.style.display = role==='owner' ? '' : 'none';
+  if(navOther) navOther.style.display = (role==='owner'||(role==='secretary'&&userName==='Joey')) ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
   // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
@@ -9837,12 +9837,12 @@ async function renderMyAvailability(){
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
 
-// ── Secretaries (owner) ──────────────────────────────────────────────────────
-// Read-only: Heather's and Joey's weekly work/off pattern side by side, plus
-// any upcoming date-specific exceptions. Editing happens only from each
-// secretary's own "My Availability" tab.
+// ── Secretaries ──────────────────────────────────────────────────────────────
+// Owner manages schedule exceptions; Joey sees a read-only view of everyone's
+// weekly work/off days and can open the staff-note composer from this screen.
 async function renderSecretaries(){
   const view=document.getElementById('view');
+  const isJoey=role==='secretary'&&userName==='Joey';
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('secretaries_list');
@@ -9863,55 +9863,48 @@ async function renderSecretaries(){
             <div class="name">${esc(niceDate(e.exception_date))}</div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="meta" style="font-weight:700;color:${e.is_available?'var(--accent)':'#b91c1c'};">${e.is_available?'Working':'Off'}</span>
-              <button type="button" class="btn ghost sm" data-sec-exc-del="${esc(e.exception_date)}" data-sec-biz="${esc(s.business_slug)}"
-                title="Remove this override so the date goes back to the normal weekly schedule" style="width:auto;padding:3px 8px;">✕</button>
+              ${role==='owner'&&!s.schedule_source?`<button type="button" class="btn ghost sm" data-sec-exc-del="${esc(e.exception_date)}" data-sec-biz="${esc(s.business_slug)}" title="Remove this override so the date goes back to the normal weekly schedule" style="width:auto;padding:3px 8px;">✕</button>`:''}
             </div>
           </div>`).join('')
         : `<div class="meta" style="padding:8px 2px;">No one-off days set.</div>`;
-      // Owner-only: book a specific date off (or on) without logging in as them.
-      const addHtml=`
+      const canEdit=role==='owner'&&!s.schedule_source;
+      const addHtml=canEdit?`
         <div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;">
           <input type="date" class="search" style="margin:0;width:auto;flex:1;min-width:150px;" data-sec-date="${esc(s.business_slug)}" min="${esc(today)}">
-          <button type="button" class="btn sm" style="width:auto;background:#b91c1c;border-color:#b91c1c;"
-            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="0">Mark off</button>
-          <button type="button" class="btn ghost sm" style="width:auto;"
-            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="1">Mark working</button>
-        </div>`;
-      return `<div style="flex:1;min-width:260px;">
-        <h2 style="margin:0 0 10px;">${esc(s.name)} <span class="meta" style="font-weight:400;">(${s.business_slug==='handy-andy'?'Handy Andy':"Dom's"} · ${payFmtMoney(s.daily_rate,s.currency)}/day)</span></h2>
+          <button type="button" class="btn sm" style="width:auto;background:#b91c1c;border-color:#b91c1c;" data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="0">Mark off</button>
+          <button type="button" class="btn ghost sm" style="width:auto;" data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="1">Mark working</button>
+        </div>`:'';
+      const business=s.business_slug==='handy-andy'?'Handy Andy':"Dom's";
+      const rate=role==='owner'&&s.daily_rate!=null?` · ${payFmtMoney(s.daily_rate,s.currency)}/day`:'';
+      const subtitle=`${business}${rate}`;
+      const phoneHtml=s.phone?`<div style="font-size:13px;margin:-5px 0 9px 1px;">📞 <a href="tel:${esc(s.phone)}" style="color:var(--accent);text-decoration:none;">${esc(fmtPhone(s.phone))}</a></div>`:'';
+      return `<div style="flex:1;min-width:250px;max-width:390px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <h2 style="margin:0 0 10px;font-size:18px;">${esc(s.name)} <span class="meta" style="font-weight:400;font-size:13px;">(${esc(subtitle)})</span></h2>
+        ${phoneHtml}
         ${rows}
-        <div class="side-section" style="margin-top:14px;">One-off days</div>
-        ${excHtml}
+        ${s.schedule_source?'':`<div class="side-section" style="margin-top:14px;">One-off days</div>${excHtml}`}
         ${addHtml}
       </div>`;
     };
-    // Recent schedule changes (app.secretary_schedule_changes). Best-effort:
-    // the schedule cards below are the point of this page, so a feed failure
-    // must not blank the whole view.
     let feed={ changes:[], unseen:0 };
-    try{ feed=await api('secretary_changes'); }catch(_){}
+    if(role==='owner') try{ feed=await api('secretary_changes'); }catch(_){}
     const changeLine=(c)=>{
       const when=c.kind==='weekly'
         ? `every ${esc(c.day_name||'')}`
         : (()=>{ try{ return new Date(c.exception_date+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return esc(c.exception_date||''); } })();
       const off=!c.is_available;
-      const what=off
-        ? (c.kind==='weekly'?`is now OFF ${when}`:`took ${when} OFF`)
-        : (c.kind==='weekly'?`is now WORKING ${when}`:`is now WORKING on ${when}`);
+      const what=off ? (c.kind==='weekly'?`is now OFF ${when}`:`took ${when} OFF`) : (c.kind==='weekly'?`is now WORKING ${when}`:`is now WORKING on ${when}`);
       const ago=(()=>{ try{ return new Date(c.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch{ return ''; } })();
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);${c.seen?'opacity:.55;':''}">
         <span style="width:8px;height:8px;border-radius:50%;flex:none;background:${c.seen?'transparent':(off?'#ef4444':'#16a34a')};"></span>
-        <div style="flex:1;font-size:14px;"><b>${esc(c.changed_by||'Secretary')}</b> ${what}
-          <span class="meta" style="font-size:12px;"> · ${esc(c.business_name||'')}</span></div>
+        <div style="flex:1;font-size:14px;"><b>${esc(c.changed_by||'Secretary')}</b> ${what}<span class="meta" style="font-size:12px;"> · ${esc(c.business_name||'')}</span></div>
         <div class="meta" style="font-size:12px;white-space:nowrap;">${esc(ago)}</div>
       </div>`;
     };
     const feedHtml=(feed.changes||[]).length ? `
       <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;max-width:720px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:12px;">
-          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);">
-            Schedule changes${feed.unseen?` · ${feed.unseen} new`:''}
-          </div>
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);">Schedule changes${feed.unseen?` · ${feed.unseen} new`:''}</div>
           ${feed.unseen?`<button class="btn ghost sm" id="secSeenAll" style="width:auto;">Mark all read</button>`:''}
         </div>
         ${feed.changes.map(changeLine).join('')}
@@ -9919,42 +9912,30 @@ async function renderSecretaries(){
 
     view.innerHTML=`<div class="wrap">
       <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
+      ${isJoey?`<div style="margin-bottom:14px;"><button type="button" class="btn" id="secSendNote" style="width:auto;">📌 Send a note to the secretaries</button></div>`:''}
       ${feedHtml}
-      <div style="margin-bottom:14px;"><div class="meta">The weekly pattern is set by each secretary from their own "My Availability" tab. You can add one-off days here, and they will see it on their side.</div></div>
-      <div style="display:flex;gap:32px;flex-wrap:wrap;">${(d.secretaries||[]).map(cardFor).join('')}</div>
+      <div style="margin-bottom:14px;"><div class="meta">${isJoey?'See the team’s regular workdays and any upcoming days off.':'The weekly pattern is set by each secretary from their own "My Availability" tab. Alex and Joe’s days follow their phone coverage schedule.'}</div></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">${(d.secretaries||[]).map(cardFor).join('')}</div>
     </div>`;
+    const sendNote=document.getElementById('secSendNote');
+    if(sendNote) sendNote.onclick=()=>{ _notesTab='staff'; renderNotes(); };
     const seenBtn=document.getElementById('secSeenAll');
     if(seenBtn) seenBtn.addEventListener('click',async()=>{
       seenBtn.disabled=true;
       try{ await api('secretary_changes_seen',{ method:'POST', body:{ all:true }}); renderSecretaries(); }
       catch(e){ seenBtn.disabled=false; toast(e.message); }
     });
-    // Add a one-off day for a secretary. The date input is per-card, so the
-    // button reads the one belonging to the same business it was rendered for.
     view.querySelectorAll('[data-sec-exc-add]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const slug=btn.dataset.secExcAdd;
-      const input=view.querySelector(`[data-sec-date="${slug}"]`);
-      const date=input&&input.value;
+      const slug=btn.dataset.secExcAdd, input=view.querySelector(`[data-sec-date="${slug}"]`), date=input&&input.value;
       if(!date){ toast('Pick a date first'); if(input) input.focus(); return; }
-      const wantAvailable=btn.dataset.secAvail==='1';
-      btn.disabled=true;
-      try{
-        await api('secretary_availability_exception_set',{ method:'POST',
-          body:{ business:slug, date, is_available:wantAvailable }});
-        toast(wantAvailable?'Marked working':'Marked off');
-        renderSecretaries();
-      }catch(e){ btn.disabled=false; toast(e.message||'Could not save that day'); }
+      const wantAvailable=btn.dataset.secAvail==='1'; btn.disabled=true;
+      try{ await api('secretary_availability_exception_set',{ method:'POST', body:{ business:slug, date, is_available:wantAvailable }}); toast(wantAvailable?'Marked working':'Marked off'); renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not save that day'); }
     }));
-    // Remove an override so the date reverts to the normal weekly schedule.
     view.querySelectorAll('[data-sec-exc-del]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const date=btn.dataset.secExcDel, slug=btn.dataset.secBiz;
-      btn.disabled=true;
-      try{
-        await api('secretary_availability_exception_set',{ method:'POST',
-          body:{ business:slug, date, remove:true }});
-        toast('Back to the normal schedule');
-        renderSecretaries();
-      }catch(e){ btn.disabled=false; toast(e.message||'Could not remove that day'); }
+      const date=btn.dataset.secExcDel, slug=btn.dataset.secBiz; btn.disabled=true;
+      try{ await api('secretary_availability_exception_set',{ method:'POST', body:{ business:slug, date, remove:true }}); toast('Back to the normal schedule'); renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not remove that day'); }
     }));
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
@@ -11695,7 +11676,7 @@ async function renderNotes(){
   // whoever is actually looking at it, not assume they're the owner.
   const forCopy = role==='owner'
     ? 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'
-    : 'Leave Andrew or the other secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
+    : 'Leave Andrew or another secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
   // Two big tab cards instead of small seg-btn pills -- owner feedback
   // 2026-09-23: "they may miss them". This is the whole reason to be on this
   // page (who a note goes to), so it gets first billing above the sub-copy,
@@ -11705,11 +11686,11 @@ async function renderNotes(){
       <span><span class="notes-tabbtn-t">${label}</span><span class="notes-tabbtn-s">${sub}</span></span>
     </button>`;
   view.innerHTML=`<div class="wrap">
-    ${role==='owner'?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
+    ${role==='owner'||(role==='secretary'&&userName==='Joey')?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
     <h2 style="margin:0 0 4px;">Notes</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:14px;">Who is this note for?</div>
     <div class="notes-tabrow">
-      ${notesTabBtn('staff','🏢','For the office',role==='owner'?'Heather, Joey, or both':'Andrew, the other secretary, or both',_notesTab==='staff')}
+      ${notesTabBtn('staff','🏢','For the office',role==='owner'?'Heather, Joey, Alex, Joe, or all':'Andrew, a secretary, or all secretaries',_notesTab==='staff')}
       ${notesTabBtn('tech','🔧','For the techs','One tech, a city, or everyone',_notesTab==='tech')}
     </div>
     <div class="sub" style="color:var(--mute);margin:14px 0;">${_notesTab==='tech'
@@ -11738,6 +11719,7 @@ function renderStaffNotesPane(){
             <option value="handy-andy">Handy Andy (Heather) only</option>
             <option value="doms">Dom's only (Joey, Alex, Joe)</option>
             ${role==='owner'?'<option value="person:Heather">Heather only</option><option value="person:Joey">Joey only</option><option value="person:Alex">Alex only</option><option value="person:Joe">Joe only</option>':''}
+            ${role==='secretary'&&userName==='Joey'?'<option value="person:Heather">Heather only</option><option value="person:Alex">Alex only</option><option value="person:Joe">Joe only</option>':''}
             ${role!=='owner'?'<option value="owner">Andrew only</option>':''}
           </select>
         </div>
@@ -11761,7 +11743,7 @@ function renderStaffNotesPane(){
   const editCtl=noteEditMode(document.getElementById('notePost'), clearForm);
   _staffNoteEdit=(n)=>{
     document.getElementById('noteBody').value=n.body||'';
-    document.getElementById('noteTarget').value=n.to_owner?'owner':(n.target_slug||'');
+    document.getElementById('noteTarget').value=n.to_owner?'owner':(n.target_name?'person:'+n.target_name:(n.target_slug||''));
     document.getElementById('noteMode').value=n.mode||'today';
     picker.set(n.photo_urls); sendCtl.set(n.send_at, n.scheduled);
     editCtl.start(n.id);
@@ -11801,7 +11783,7 @@ async function loadNotesRecent(){
     if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
     wrap.className='';
     wrap.innerHTML=notes.map(n=>{
-      const who=n.to_owner ? 'Andrew' : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'All';
+      const who=n.to_owner ? 'Andrew' : n.target_name ? n.target_name : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'All secretaries';
       const reads=n.reads||[];
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
@@ -12100,7 +12082,8 @@ async function renderOther(){
       ${tile('gallery','📷','Photos','Job photos from the techs.')}
       ${tile('brackets','📦','Bracket Inventory','Brackets on hand with each tech.')}
       ${tile('myavailability','🗓️','My Availability','Your work and off days.')}
-      ${tile('notes','📌','Notes','Notes from the owner, with photos.')}
+      ${userName==='Joey'?tile('secretaries','🗂️','Secretaries','See everyone’s work and off days; send a note.'):''}
+      ${tile('notes','📌','Notes','Read notes from the owner and send notes to the team.')}
     </div></div>`;
     view.querySelectorAll('[data-othernav]').forEach(el=>el.onclick=()=>{ const n=el.dataset.othernav; if(n==='notes') renderNotes(); else navTo(n); });
     return;
@@ -12122,7 +12105,7 @@ async function renderOther(){
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDispCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
       <div id="otherSecretaries" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Heather's and Joey's weekly work/off schedule, plus every schedule change they make.</div></div>
+        <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">The secretaries’ weekly work/off days and schedule updates.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherSecCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
       <div id="otherCoupons" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">

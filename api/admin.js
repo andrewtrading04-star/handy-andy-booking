@@ -15530,7 +15530,7 @@ async function notesList(req, res, db, auth) {
   if (auth.role !== 'owner' && auth.role !== 'secretary') return res.status(403).json({ error: 'Not available for this login' });
   const today = denverToday();
   let q = db.from('staff_notes')
-    .select('id, target_slug, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
+    .select('id, target_slug, target_name, to_owner, body, mode, show_from, send_at, created_by, created_at, photo_urls')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(40);
@@ -15763,7 +15763,13 @@ async function notesUpdate(req, res, db, auth, body) {
   const r = noteEditPatch(existing, body);
   if (r.error) return res.status(400).json({ error: r.error });
   const { reshow, ...patch } = r.patch;
-  if ('target' in body) patch.target_slug = body.target && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+  if ('target' in body) {
+    const toOwner = body.target === 'owner';
+    const person = /^person:(Heather|Joey|Alex|Joe)$/.exec(String(body.target || ''));
+    patch.to_owner = toOwner;
+    patch.target_slug = !toOwner && !person && ['handy-andy', 'doms'].includes(body.target) ? body.target : null;
+    patch.target_name = person ? person[1] : null;
+  }
   const { error } = await db.from('staff_notes').update(patch).eq('id', id);
   if (error) throw error;
   if (reshow) await db.from('staff_note_reads').delete().eq('note_id', id).is('reply', null);
@@ -16053,21 +16059,41 @@ async function secretaryChangesSeen(req, res, db, auth, body) {
   return res.status(200).json({ ok: true });
 }
 
-// GET — owner-only "Secretaries" admin view: both Heather's and Joey's
-// weekly pattern + upcoming exceptions side by side.
+// GET — owner roster and Joey's read-only team schedule: secretary work/off
+// patterns, date exceptions where those are tracked, and Alex/Joe's routed days.
 async function secretariesList(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const isOwner = auth.role === 'owner';
+  const isJoey = auth.role === 'secretary' && auth.name === 'Joey';
+  if (!isOwner && !isJoey) return res.status(403).json({ error: 'Not available for this login' });
   const { data: bizRows, error: bizErr } = await db.from('businesses')
     .select('id, slug').in('slug', ['handy-andy', 'doms']);
   if (bizErr) throw bizErr;
 
+  const [{ data: staffPhones, error: phoneErr }, { data: scheduleRows, error: scheduleErr }] = await Promise.all([
+    db.from('staff_users').select('name, phone').in('name', ['Heather', 'Joey', 'Alex', 'Joe']).eq('active', true),
+    db.from('staff_schedules').select('name, day_of_week, phone').in('name', ['Alex', 'Joe']),
+  ]);
+  if (phoneErr) throw phoneErr;
+  if (scheduleErr) throw scheduleErr;
+  const phoneFor = name => (staffPhones || []).find(r => r.name === name && r.phone)?.phone
+    || (scheduleRows || []).find(r => r.name === name && r.phone)?.phone || null;
   const secretaries = await Promise.all((bizRows || []).map(async biz => {
     const { pattern, exceptions } = await fetchSecretaryAvailability(db, biz.id);
+    const name = displayNameFor(biz.slug);
     return {
-      business_slug: biz.slug, name: displayNameFor(biz.slug), pattern, exceptions,
-      daily_rate: SECRETARY_RATE[biz.slug].daily, currency: SECRETARY_RATE[biz.slug].currency,
+      business_slug: biz.slug, name, phone: phoneFor(name), pattern, exceptions,
+      ...(isOwner ? { daily_rate: SECRETARY_RATE[biz.slug].daily, currency: SECRETARY_RATE[biz.slug].currency } : {}),
     };
   }));
+  for (const name of ['Alex', 'Joe']) {
+    const workDays = new Set((scheduleRows || []).filter(r => r.name === name).map(r => Number(r.day_of_week)));
+    secretaries.push({
+      business_slug: 'doms', name, phone: phoneFor(name), schedule_source: 'staff_schedules', exceptions: [],
+      pattern: DOW_NAMES.map((_, day_of_week) => ({ day_of_week, is_available: workDays.has(day_of_week) })),
+    });
+  }
+  const order = { Heather: 0, Joey: 1, Alex: 2, Joe: 3 };
+  secretaries.sort((a, b) => (order[a.name] ?? 9) - (order[b.name] ?? 9));
   return res.status(200).json({ secretaries, day_names: DOW_NAMES });
 }
 
