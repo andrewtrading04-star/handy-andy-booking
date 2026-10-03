@@ -1,0 +1,24 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const source=fs.readFileSync('api/admin.js','utf8');
+const body=source.slice(source.indexOf('async function secretaryAvailabilitySet('),source.indexOf('// Record a secretary schedule change'));
+const records={businesses:[{id:'ha',slug:'handy-andy'},{id:'dom',slug:'doms'}],secretary_availability:[],staff_schedules:[{name:'Alex',business_slug:'doms',day_of_week:1,phone:'+15555550123',priority:3,start_time:'08:00',end_time:'20:00',timezone:'America/Denver'}],secretary_schedule_changes:[],staff_users:[{name:'Alex',active:true,phone:'+15555550123'}]};
+const db={from(table){let filters=[],op='read',value;const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},maybeSingle(){return q.then(x=>({...x,data:x.data[0]||null}))},upsert(v){op='upsert';value=v;return q},insert(v){op='insert';value=v;return q},delete(){op='delete';return q},then(resolve,reject){try{let rows=records[table];if(op==='upsert'){const keys=table==='staff_schedules'?['name','day_of_week']:['business_id','day_of_week'];const at=rows.findIndex(r=>keys.every(k=>r[k]===value[k]));if(at<0)rows.push(value);else rows[at]={...rows[at],...value};}if(op==='insert')rows.push(value);if(op==='delete')records[table]=rows.filter(r=>!filters.every(f=>f(r)));return Promise.resolve({data:rows.filter(r=>filters.every(f=>f(r))),error:null}).then(resolve,reject)}catch(e){return Promise.reject(e).then(resolve,reject)}}};return q}};
+const fn=vm.runInNewContext(`(${body})`,{displayNameFor:s=>s==='doms'?'Joey':'Heather',recordSecretaryChange:async()=>{}});
+async function run(auth,body){let result;const res={status(n){this.code=n;return this},json(data){result={status:this.code,data};return result}};await fn({method:'POST',body},res,db,auth);return result;}
+const owner={role:'owner'};
+assert.equal((await run(owner,{business:'doms',name:'Joey',day_of_week:0,is_available:true})).status,200);
+assert.equal(records.secretary_availability[0].business_id,'dom');
+assert.equal((await run({role:'secretary',name:'Heather',scope:'handy-andy'},{business:'doms',name:'Joey',day_of_week:0,is_available:false})).status,200);
+assert.equal(records.secretary_availability.find(r=>r.business_id==='dom').is_available,true);
+assert.equal((await run({role:'secretary',name:'Joe',scope:'doms'},{day_of_week:0,is_available:true})).status,403);
+assert.equal((await run(owner,{business:'doms',name:'Unknown',day_of_week:0,is_available:true})).status,400);
+assert.equal((await run(owner,{business:'doms',name:'Alex',day_of_week:2,is_available:true})).status,200);
+assert.equal(records.staff_schedules.find(r=>r.day_of_week===2).priority,3);
+for(const day_of_week of [1,2])assert.equal((await run(owner,{business:'doms',name:'Alex',day_of_week,is_available:false})).status,200);
+assert.equal(records.staff_schedules.length,0);
+assert.equal((await run(owner,{business:'doms',name:'Alex',day_of_week:3,is_available:true})).status,200);
+assert.equal(records.staff_schedules[0].phone,'+15555550123');
+assert.equal((await run(owner,{business:'doms',name:'Joey',day_of_week:1,is_available:'false'})).status,400);
+console.log('Secretary schedule checks passed: owner edits, secretary isolation, routing settings, all-off/re-enable, input validation.');

@@ -72,6 +72,21 @@ async function check(name, fn) {
   catch (e) { failed++; console.log(`FAIL ${name}\n     ${e.message.split('\n').join('\n     ')}`); }
 }
 
+await check('email-only sent estimate follows its explicit call link', () => {
+  const call = liveRow({caller_phone:CUST});
+  const quote = estimate({customer_phone:null,call_id:call.id,texted_at:null,emailed_at:ago(H)});
+  const card = one(raw({calls:[call],estimates:[quote]}));
+  assert.equal(card.stage,'quoted');
+  const viaEvent = {...quote,call_id:null};
+  assert.equal(one(raw({calls:[call],estimates:[viaEvent],callEvents:[{call_id:call.id,event:'estimate_sent',meta:{estimate_id:quote.id}}]})).stage,'quoted');
+  assert.equal(one(raw({calls:[call],estimates:[viaEvent]})).stage,'talked');
+  const other=liveRow({caller_phone:CUST2});
+  const ambiguous=board(raw({calls:[call,other],estimates:[quote],callEvents:[{call_id:other.id,event:'estimate_sent',meta:{estimate_id:quote.id}}]}));
+  assert.ok(ambiguous.cards.every(c=>c.stage==='talked'));
+  const crossBrand={...quote,business_id:'b-doms'};
+  assert.equal(one(raw({calls:[call],estimates:[crossBrand]})).stage,'talked');
+});
+
 // ── The spec's verification cases ───────────────────────────────────────────
 await check('missed call -> 2 failed tries -> Lost "Never reached"', () => {
   const c = missed({ occurred_at: ago(5 * H) });

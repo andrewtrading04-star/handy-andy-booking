@@ -351,10 +351,19 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
     // its key -- and its Not a lead / Lost marks -- when the archive happens;
     // a card made of nothing else is dropped (groupCards). Review 2026-09-24.
     const archivedUnsent = e.status === 'archived' && !stamps.length;
-    const phone = phone10(e.customer_phone); if (ctx.isExcluded(phone)) continue;
+    const slug = ctx.slugOf(e);
+    let phone = phone10(e.customer_phone);
+    // Email-only phone estimates still belong to their explicitly linked call.
+    // Never infer a customer from an amount, email address, or nearby timestamp.
+    if (!phone) {
+      const linkedIds = new Set(e.call_id ? [e.call_id] : []);
+      for (const ev of raw.callEvents || []) if (ev.event === 'estimate_sent' && ev.meta?.estimate_id === e.id) linkedIds.add(ev.call_id);
+      const phones = new Set(touches.filter(t => (t.type === 'wizard' || t.type === 'call_in') && linkedIds.has(t.id) && t.family === familyOf(slug)).map(t => t.phone).filter(Boolean));
+      if (phones.size === 1) phone = [...phones][0];
+    }
+    if (ctx.isExcluded(phone)) continue;
     if (TEST_NAME.test(e.customer_name || '')) continue;
     const atMs = msOf(e.created_at); if (atMs == null) continue;
-    const slug = ctx.slugOf(e);
     const sent = e.status === 'contacted' || e.status === 'scheduled' || stamps.length > 0;
     // The quote clock (owner rule 2026-09-24): a phone estimate goes out the
     // moment it is created; a web one when it was FIRST sent. Resends

@@ -15375,36 +15375,51 @@ async function secretaryAvailability(req, res, db, auth) {
   });
 }
 
-// POST — set the recurring weekly pattern for ONE day. Secretary-only, and
-// always scoped to THEIR OWN business (auth.scope) — a request body business
-// field is never trusted, so Heather's session can never edit Joey's days.
+// Owner can manage every regular workday; secretary edits remain self-scoped.
 async function secretaryAvailabilitySet(req, res, db, auth) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'secretary') return res.status(403).json({ error: 'Secretary only' });
-  if (auth.name && auth.name !== displayNameFor(auth.scope)) return res.status(403).json({ error: 'Your schedule is set by Andrew.' });
-  const dayOfWeek = parseInt(req.body?.day_of_week, 10);
-  const isAvailable = !!(req.body || {}).is_available;
-  if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return res.status(400).json({ error: 'day_of_week (0-6) required' });
-
-  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', auth.scope).maybeSingle();
+  const owner = auth.role === 'owner', body = req.body || {};
+  if (!owner && auth.role !== 'secretary') return res.status(403).json({ error: 'Forbidden' });
+  if (!owner && auth.name && auth.name !== displayNameFor(auth.scope)) return res.status(403).json({ error: 'Your schedule is set by Andrew.' });
+  const dayOfWeek = body.day_of_week, isAvailable = body.is_available;
+  if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 || typeof isAvailable !== 'boolean') return res.status(400).json({ error: 'A weekday (0-6) and Working/Off value are required' });
+  const scope = owner ? body.business : auth.scope;
+  const subject = owner ? body.name : displayNameFor(scope);
+  if (!['handy-andy','doms'].includes(scope) || (owner && !((subject === 'Heather' && scope === 'handy-andy') || (['Joey','Alex','Joe'].includes(subject) && scope === 'doms')))) return res.status(400).json({ error: 'Unknown secretary' });
+  const { data: biz, error: bizErr } = await db.from('businesses').select('id').eq('slug', scope).maybeSingle();
   if (bizErr) throw bizErr;
   if (!biz) return res.status(404).json({ error: 'Business not found' });
-
-  // Read the prior value BEFORE the upsert so the owner's feed can describe a
-  // real change ("was working -> now off") instead of just the end state.
-  const { data: prevRow } = await db.from('secretary_availability')
-    .select('is_available').eq('business_id', biz.id).eq('day_of_week', dayOfWeek).maybeSingle();
-
-  const { error } = await db.from('secretary_availability')
-    .upsert({ business_id: biz.id, day_of_week: dayOfWeek, is_available: isAvailable, updated_at: new Date().toISOString() },
-      { onConflict: 'business_id,day_of_week' });
-  if (error) throw error;
-
-  await recordSecretaryChange(db, {
-    biz, scope: auth.scope, kind: 'weekly',
-    dayOfWeek, isAvailable, previous: prevRow ? prevRow.is_available : null,
-  });
-  return res.status(200).json({ ok: true, day_of_week: dayOfWeek, is_available: isAvailable });
+  if (owner && ['Alex','Joe'].includes(subject)) {
+    const { data: rows, error: readErr } = await db.from('staff_schedules').select('*').eq('name', subject);
+    if (readErr) throw readErr;
+    const previous = (rows || []).some(r=>r.day_of_week===dayOfWeek);
+    if (previous !== isAvailable) {
+      if (isAvailable) {
+        let template = (rows || [])[0];
+        // Existing coverage settings win. Re-enabling a fully off roster uses
+        // the same standard 8am-8pm coverage, with the current staff phone.
+        if (!template) {
+          const { data: person, error: personErr } = await db.from('staff_users').select('phone').eq('name', subject).eq('active', true).maybeSingle();
+          if (personErr) throw personErr;
+          if (!person?.phone) return res.status(409).json({ error: 'Add this secretary’s phone number before enabling coverage.' });
+          template = { name:subject, business_slug:scope, start_time:'08:00', end_time:'20:00', timezone:'America/Denver', phone:person.phone, priority:subject==='Alex'?1:2 };
+        }
+        const { error } = await db.from('staff_schedules').upsert({ ...template, day_of_week: dayOfWeek, updated_at: new Date().toISOString() }, { onConflict:'name,day_of_week' });
+        if (error) throw error;
+      } else {
+        const { error } = await db.from('staff_schedules').delete().eq('name', subject).eq('day_of_week', dayOfWeek);
+        if (error) throw error;
+      }
+      await db.from('secretary_schedule_changes').insert({business_id:biz.id,changed_by:`Owner (for ${subject})`,kind:'weekly',day_of_week:dayOfWeek,is_available:isAvailable,previous_available:previous});
+    }
+  } else {
+    const { data: prevRow, error: prevErr } = await db.from('secretary_availability').select('is_available').eq('business_id', biz.id).eq('day_of_week', dayOfWeek).maybeSingle();
+    if (prevErr) throw prevErr;
+    const { error } = await db.from('secretary_availability').upsert({ business_id: biz.id, day_of_week: dayOfWeek, is_available: isAvailable, updated_at: new Date().toISOString() }, { onConflict:'business_id,day_of_week' });
+    if (error) throw error;
+    await recordSecretaryChange(db, { biz, scope, kind:'weekly', dayOfWeek, isAvailable, previous:prevRow ? prevRow.is_available : null, actor:owner?'owner':'secretary' });
+  }
+  return res.status(200).json({ ok:true, day_of_week:dayOfWeek, is_available:isAvailable });
 }
 
 // Record a secretary schedule change for the owner's dashboard feed, and text

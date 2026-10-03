@@ -3496,6 +3496,7 @@ function enterApp(){
   document.body.classList.toggle('pl-on', role==='secretary');
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
+  configureJoeyNav();
   renderSwitcher();
   // Arriving from the "new estimate" text (/admin.html?estimate=<id>): open the
   // Estimates tab straight away instead of the schedule, then focusPendingEstimate()
@@ -3832,6 +3833,22 @@ function openCalBooking(b){
   openBooking(b);
 }
 
+function configureJoeyNav(){
+  const nav=document.getElementById('sideNav');
+  if(!nav._originalOrder) nav._originalOrder=Array.from(nav.children);
+  nav._originalOrder.forEach(el=>nav.appendChild(el));
+  document.getElementById('joeyCommunication')?.remove();
+  const joey=role==='secretary'&&userName==='Joey';
+  const task=document.getElementById('navTasks');
+  Array.from(task.childNodes).filter(n=>n.nodeType===3).forEach(n=>{if(n.textContent.trim()) n.textContent=joey?' Tasks ':' Task ';});
+  document.getElementById('navNotes').style.display=joey?'':'none';
+  if(!joey) return;
+  const comm=document.createElement('details'); comm.id='joeyCommunication'; comm.open=true;
+  comm.innerHTML='<summary style="padding:12px 14px;cursor:pointer;font-weight:700;">Communication</summary>';
+  ['navCallHub','navMessages'].forEach(id=>{const el=document.getElementById(id);comm.appendChild(el);});
+  const first=['navPipeline','navTasks','navNotes','navAskAndrew'].map(id=>document.getElementById(id));
+  nav.prepend(...first,comm);
+}
 function renderSwitcher(){
   const el = document.getElementById('switcher');
   const allBiz = businesses.concat(viewBusinesses);
@@ -9900,7 +9917,7 @@ async function renderSecretaries(){
         const on=!!patternByDow[dow];
         return `<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
           <div class="name">${esc(d.day_names[dow])}</div>
-          <div class="meta" style="font-weight:700;color:${on?'var(--accent)':'var(--mute)'};">${on?'Working':'Off'}</div>
+          ${role==='owner'?`<button type="button" class="btn ghost sm" style="width:auto;color:${on?'var(--accent)':'var(--mute)'};" data-sec-week="${dow}" data-sec-name="${esc(s.name)}" data-sec-biz="${esc(s.business_slug)}" data-sec-working="${on?'1':'0'}" aria-label="${esc(s.name)} ${esc(d.day_names[dow])}: ${on?'Working':'Off'}">${on?'Working':'Off'}</button>`:`<div class="meta" style="font-weight:700;color:${on?'var(--accent)':'var(--mute)'};">${on?'Working':'Off'}</div>`}
         </div>`;
       }).join('');
       const upcoming=(s.exceptions||[]).filter(e=>e.exception_date>=today).sort((a,b)=>a.exception_date.localeCompare(b.exception_date));
@@ -9961,9 +9978,14 @@ async function renderSecretaries(){
       <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
       ${isJoey?`<div style="margin-bottom:14px;"><button type="button" class="btn" id="secSendNote" style="width:auto;">📌 Send a note to the secretaries</button></div>`:''}
       ${feedHtml}
-      <div style="margin-bottom:14px;"><div class="meta">${isJoey?'See the team’s regular workdays and any upcoming days off.':'The weekly pattern is set by each secretary from their own "My Availability" tab. Alex and Joe’s days follow their phone coverage schedule.'}</div></div>
+      <div style="margin-bottom:14px;"><div class="meta">${isJoey?'See the team’s regular workdays and any upcoming days off.':'Click Working or Off to change regular workdays. Alex and Joe’s workdays also control phone coverage.'}</div></div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">${(d.secretaries||[]).map(cardFor).join('')}</div>
     </div>`;
+    view.querySelectorAll('[data-sec-week]').forEach(btn=>btn.addEventListener('click',async()=>{
+      btn.disabled=true;
+      try{ await api('secretary_availability_set',{method:'POST',body:{business:btn.dataset.secBiz,name:btn.dataset.secName,day_of_week:Number(btn.dataset.secWeek),is_available:btn.dataset.secWorking!=='1'}}); await renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not save workday'); }
+    }));
     const sendNote=document.getElementById('secSendNote');
     if(sendNote) sendNote.onclick=()=>{ _notesTab='staff'; renderNotes(); };
     const seenBtn=document.getElementById('secSeenAll');
@@ -10766,7 +10788,7 @@ async function renderTasks(){
 }
 function tasksBadge(){
   const el=document.getElementById('tasksBadge'); if(!el) return;
-  const n=_tk.tasks.filter(t=>!t.done_at).length;
+  const n=_tk.tasks.filter(t=>!t.done_at&&t.color!=='white').length;
   el.textContent=n; el.style.display=(n&&role!=='owner')?'':'none';
 }
 function paintTasks(){
@@ -10795,7 +10817,7 @@ function paintTasks(){
     </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
-    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b><span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span></button>`).join('')}</div>
+    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
     <div class="tk-add" style="max-width:760px;">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
       ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
