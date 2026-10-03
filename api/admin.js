@@ -10561,7 +10561,7 @@ async function attachInboundVoicemails(db, rows) {
 // Log the outcome of a review call (Joey). Cross-business: resolve by id.
 async function reviewCallLog(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.scope === 'handy-andy') return res.status(403).json({ error: 'Review Calls is not available on this account.' });
+  if (auth.scope === 'handy-andy' && !body?.from_pipeline) return res.status(403).json({ error: 'Review Calls is not available on this account.' });
   const id = body && body.id;
   const status = ((body && body.status) || '').toString().trim();
   if (!id) return res.status(400).json({ error: 'id required' });
@@ -10571,13 +10571,20 @@ async function reviewCallLog(req, res, db, auth, body) {
   // read is the same round trip that already had to happen to prove the booking
   // exists, so this costs nothing on the calls that are not complaints.
   const { data: bk } = await db.from('bookings')
-    .select(`id, scheduled_at,
+    .select(`id, scheduled_at, status, paid_at,
       business:businesses ( slug, name ),
       customer:customers ( name, phone, email ),
       technician:technicians!technician_id ( name ),
       service:services ( name )`)
     .eq('id', id).maybeSingle();
   if (!bk) return res.status(404).json({ error: 'Booking not found' });
+
+  if (body.from_pipeline) {
+    if (!mayUseBusiness(auth, bk.business?.slug)) return res.status(403).json({ error:'Forbidden for this business' });
+    if (bk.status !== 'completed' && !bk.paid_at) return res.status(400).json({ error:'Review calls are for completed or paid jobs.' });
+    if (!['promised_review','complaint','voicemail','do_not_contact'].includes(status)) return res.status(400).json({ error:'Choose a review call outcome.' });
+    if (status === 'complaint' && !String(body.notes || '').trim()) return res.status(400).json({ error:'Describe what happened first.' });
+  }
 
   const patch = {
     review_call_status: status || null,

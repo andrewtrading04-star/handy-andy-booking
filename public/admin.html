@@ -1996,6 +1996,7 @@
   .dpl .dpl-cell{background:color-mix(in srgb,var(--st) 28%,#fff);border-top:3px solid var(--st);} .dpl .dpl-cell:hover{background:color-mix(in srgb,var(--st) 42%,#fff);}
   .jy .dpl{border-top:1px solid #d4d9e2;margin-top:9px;padding-top:1px;width:100%;}
   .jy .dpl-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+  body.joey-nav #sideNav [data-nav="schedule"], body.joey-nav #sideNav [data-nav="estimates"], body.joey-nav #sideNav #navGallery{display:none!important;}
   .jy-stock{display:flex;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
   .jy-stock:focus-visible{outline:2px solid #534ab7;outline-offset:3px;}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
@@ -3505,7 +3506,7 @@ function enterApp(){
   let _urlCall=null; try{ _urlCall=new URLSearchParams(location.search).get('call'); }catch(_){}
   if(pendingEstimateId){ estFilter='all'; navTo('estimates'); }
   else if(_urlCall){ openCallLink(_urlCall); }
-  else navTo('schedule');
+  else navTo(isJoeyHome()?'pipeline':'schedule');
   // navTo('schedule') already runs renderGreeting(), which itself calls
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
@@ -3841,9 +3842,10 @@ function configureJoeyNav(){
   const joey=role==='secretary'&&userName==='Joey';
   const task=document.getElementById('navTasks');
   Array.from(task.childNodes).filter(n=>n.nodeType===3).forEach(n=>{if(n.textContent.trim()) n.textContent=joey?' Tasks ':' Task ';});
+  document.body.classList.toggle('joey-nav',joey);
   document.getElementById('navNotes').style.display=joey?'':'none';
   if(!joey) return;
-  const comm=document.createElement('details'); comm.id='joeyCommunication'; comm.open=true;
+  const comm=document.createElement('details'); comm.id='joeyCommunication';
   comm.innerHTML='<summary style="padding:12px 14px;cursor:pointer;font-weight:700;">Communication</summary>';
   ['navCallHub','navMessages'].forEach(id=>{const el=document.getElementById(id);comm.appendChild(el);});
   const first=['navPipeline','navTasks','navNotes','navAskAndrew'].map(id=>document.getElementById(id));
@@ -3962,7 +3964,7 @@ function navTo(s){
     else if(s==='notes') renderNotes();
     else if(s==='myday') renderMyDay();
     else if(s==='tasks') renderTasks();
-    else if(s==='pipeline') renderPipeline();
+    else if(s==='pipeline'){ renderPipeline(); if(isJoeyHome()) renderGreeting(); }
     else if(s==='askandrew') renderAskAndrew();
   }
 }
@@ -10818,6 +10820,7 @@ function paintTasks(){
   view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
     <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
+    ${isJoeyHome()?'<details class="tk-add-wrap" style="margin:12px 0;max-width:760px;"><summary style="cursor:pointer;padding:12px;border:1px solid var(--line);border-radius:10px;font-weight:700;">Add my own task</summary>':''}
     <div class="tk-add" style="max-width:760px;">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
       ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
@@ -10826,6 +10829,7 @@ function paintTasks(){
       <div id="tkPhotoHost"></div>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
+    ${isJoeyHome()?'</details>':''}
     <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k);
       return `<div class="plv-col${_tk.filter===k?' on':''}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}</div></div>`; }).join('')}</div>
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
@@ -10935,7 +10939,8 @@ const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
 // login's cached cards -- the owner's audit notes and full scoreboard -- must
 // never be painted for a secretary session, not even until the refetch lands.
-function plReset(){ _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; _plMarked=null; _plView='board'; }
+let _plReview={};
+function plReset(){ _plReview={}; _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; _plMarked=null; _plView='board'; }
 
 const plStageLabel=s=>(PL_STAGES.find(x=>x[0]===s)||[s,s])[1];
 function plCard(key){ return ((_pl&&Array.isArray(_pl.cards))?_pl.cards:[]).find(c=>c&&c.key===key)||((_plView==='marked'&&_plMarked&&_plMarked.rows)||[]).map(r=>r.card).find(c=>c&&c.key===key)||null; }
@@ -11292,7 +11297,7 @@ function plDetailHtml(c){
   const picking=!!(_plLost && _plLost.key===c.key);
   const vo=!!c.view_only;   // Joey on another family's brand: read-only card (owner 2026-10-03)
   const top=[];
-  if(_plAsk[c.key]) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
+  if(_plAsk[c.key]&&!plIsReviewCall(c)) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
       <button type="button" class="pl-btn pri" data-pl="ask-yes">Yes</button><button type="button" class="pl-btn" data-pl="ask-no">No answer</button>
       <button type="button" class="pl-link pl-x" data-pl="ask-x">Not now</button></div>`);
   if(unconf && !vo) top.push(`<div class="pl-ask" role="group" aria-label="Talk or voicemail"><span>Answered, but was it a real talk?</span>
@@ -11388,6 +11393,7 @@ function plDetailHtml(c){
        ${plStoryHtml(c)}
        ${plNotesHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}
+       ${plReviewOutcomeHtml(c)}
        ${plOwnerMoveHtml(c)}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
   const un=c.unanswered, who=c.secretary||'the office';
@@ -11582,6 +11588,32 @@ async function plOp(c, body, okMsg, onSaved){
 // customer, from the brand's tracking line (never her personal caller ID).
 // The server logs the attempt and returns its id; she then says whether they
 // actually talked, which settles the "2 tries" and leak rules.
+document.addEventListener('input',e=>{if(e.target.id==='plReviewNote'&&_plReview[_plOpen]) _plReview[_plOpen].note=e.target.value;});
+function plIsReviewCall(c){ return !!(c.booking?.id&&(c.stage==='completed'||c.booking.completed_at||c.booking.paid_at)); }
+function plReviewOutcomeHtml(c){
+  if(!plIsReviewCall(c)||c.view_only) return '';
+  const w=_plReview[c.key];
+  if(!w) return '<button type="button" class="pl-link" data-pl="review-open">Log review call</button>';
+  return `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;" role="group" aria-label="Review call outcome"><b>How did it go?</b>
+    <div class="rc-opts">${RC_OUTCOMES.map(o=>`<button type="button" class="rc-opt ${o.tone}${w.outcome===o.v?' on':''}" data-pl="review-pick" data-outcome="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+    ${w.outcome==='issue'?`<textarea id="plReviewNote" maxlength="500" placeholder="What happened?">${esc(w.note||'')}</textarea>`:''}
+    ${w.outcome?'<button type="button" class="pl-btn pri" data-pl="review-save">Save outcome</button>':''}
+  </div>`;
+}
+async function plSaveReviewOutcome(c,btn){
+  const w=_plReview[c.key], status=w&&RC_OUT_STATUS[w.outcome];
+  if(!status||!plIsReviewCall(c)) return;
+  const note=document.getElementById('plReviewNote')?.value.trim()||'';
+  if(w.outcome==='issue'&&!note){ toast('Write down what happened first'); return; }
+  btn.disabled=true;
+  try{
+    const attempt=_plAsk[c.key];
+    if(attempt?.attempt_id) await api('pipeline',{method:'POST',body:{op:'attempt_outcome',attempt_id:attempt.attempt_id,talked:w.outcome!=='noanswer'}});
+    await api('review_call_log',{method:'POST',body:{id:c.booking.id,status,notes:note,tags:[],from_pipeline:true}});
+    delete _plAsk[c.key]; delete _plReview[c.key];
+    await plLoad(true); toast('Review call outcome saved');
+  }catch(e){btn.disabled=false;toast(e.message||'Could not save the outcome');}
+}
 async function plCall(c, btn){
   const tag='call:'+c.key;
   if(_plBusy.has(tag)) return;
@@ -11590,6 +11622,7 @@ async function plCall(c, btn){
     const r=await api('call_start',{ method:'POST', body:{ source:'pipeline', phone:c.phone, business:(c.business&&c.business.slug)||plBizSlug(c), card_key:c.key }});
     toast('Ringing your phone…');
     if(r && r.attempt_id) _plAsk[c.key]={ mode:'bridge', attempt_id:r.attempt_id };
+    if(plIsReviewCall(c)) _plReview[c.key]={outcome:null,note:''};
   }catch(e){ toast(e.message||'Could not place the call'); }
   finally{ _plBusy.delete(tag); }
   if(onScreen('pipeline')) paintPipeline();
@@ -11638,6 +11671,12 @@ function plClick(e){
         api('pipeline',{ params:{ why_for:key } }).then(a=>{ if(a&&a.holding_back&&_plOpen===key&&!(_plWhy&&_plWhy.key===key)){ _plWhy={ key, ans:a }; paintPipeline(); } }).catch(()=>{}); }
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
+    case 'review-open': _plReview[c.key]={outcome:null,note:''}; paintPipeline(); return;
+    case 'review-pick': {
+      const state=_plReview[c.key]||{};
+      _plReview[c.key]={...state,outcome:b.dataset.outcome}; paintPipeline(); return;
+    }
+    case 'review-save': plSaveReviewOutcome(c,b); return;
     case 'call': plCall(c,b); return;
     case 'manual': _plAsk[c.key]={ mode:'manual' }; paintPipeline(); return;
     case 'ask-yes': case 'ask-no': plAnswer(c, act==='ask-yes', b); return;
@@ -12151,7 +12190,7 @@ async function renderOther(){
       ${tile('brackets','📦','Bracket Inventory','Brackets on hand with each tech.')}
       ${tile('myavailability','🗓️','My Availability','Your work and off days.')}
       ${userName==='Joey'?tile('secretaries','🗂️','Secretaries','See everyone’s work and off days; send a note.'):''}
-      ${tile('notes','📌','Notes','Read notes from the owner and send notes to the team.')}
+      ${userName==='Joey'?tile('estimates','🧾','Estimates','View and send estimates.')+tile('schedule','📅','Schedule','View all jobs on the schedule.'):tile('notes','📌','Notes','Read notes from the owner and send notes to the team.')}
     </div></div>`;
     view.querySelectorAll('[data-othernav]').forEach(el=>el.onclick=()=>{ const n=el.dataset.othernav; if(n==='notes') renderNotes(); else navTo(n); });
     return;
@@ -19038,7 +19077,7 @@ async function renderGreeting(){
     paintGreeting();
     /* Calls badge = missed calls only (owner 2026-10-02); see refreshCallsBadge. */
     // One brand's numbers: hidden on the merged Lead Gen calendar. Joey's 4 cards are cross-business and stay (owner 2026-10-03).
-    el.classList.toggle('hidden', section!=='schedule' || (leadGenAllOn() && !isJoeyHome()));
+    el.classList.toggle('hidden', !(section==='schedule'||(isJoeyHome()&&section==='pipeline')) || (leadGenAllOn() && !isJoeyHome()));
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
 }
@@ -19364,7 +19403,7 @@ function dashPipelineHtml(){
   if(role!=='owner' && !joey) return '';
   if(!_dashPlBusy && Date.now()-_dashPlAt>120000){
     _dashPlBusy=true;
-    api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule') paintGreeting(); });
+    api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule'||(isJoeyHome()&&section==='pipeline')) paintGreeting(); });
   }
   const st=_dashPl;
   const cell=([k,l])=>`<button type="button" class="dpl-cell st-${k}" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
@@ -19627,10 +19666,10 @@ function joeyCardsHtml(){
       `<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:18px;background:#fff;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${hue};border-radius:6px;"></div></div><b style="font-size:12px;color:${p.calls?hue:'#6b7280'};min-width:34px;text-align:right;">${pct}</b></div></div>`; }).join('');
   const low=Number(greetingData.lowStockTechs)||0;
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
-  return stockNotice+`<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
+  return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
     card('Covering today',covHtml)+
     card('Jobs today',big(Number(j.jobs_today)||0)+dashPipelineHtml())+
-    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>`)+
+    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>`+stockNotice)+
     card('Booking rate · 7 days',secs)+
   `</div>`;
 }
@@ -19726,7 +19765,7 @@ function greetStatsHtml(){
 function startGreetingClock(){
   if(greetingClock) clearInterval(greetingClock);
   // Local clock re-paint only (no API call) — but skip when the tab is hidden.
-  greetingClock=setInterval(()=>{ if(document.hidden) return; if(section==='schedule') paintGreeting(); }, 30000);
+  greetingClock=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'||(isJoeyHome()&&section==='pipeline')) paintGreeting(); }, 30000);
 }
 // Polling is paused while the tab is in the background (see the document.hidden
 // guards on each interval) — that's the single biggest cut to Vercel function
