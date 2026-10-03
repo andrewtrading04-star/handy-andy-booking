@@ -19411,7 +19411,7 @@ function incomePeriodLabel(h, view){
   if(view==='month') return MON[m-1];
   return `Q${Math.floor((m-1)/3)+1}`;
 }
-function incomeChartSvg(history, maxScale, view, unitWord, pointWidth){
+function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough ${unitWord||'weeks'} yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
   // Fixed scale, sized to the bucket: floor $0, ceiling passed in by the
@@ -19430,7 +19430,7 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth){
   // labels together, and the caller wraps it in a horizontal-scroll div. The
   // Income box never passes this, so its behavior is byte-for-byte unchanged.
   const w = pointWidth ? (20 + pointWidth*(history.length-1)) : 380;
-  const h=172, padX=10, padTop=34, padBottom=28;
+  const h=height||172, padX=10, padTop=34, padBottom=28;
   const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
   const xy=vals.map((v,i)=>{
@@ -19481,7 +19481,9 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth){
 function ndpChartHtml(cached){
   if(!cached) return `<div class="gstat-s" style="margin-top:8px;">Loading…</div>`;
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
-  const svg=incomeChartSvg(history, 1500, 'week', 'days', 44);
+  // Shorter box (owner 2026-10-03): scale to the real numbers, 120px tall.
+  const top=Math.max(100, ...history.map(h=>h.total_made))*1.1;
+  const svg=incomeChartSvg(history, top, 'week', 'days', 44, 120);
   return `<div class="ndp-scroll">${svg}</div>`;
 }
 // Secretary conversion card -- one merged dark-hero card: the 7-day rate is
