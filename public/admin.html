@@ -19574,7 +19574,8 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
   const dots=xy.map(([x,y],i)=>`<circle cx="${(x/w*100).toFixed(2)}%" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="#16a34a"><title>${esc(incomePeriodLabel(history[i],view||'week'))}: ${money(vals[i])}</title></circle>`).join('');
   // Keep every plotted point; label up to seven evenly spaced dates.
-  const labelIds=new Set(Array.from({length:Math.min(7,n)},(_,i)=>Math.round(i*(n-1)/(Math.min(7,n)-1))));
+  const labelCount=n<=7?n:6;
+  const labelIds=new Set(Array.from({length:labelCount},(_,i)=>Math.round(i*(n-1)/(labelCount-1))));
   const labels=xy.map(([x,y],i)=>{
     if(!labelIds.has(i)) return '';
     const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
