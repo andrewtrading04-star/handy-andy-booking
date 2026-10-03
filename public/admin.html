@@ -11296,8 +11296,8 @@ function plDetailHtml(c){
   if(!lost && !closed && !liveJob && !picking) b.push('<button type="button" class="pl-btn red" data-pl="lost">Mark lost</button>');
   if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
   if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
-  // View-only: open the job or estimate, nothing that writes or calls.
-  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); b.length=0; }
+  // Other-brand cards allow notes and Not a lead; keep remaining actions restricted.
+  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); const notLead=b.filter(x=>x.includes('data-pl="notlead"')); b.length=0; b.push(...notLead); }
   const f=[];
   f.push(phone
     ? `<b>${esc(c.phone_pretty||fmtPhone(c.phone))}</b>${c.business&&c.business.name?' · '+esc(c.business.name):''}`
@@ -11459,13 +11459,12 @@ function plReviewHtml(c){
 // Card notes (owner 2026-09-28): a small notes box on every card.
 function plNotesHtml(c){
   const ns=Array.isArray(c.notes)?c.notes:[];
-  if(c.view_only && !ns.length) return '';
   return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
     ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
-    ${c.view_only?'':`<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
+    <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
       <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
       <button type="button" class="pl-btn" data-pl="note-add">Save</button>
-    </div>`}`;
+    </div>`;
 }
 // Owner only (2026-09-28): move a card forward a step, or mark it lost.
 function plOwnerMoveHtml(c){
@@ -11603,7 +11602,7 @@ function plClick(e){
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
   if(!c) return;
   // View-only card: reads only; the server refuses the rest (owner 2026-10-03).
-  if(c.view_only && !['toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
+  if(c.view_only && !['note-add','notlead','toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
   switch(act){
     case 'toggle':
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
