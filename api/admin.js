@@ -17645,6 +17645,16 @@ async function joeyMetrics(req, res, db, auth) {
   for (const n of ['Heather', 'Alex', 'Joe']) if (!list.some(p => p.person === n)) list.push({ person: n, calls: 0, booked: 0, conversion: 0 });
   return res.status(200).json({ covering: { 'handy-andy': ha, doms }, jobs_today: jobs, urgent_tasks: tasks.count || 0, secretaries: list });
 }
+const TASK_COLORS = ['red', 'yellow', 'green', 'white'];
+// A red task means drop everything: text Joey right away. Never blocks the save.
+async function textJoeyRedTask(db, title) {
+  try {
+    const { data: j } = await db.from('staff_users').select('phone').eq('name', 'Joey').eq('active', true).maybeSingle();
+    if (!j || !j.phone) return false;
+    const r = await sendSMSResult(j.phone, `URGENT task from Andrew: ${String(title).slice(0, 200)}. Drop everything. Open the CRM > Task.`);
+    return !!(r && r.ok);
+  } catch (e) { console.warn('[tasks] red text failed:', e.message); return false; }
+}
 async function assistantTasks(req, res, db, auth, body) {
   if (!taskAccess(auth)) return res.status(403).json({ error: 'Not available for this login' });
   const who = auth.name || (auth.role === 'owner' ? 'Andrew' : 'Joey');
@@ -17676,7 +17686,7 @@ async function assistantTasks(req, res, db, auth, body) {
   if (op === 'add') {
     const title = String(body.title || '').trim().slice(0, 300);
     // Joey's own tasks go in their own list, no color pick (owner 2026-10-02).
-    const color = auth.role !== 'owner' ? 'joey' : ['red', 'yellow', 'green'].includes(body.color) ? body.color : null;
+    const color = auth.role !== 'owner' ? 'joey' : TASK_COLORS.includes(body.color) ? body.color : null;
     if (!title) return res.status(400).json({ error: 'Write the task first.' });
     if (!color) return res.status(400).json({ error: 'Pick a color.' });
     const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who, photo_urls: cleanNotePhotos(body.photos) };
@@ -17685,7 +17695,8 @@ async function assistantTasks(req, res, db, auth, body) {
     }
     const { data, error } = await db.from('assistant_tasks').insert(row).select('*').maybeSingle();
     if (error) throw error;
-    return res.status(200).json({ ok: true, task: data });
+    const texted = color === 'red' ? await textJoeyRedTask(db, title) : false;
+    return res.status(200).json({ ok: true, task: data, texted });
   }
   const id = String(body.id || '');
   if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
@@ -17699,6 +17710,26 @@ async function assistantTasks(req, res, db, auth, body) {
     const { error } = await db.from('assistant_tasks').update({ notes: String(body.notes || '').slice(0, 4000) || null }).eq('id', id);
     if (error) throw error;
     return res.status(200).json({ ok: true });
+  }
+  // Andrew edits a task's title or color any time (owner 2026-10-03).
+  // Turning a task red texts Joey, same as creating a red one.
+  if (op === 'title' || op === 'color') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Only Andrew can change this.' });
+    let patch, texted = false;
+    if (op === 'title') {
+      const title = String(body.title || '').trim().slice(0, 300);
+      if (!title) return res.status(400).json({ error: 'Write the task first.' });
+      patch = { title };
+    } else {
+      if (!TASK_COLORS.includes(body.color)) return res.status(400).json({ error: 'Pick a color.' });
+      patch = { color: body.color };
+    }
+    const { data: prev } = await db.from('assistant_tasks').select('title, color').eq('id', id).maybeSingle();
+    if (!prev) return res.status(404).json({ error: 'Not found' });
+    const { error } = await db.from('assistant_tasks').update(patch).eq('id', id);
+    if (error) throw error;
+    if (op === 'color' && body.color === 'red' && prev.color !== 'red') texted = await textJoeyRedTask(db, prev.title);
+    return res.status(200).json({ ok: true, texted });
   }
   if (op === 'photos') {
     // Pictures on a task (owner 2026-10-02): the full list, already uploaded via notes_photo.
