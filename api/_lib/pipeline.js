@@ -39,8 +39,11 @@ import { paymentState } from './payroll.js';
 import { allowedSlugsFor, mayUseBusiness, SECRETARY_EXTRA_BUSINESSES } from './staff-access.js';
 // Pipeline = own business + its family only, never access-only brands
 // (owner 2026-09-30: Dom's staff see Dom's family, not Handy Andy).
-// Joey sees every brand's Pipeline (owner 2026-10-03).
-const pipelineSlugsFor = (auth) => { if (auth && auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey') return null; const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
+// Every write and dial (card ops, notes, the Call button) uses this list.
+const pipelineWriteSlugsFor = (auth) => { const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
+// Joey sees every brand's Pipeline (owner 2026-10-03) -- read only outside
+// her family, like her all-jobs view (admin.js resolveBusiness).
+const pipelineSlugsFor = (auth) => ((auth && auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey') ? null : pipelineWriteSlugsFor(auth));
 import { localDayStartUTC } from './time.js';
 
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
@@ -1047,11 +1050,14 @@ function historyIndex(rows, ctx) {
 }
 
 // The whole GET response. Pure: raw rows in (see loadPipelineRaw), a clock in.
-// opts: { isOwner, allowed (allowedSlugsFor: null = all), viewerName, range, business }
+// opts: { isOwner, allowed (allowedSlugsFor: null = all), actAllowed (write
+// list; a card outside it gets view_only: true), viewerName, range, business }
 export function buildPipeline(raw, now = Date.now(), opts = {}) {
   const { cards, ctx, nowMs } = computeCards(raw, now);
   const isOwner = !!opts.isOwner;
   const allowed = opts.allowed === undefined ? null : opts.allowed;
+  // Seen but not hers to act on (Joey's other brands, owner 2026-10-03).
+  const viewOnly = (c, sc) => { if (opts.actAllowed !== undefined && !cardVisible(c, opts.actAllowed)) sc.view_only = true; return sc; };
   const range = normRange(opts.range);
   const fromMs = rangeStartMs(range, nowMs);
   const toMs = rangeEndMs(range, nowMs);
@@ -1080,7 +1086,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
       if (c.touches.some((t) => t.atMs > after && ((t.type === 'attempt' && (t.att.dialStatus === 'completed' || t.talk === 'yes')) || (t.type === 'call_in' && t.talk)))) continue;
       if (nowMs - (b.completedMs ?? b.paidMs ?? 0) > 14 * DAY) continue;
       if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
-      shaped.push(shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
+      shaped.push(viewOnly(c, shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null })));
       continue;
     }
     // In range if it started in range OR was booked in range (owner 2026-09-27:
@@ -1092,7 +1098,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     const recentDone = c.touches.some((t) => t.type === 'booking' && t.bk && t.bk.completedMs != null && t.bk.completedMs >= nowMs - 3 * DAY);
     if (!inR && !recentDone) continue;
     if (!cardVisible(c, allowed) || !brandMatches(c, brand)) continue;
-    const sc = shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null });
+    const sc = viewOnly(c, shapeCard(c, ctx, { nowMs, isOwner, mark: markBy.get(c.key), history: c.phone ? hist.get(c.phone + '|' + c.family) : null, audits: auditsBy.get(c.key) || null }));
     if (sc.stage === 'completed') {
       const doneMs = Date.parse((sc.review && sc.review.completed_at) || '');
       if (!inR && !(doneMs >= nowMs - 3 * DAY)) continue;
@@ -1264,13 +1270,22 @@ export async function pipelineHandler(req, res, db, auth, body) {
     const raw = await loadPipelineRaw(db, { nowMs, withAudits: isOwner });
     raw.history = await loadHistory(db, phonesSince(raw, rangeStartMs(range, nowMs)));
     return res.status(200).json(buildPipeline(raw, nowMs, {
-      isOwner, allowed: pipelineSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(), legacyBoard: req.query.board === 'legacy',
+      isOwner, allowed: pipelineSlugsFor(auth), actAllowed: pipelineWriteSlugsFor(auth), viewerName: auth.name || null, range, business: (req.query.business || 'all').toString(), legacyBoard: req.query.board === 'legacy',
     }));
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (body && body.op === 'add_note') {
     const key = String(body.card_key || ''), text = String(body.body || '').trim().slice(0, 1000);
     if (!/^c_[0-9a-f-]{36}$/i.test(key) || !text) return res.status(400).json({ error: 'Write a note first.' });
+    // A note is a write: same card check as the ops below (Joey's other
+    // brands are view only, owner 2026-10-03).
+    const act = pipelineWriteSlugsFor(auth);
+    if (act !== null) {
+      const nowMs = Date.now();
+      const card = computeCards(await loadPipelineRaw(db, { nowMs }), nowMs).cards.find((c) => c.key === key);
+      if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
+      if (!cardVisible(card, act)) return res.status(403).json({ error: 'Forbidden for this business' });
+    }
     const { error } = await db.from('pipeline_notes').insert({ card_key: key, body: text, created_by: auth.name || auth.role || 'office' });
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ ok: true });
@@ -1352,7 +1367,8 @@ async function pipelineOp(res, db, auth, body) {
   }
 
   // Every card op: rebuild the cards server-side and check the card is one
-  // this login may see -- the key alone proves nothing.
+  // this login may act on (her write list, not the view list) -- the key
+  // alone proves nothing.
   const key = String(body.card_key || '');
   if (!CARD_KEY.test(key)) return res.status(400).json({ error: 'card_key is required' });
   const nowMs = Date.now();
@@ -1360,7 +1376,7 @@ async function pipelineOp(res, db, auth, body) {
   const { cards, ctx } = computeCards(raw, nowMs);
   const card = cards.find((c) => c.key === key);
   if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
-  if (!cardVisible(card, pipelineSlugsFor(auth))) return res.status(403).json({ error: 'Forbidden for this business' });
+  if (!cardVisible(card, pipelineWriteSlugsFor(auth))) return res.status(403).json({ error: 'Forbidden for this business' });
   const biz = card.shownSlug && ctx.bizBySlug.get(card.shownSlug);
   const bizId = biz ? biz.id : null;
 
@@ -1460,7 +1476,9 @@ export async function pipelineCallTarget(db, auth, rawPhone, cardSlugIn) {
   // use is ignored (the proof below is scoped to her businesses anyway).
   const bizSlug = cardSlugIn && mayUseBusiness(auth, cardSlugIn) ? cardSlugIn : null;
   const fam = bizSlug ? familyOf(bizSlug) : null;
-  const allowed = pipelineSlugsFor(auth);
+  // Dialing follows the dashboard's access list (Joey may call Handy Andy customers
+  // from a job card, owner 2026-09-29) -- never her view-only brands.
+  const allowed = allowedSlugsFor(auth);
   const [bizR, linesR] = await Promise.all([
     db.from('businesses').select('id, slug'),
     db.from('tracking_numbers').select('phone, business_slug, active, forward_to, created_at').order('created_at'),

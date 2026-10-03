@@ -9296,11 +9296,15 @@ async function calls(req, res, db, auth) {
     const nums = [...new Set(missedRows.map(r => callerDigits(r.caller_phone)).filter(d => d.length === 10))];
     if (nums.length) {
       const oldest = missedRows.reduce((m, r) => (r.occurred_at < m ? r.occurred_at : m), missedRows[0].occurred_at);
-      const { data: atts, error: attErr } = await db.from('call_attempts').select('phone, started_at, staff_name')
+      const { data: atts, error: attErr } = await db.from('call_attempts').select('phone, started_at, staff_name, staff_status, talked')
         .in('phone', nums).gte('started_at', oldest).order('started_at');
       if (attErr) throw attErr;
+      // Same rule as the Pipeline's noRing (pipeline.js): her own phone never
+      // connected, so the customer was never dialed -- not a call-back. Manual
+      // log_attempt rows (no staff_status) and her "Yes" tap always count.
+      const rang = (atts || []).filter(x => !x.staff_status || x.staff_status === 'completed' || x.talked === true);
       for (const r of missedRows) {
-        const a = (atts || []).find(x => callerDigits(x.phone) === callerDigits(r.caller_phone) && x.started_at > r.occurred_at);
+        const a = rang.find(x => callerDigits(x.phone) === callerDigits(r.caller_phone) && x.started_at > r.occurred_at);
         if (a) { r.called_back_at = a.started_at; r.called_back_by = r.called_back_by || a.staff_name; }
       }
     }
@@ -17726,10 +17730,15 @@ async function assistantTasks(req, res, db, auth, body) {
     }
     const { data: prev } = await db.from('assistant_tasks').select('title, color').eq('id', id).maybeSingle();
     if (!prev) return res.status(404).json({ error: 'Not found' });
-    const { error } = await db.from('assistant_tasks').update(patch).eq('id', id);
-    if (error) throw error;
+    // Same color again (re-tapping the one it already has): nothing to save
+    // or text, and the client must not warn that Joey's text failed (owner 2026-10-03).
+    const already = op === 'color' && prev.color === body.color;
+    if (!already) {
+      const { error } = await db.from('assistant_tasks').update(patch).eq('id', id);
+      if (error) throw error;
+    }
     if (op === 'color' && body.color === 'red' && prev.color !== 'red') texted = await textJoeyRedTask(db, prev.title);
-    return res.status(200).json({ ok: true, texted });
+    return res.status(200).json({ ok: true, texted, already });
   }
   if (op === 'photos') {
     // Pictures on a task (owner 2026-10-02): the full list, already uploaded via notes_photo.

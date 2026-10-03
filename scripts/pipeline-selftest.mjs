@@ -601,9 +601,34 @@ await check('GET through the handler: scoping by login', async () => {
   const h = await get(db, HEATHER);
   assert.deepEqual(h.body.cards.map((c) => c.family).sort(), ['handy-andy', 'handy-andy']);
   assert.ok(h.body.cards.some((c) => c.key === 'c_' + ha.id));
-  assert.equal((await get(db, JOEY)).body.cards.length, 1);
+  assert.ok(!o.body.cards.some((c) => 'view_only' in c), 'owner: no view_only');
+  assert.ok(!h.body.cards.some((c) => 'view_only' in c), 'Heather acts on every card she sees');
+  // Joey sees every brand's cards (owner 2026-10-03); only Dom's family is hers to act on.
+  const j = await get(db, JOEY);
+  assert.equal(j.body.cards.length, 3);
+  assert.deepEqual(j.body.cards.filter((c) => !c.view_only).map((c) => c.family), ['doms']);
+  assert.ok(j.body.cards.filter((c) => c.family === 'handy-andy').every((c) => c.view_only === true));
   assert.equal((await get(db, AUDITOR)).code, 403);
   assert.equal((await post(db, AUDITOR, { op: 'reopen', card_key: 'c_' + ha.id })).code, 403);
+});
+
+await check("Joey: another brand's card is view only (every write and the Call button refused)", async () => {
+  const { db, ha, dom } = seedDb();
+  const key = 'c_' + ha.id;
+  for (const b of [{ op: 'mark_lost', reason: 'Spam' }, { op: 'not_a_lead' }, { op: 'reopen' }, { op: 'talk', call_id: ha.id },
+    { op: 'no_talk', call_id: ha.id }, { op: 'log_attempt', phone: CUST, talked: false }, { op: 'add_note', body: 'called her' }]) {
+    assert.equal((await post(db, JOEY, { ...b, card_key: key })).code, 403, b.op);
+  }
+  assert.deepEqual([db.tables.pipeline_marks.length, db.tables.call_attempts.length, (db.tables.pipeline_notes || []).length], [0, 0, 0], 'nothing stored');
+  assert.ok((await pipelineCallTarget(db, JOEY, CUST, 'handy-andy')).line, 'may dial a Handy Andy customer (dashboard access)');
+  // Her own family still works.
+  assert.equal((await post(db, JOEY, { op: 'add_note', card_key: 'c_' + dom.id, body: 'left a voicemail' })).code, 200);
+  assert.equal((await post(db, JOEY, { op: 'mark_lost', card_key: 'c_' + dom.id, reason: 'Spam' })).code, 200);
+  // A note needs a card the login may act on (Heather on a Dom's card), and a real card.
+  assert.equal((await post(db, HEATHER, { op: 'add_note', card_key: 'c_' + dom.id, body: 'x' })).code, 403);
+  assert.equal((await post(db, HEATHER, { op: 'add_note', card_key: 'c_00000000-0000-4000-8000-999999999999', body: 'x' })).code, 404);
+  assert.equal((await post(db, OWNER_AUTH, { op: 'add_note', card_key: key, body: 'owner note' })).code, 200);
+  assert.equal(db.tables.pipeline_notes.length, 2);
 });
 
 await check('POST mark_lost / not_a_lead / reopen', async () => {

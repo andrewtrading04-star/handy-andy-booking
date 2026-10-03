@@ -3184,6 +3184,7 @@ function logout(opts){
   const otherTabLive = reason==='expired' && !!token && !!lsGet('ha_admin_token') && lsGet('ha_admin_token')!==token;
   dismissAllOverlays();
   token=''; role=''; userName=''; scope=''; appConfig={}; businesses=[]; current=null;
+  filterArea=''; filterTech='all'; pendingBranch=null; lgAll=false;
   try{ plReset(); }catch(_){}   // drop the cached Pipeline board (owner's audit notes, scoreboard)
   if(!otherTabLive){
     lsDel('ha_admin_token'); lsDel('ha_admin_role'); lsDel('ha_admin_name'); lsDel('ha_admin_scope'); lsDel('ha_admin_config'); lsDel('ha_admin_biz');
@@ -3386,6 +3387,7 @@ function enterApp(){
   // her work is her own company. Owner (scope 'all') keeps the old behaviour:
   // no match, so it falls through to the handy-andy-first sort above.
   current = (scope && scope!=='all' && businesses.find(b=>b.slug===scope)) || businesses[0] || null;
+  filterArea=''; filterTech='all'; pendingBranch=null; lgAll=false;   // login / View As / Back to Admin start unfiltered (owner 2026-10-03)
   loadVip();
   loadJobViewBusinesses();
   ringInit();
@@ -3678,7 +3680,7 @@ document.addEventListener('click', e=>{
   if(tr) openPayrollJob(tr.dataset.prJob, tr.dataset.prSlug);
 });
 async function openPayrollJob(id, slug){
-  const biz=businesses.find(b=>b.slug===slug) || current;
+  const biz=businesses.find(b=>b.slug===slug) || viewBusinesses.find(b=>b.slug===slug) || current;   // Joey: view-only brands open read-only (owner 2026-10-03)
   if(!biz) return;
   const prev=current;
   try{
@@ -3703,6 +3705,7 @@ async function openAlertJob(slug, id){
     // renderGreeting) AND for 'estimates' (renderEstimates calls it itself) —
     // only call it here for every OTHER section, where neither runs, so the
     // badge/estStale banner still updates without a duplicate fetch.
+    filterArea=''; filterTech='all'; pendingBranch=null; lgAll=false;   // another business: old branch / tech / Lead Gen view no longer apply (owner 2026-10-03)
     current=biz; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); navTo(section); if(section!=='schedule'&&section!=='estimates') refreshEstimateBadge(); refreshCallsBadge(); loadGoodAlerts();
   }
   try{
@@ -3727,6 +3730,7 @@ const LEAD_GEN_CITY_GROUPS = [
   { label: 'Houston', slugs: ['houstonmounting', 'houstontvinstallation', 'tvhanginghouston', 'htvmounting', 'precision', 'houstontvmountingpros', 'houstonperfectviewtvmounting'] },
   { label: 'Denver',  slugs: ['tvmountingdenver', 'mile-high'] },
   { label: 'DFW',     slugs: ['a1tvmounting'] },
+  { label: 'Los Angeles', slugs: ['tvmountinglosangeles', 'latvpro', 'lainstall'] },
 ];
 
 async function loadJobViewBusinesses(){
@@ -3741,6 +3745,8 @@ async function loadJobViewBusinesses(){
 function switchToBusiness(slug){
   const next = businesses.find(b => b.slug === slug) || viewBusinesses.find(b => b.slug === slug);
   if(!next) return;
+  // A new business never inherits the old one's branch/tech filter (Pipeline Book, Take a Call, ring card...).
+  if(!current || current.slug!==next.slug){ filterArea=''; filterTech='all'; }
   current = next;
   if(next.view_only) section='schedule';
   nbWarmDataCache(current.slug);
@@ -3818,7 +3824,7 @@ function renderSwitcher(){
   if(allBiz.length<2){ el.innerHTML=''; return; }
   const own     = OWN_CHIP_SLUGS.map(sl => allBiz.find(b => b.slug === sl)).filter(Boolean);
   const leadGen = allBiz.filter(b => !OWN_CHIP_SLUGS.includes(b.slug));
-  const lgOn    = leadGenAllOn();
+  const lgOn    = leadGenAllOn() && section==='schedule';   // off Schedule, name the one brand every screen uses (owner 2026-10-03)
   const isOn    = b => !lgOn && current && b.slug === current.slug;
   const areaName = () => { const a=filterArea && areaCache.find(x=>x.id===filterArea); return a ? a.name : ''; };
   const wrap = (key, label, on, menu) => `<span class="lg" data-wrap="${key}">
@@ -3840,7 +3846,7 @@ function renderSwitcher(){
   }
   el.innerHTML = html;
 
-  const go = (fn) => { filterArea=''; pendingBranch=null; fn(); };
+  const go = (fn) => { filterArea=''; filterTech='all'; pendingBranch=null; fn(); };
   el.querySelectorAll('button[data-grp]').forEach(btn => btn.addEventListener('click', () => go(() => {
     const k=btn.dataset.grp;
     if(k==='leadgen'){ lgAll=true; switchToBusiness(isLeadGenBiz(current) ? current.slug : leadGen[0].slug); }
@@ -3860,15 +3866,14 @@ function renderSwitcher(){
     wraps.forEach(x => x.classList.remove('open'));
     if(open) w.classList.add('open');
   }));
-  if(wraps.length){
-    // Close on any outside click. Registered once per render and removed on the
-    // first fire, so repeated renders cannot stack listeners.
-    document.addEventListener('click', function away(ev){
-      wraps.forEach(w => { if(!w.contains(ev.target)) w.classList.remove('open'); });
-      document.removeEventListener('click', away);
-    });
-  }
 }
+// Close an open switcher dropdown on any outside click. One listener for the
+// page's life: the old per-render one removed itself on the first click
+// anywhere (often the same click that re-rendered the switcher), so menus
+// stopped closing (owner 2026-10-03).
+document.addEventListener('click', ev => {
+  document.querySelectorAll('#switcher .lg.open').forEach(w => { if(!w.contains(ev.target)) w.classList.remove('open'); });
+});
 
 // ── Navigation ─────────────────────────────────────────────────────────────
 document.getElementById('sideNav').querySelectorAll('button').forEach(b=>
@@ -3889,6 +3894,7 @@ function navTo(s){
   // A view-only business (Joey) is Schedule-only; any other screen goes back to her own company.
   if(current && current.view_only && s!=='schedule'){ current=businesses.find(b=>b.slug===scope)||businesses[0]||current; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); }
   section=s;
+  if(lgAll) renderSwitcher();   // Lead Gen pill: "Lead Gen" on Schedule, the bound brand elsewhere
   document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch'||s==='estimates');
   document.getElementById('view').classList.toggle('estimates-workspace',s==='estimates');
   document.getElementById('view').classList.toggle('launch-workspace',s==='launch');
@@ -4106,6 +4112,20 @@ function passFilters(b){
 
   return true;
 }
+// Ghosts (another business's jobs on this calendar) follow the same sidebar.
+// A full ghost is a whole job from another business, so a branch view hides it
+// and search matches it by customer name; faded "X busy" ghosts stay hidden
+// while searching (owner 2026-10-03).
+function ghostPass(g){
+  if(filterTech!=='all' && filterTech!==g.technician_id) return false;
+  // Branch view: keep a full ghost only when its tech works that branch (same map as passFilters).
+  if(g.full && filterArea && jobTerritoryAreaId({technician_id:g.technician_id})!==filterArea) return false;
+  if(jobSearchQuery){
+    if(!g.full) return false;
+    return String(g.customer_name||'').toLowerCase().includes(jobSearchQuery.toLowerCase());
+  }
+  return true;
+}
 
 function updateRangeLabel(dates){
   const o={timeZone:'UTC',month:'short',day:'numeric'};
@@ -4193,7 +4213,7 @@ function ghostEvtCard(g){
   const canOpen=!!(g.booking_id&&g.open_slug&&businesses.concat(viewBusinesses).some(x=>x.slug===g.open_slug));
   // Owner, 2026-10-03: Joey sees every business's jobs as normal full jobs
   // (server sets full). Read-only open via the view gate; no pay/profit.
-  if(canOpen&&g.full) return `<div class="evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}">${evtCard({id:g.booking_id,status:g.status,price:g.price,tip:g.tip,payment_status:g.payment_status,scheduled_at:g.scheduled_at,customer:{name:g.customer_name},technician:t||(g.technician_id?{id:g.technician_id,name:techName}:null)})}</div>`;
+  if(canOpen&&g.full) return `<div class="evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}">${evtCard({id:g.booking_id,status:g.status,price:g.price,tip:g.tip,payment_status:g.payment_status,scheduled_at:g.scheduled_at,customer:{name:g.customer_name},technician:t||(g.technician_id?{id:g.technician_id,name:techName}:null),secondary_technician:g.second_technician_id?(techCache.find(x=>x.id===g.second_technician_id)||{id:g.second_technician_id,name:'Tech'}):null})}</div>`;
   if(canOpen) return `<div class="evt evt-ghost evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}" title="Open this ${esc(g.partner_company||'partner')} job${who}">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
     <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
@@ -4207,14 +4227,26 @@ function ghostEvtCard(g){
 function dayColumn(ds){
   const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b))
                          .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-  const ghosts=ghostBookings.filter(g=>localDateOf(g.scheduled_at)===ds
-    && (filterTech==='all' || filterTech===g.technician_id) && !jobSearchQuery)
-    .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  // A job worked by two of this business's techs arrives as one ghost per tech.
+  // A full ghost is the job itself, so the week shows it once, with both techs'
+  // avatars; faded "X busy" ghosts stay per tech (owner 2026-10-03).
+  const fullSeen=new Map(), ghosts=[];
+  for(const g of ghostBookings){
+    if(localDateOf(g.scheduled_at)!==ds || !ghostPass(g)) continue;
+    if(g.full && g.booking_id){
+      const first=fullSeen.get(g.booking_id);
+      if(first){ if(g.technician_id && g.technician_id!==first.technician_id && !first.second_technician_id) first.second_technician_id=g.technician_id; continue; }
+      const one=Object.assign({},g); fullSeen.set(g.booking_id,one); ghosts.push(one); continue;
+    }
+    ghosts.push(g);
+  }
+  ghosts.sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  const nJobs=items.length+ghosts.filter(g=>g.full).length;
   const h=colHeadLabel(ds);
   const isToday=ds===todayStr();
   return `<div class="daycol">
     <div class="dayhead ${isToday?'today':''}">${isToday?'<span class="todot"></span>':''}${h.dow}, ${h.md}</div>
-    <div class="daycount">${items.length+ghosts.filter(g=>g.full).length} JOB${(items.length+ghosts.filter(g=>g.full).length)===1?'':'S'}</div>
+    <div class="daycount">${nJobs} JOB${nJobs===1?'':'S'}</div>
     <div class="daybody">${items.map(evtCard).join('')}${ghosts.map(ghostEvtCard).join('')}${(!items.length&&!ghosts.length)?'<div class="dayempty"></div>':''}</div>
   </div>`;
 }
@@ -4246,8 +4278,7 @@ function daySlotIdx(slotTime, iso){
 function dayGrid(ds){
   const items=calBookings.filter(b=>localDateOf(b.scheduled_at)===ds && passFilters(b))
                          .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-  const ghosts=ghostBookings.filter(g=>localDateOf(g.scheduled_at)===ds
-    && (filterTech==='all' || filterTech===g.technician_id) && !jobSearchQuery);
+  const ghosts=ghostBookings.filter(g=>localDateOf(g.scheduled_at)===ds && ghostPass(g));
   // Columns: the roster (narrowed by the sidebar filter), then anyone working a
   // job today who is not on this roster (a partner-company helper), then
   // Unassigned when there is something in it.
@@ -4255,7 +4286,7 @@ function dayGrid(ds){
   if(filterArea || jobSearchQuery) cols=cols.filter(t=>items.some(b=>b.technician_id===t.id||b.secondary_technician_id===t.id));
   const have=new Set(cols.map(t=>t.id));
   if(filterTech==='all') items.forEach(b=>[b.technician,b.secondary_technician].forEach(t=>{ if(t&&t.id&&!have.has(t.id)){ have.add(t.id); cols.push(t); } }));
-  if(filterTech==='all') ghosts.forEach(g=>{ if(g.technician_id&&!have.has(g.technician_id)){ have.add(g.technician_id); cols.push({id:g.technician_id,name:g.tech_name||'Tech'}); } });
+  if(filterTech==='all') ghosts.forEach(g=>{ if(g.technician_id&&!have.has(g.technician_id)){ have.add(g.technician_id); cols.push(techCache.find(t=>t.id===g.technician_id)||{id:g.technician_id,name:g.tech_name||'Tech'}); } });
   const unassigned=items.filter(b=>!b.technician_id);
   if(unassigned.length || filterTech==='unassigned') cols=cols.concat([{id:'__un',name:'Unassigned',un:true}]);
   if(!cols.length) return '<div class="dg-empty">No jobs for this day.</div>';
@@ -10753,8 +10784,9 @@ function paintTasks(){
   jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
     tmr=setTimeout(async()=>{ try{ const d=await api('assistant_tasks',{ params:{ q } });
       res.innerHTML=(d.jobs||[]).map((j,i)=>`<button type="button" data-i="${i}">${esc(j.label)}</button>`).join('');
-      res.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ _tk.job=d.jobs[+b.dataset.i]; jobIn.value=_tk.job.label; res.innerHTML=''; });
+      res.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ _tk.job=d.jobs[+b.dataset.i]; jobIn.value=_tk.job.label; res.innerHTML=''; jobIn.blur(); });
     }catch(_){} },250); };
+  res.onmousedown=e=>e.preventDefault();   // pressing a result keeps focus here, so the blur timer can't eat a slow click (owner 2026-10-03)
   jobIn.onblur=()=>setTimeout(()=>{ res.innerHTML=''; },200);   // never cover the notes box
   view.querySelector('#tkAdd').onclick=async()=>{
     const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
@@ -10771,7 +10803,8 @@ function paintTasks(){
     const ti=el.querySelector('[data-tk-title]'); if(ti) ti.onchange=async()=>{ const v=ti.value.trim(); if(!v){ toast('Write the task first.'); return; }
       try{ await api('assistant_tasks',{ method:'POST', body:{ op:'title', id, title:v } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.title=v; const s=el.querySelector('.tk-sum .tk-title'); if(s) s.textContent=v; toast('Saved'); }catch(err){ toast(err.message); } };
     el.querySelectorAll('[data-tk-recolor]').forEach(b=>b.onclick=async()=>{ const k=b.dataset.tkRecolor;
-      try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:k } }); if(k==='red') toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.'); _tk.open.add(id); await renderTasks(); }catch(err){ toast(err.message); } });
+      const cur=_tk.tasks.find(x=>x.id===id); if(cur&&cur.color===k) return;   // already this color: nothing to save, no text
+      try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:k } }); if(k==='red'&&!(r&&r.already)) toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.'); _tk.open.add(id); await renderTasks(); }catch(err){ toast(err.message); } });
     const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
     // Pictures on a task (owner 2026-10-02): upload, then save the full list.
     const pb=el.querySelector('[data-tk-photo]'), pf=el.querySelector('[data-tk-file]');
@@ -11032,7 +11065,7 @@ function paintPipeline(){
   const m=d.metrics||{};
   const calls=Number(m.calls)||0, conv=Number(m.converted)||0, leakN=Number(m.leaks)||0;
   const pct=calls?Math.round(100*conv/calls):0;
-  const rangeName=({today:'today','2':'today and yesterday',yesterday:'yesterday','7':'last 7 days'})[_plRange]||'';
+  const rangeName=({today:'today','2':'today and yesterday','3':'last 3 days',yesterday:'yesterday','7':'last 7 days'})[_plRange]||'';
   const upd=_plLoading?'Updating…':_plErr?'Could not refresh: '+_plErr:(d.generated_at?'Updated '+(plAgo(d.generated_at)==='0m'?'just now':plAgo(d.generated_at)+' ago'):'');
   const opt=(v,l,cur)=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`;
   const rangeSel=`<select id="plRange" aria-label="Date range">${[['3','Last 3 days'],['2','Today + yesterday'],['today','Today'],['yesterday','Yesterday'],['7','Last 7 days']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
@@ -11200,11 +11233,12 @@ function plDetailHtml(c){
   const liveJob=!!(c.booking && c.booking.status!=='cancelled');
   const unconf=plUnconfirmedCall(c), talkCall=plTalkCall(c);
   const picking=!!(_plLost && _plLost.key===c.key);
+  const vo=!!c.view_only;   // Joey on another family's brand: read-only card (owner 2026-10-03)
   const top=[];
   if(_plAsk[c.key]) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
       <button type="button" class="pl-btn pri" data-pl="ask-yes">Yes</button><button type="button" class="pl-btn" data-pl="ask-no">No answer</button>
       <button type="button" class="pl-link pl-x" data-pl="ask-x">Not now</button></div>`);
-  if(unconf) top.push(`<div class="pl-ask" role="group" aria-label="Talk or voicemail"><span>Answered, but was it a real talk?</span>
+  if(unconf && !vo) top.push(`<div class="pl-ask" role="group" aria-label="Talk or voicemail"><span>Answered, but was it a real talk?</span>
       <button type="button" class="pl-btn pri" data-pl="talk">Talked</button><button type="button" class="pl-btn" data-pl="notalk">Voicemail</button></div>`);
   if(picking){
     const reasons=(Array.isArray(_pl.lost_reasons)&&_pl.lost_reasons.length)?_pl.lost_reasons:PL_LOST_REASONS;
@@ -11231,6 +11265,8 @@ function plDetailHtml(c){
   if(!lost && !closed && !liveJob && !picking) b.push('<button type="button" class="pl-btn red" data-pl="lost">Mark lost</button>');
   if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
   if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
+  // View-only: open the job or estimate, nothing that writes or calls.
+  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); b.length=0; }
   const f=[];
   f.push(phone
     ? `<b>${esc(c.phone_pretty||fmtPhone(c.phone))}</b>${c.business&&c.business.name?' · '+esc(c.business.name):''}`
@@ -11305,7 +11341,7 @@ function plDetailHtml(c){
   const whyBox=c.stage==='booked'?'':(W_&&W_.ans
     ?`<div style="border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
         <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
-        ${W_.ans.what_went_wrong&&!/^\W*(nothing|none|no (real |major )?(mistakes?|issues?|problems?)|n\/a)/i.test(W_.ans.what_went_wrong)&&!/nothing (major |really )?went wrong/i.test(W_.ans.what_went_wrong)?`<div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>`:''}
+        ${W_.ans.what_went_wrong&&!/^\W*(nothing|none|no (real |major )?(mistakes?|issues?|problems?)|n\/a)\b/i.test(W_.ans.what_went_wrong)&&!/nothing (major |really )?went wrong/i.test(W_.ans.what_went_wrong)?`<div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>`:''}
         <div style="margin-top:5px;"><b>Next step:</b> ${esc(W_.ans.next_step)}</div>
         ${role==='owner'&&W_.ans.for_name?`<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#5b21b6;">📨 Sent to ${esc(W_.ans.for_name)} · ${W_.ans.seen_at?'seen '+esc(plWhen(W_.ans.seen_at,c.tz)):'not seen yet'}</div>`:''}
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
@@ -11381,23 +11417,24 @@ function plReviewHtml(c){
   const opened=!!(r.page_opened||r.sms_clicked||r.email_clicked);
   return `<div class="plt-info">
     <div><span>Review request</span><b>${sent?esc(sent)+' sent · '+(opened?'opened':'not opened'):'Not sent'}</b></div>
-    <div><span>Call for review</span><b>${r.call_status?'Called'+(r.call_by?' by '+esc(r.call_by):'')+' · '+W(r.call_at):'<button type="button" data-pl="call" style="font:inherit;font-size:13px;font-weight:800;padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111418;cursor:pointer;">Call for a review</button>'}</b></div>
+    <div><span>Call for review</span><b>${r.call_status?'Called'+(r.call_by?' by '+esc(r.call_by):'')+' · '+W(r.call_at):c.view_only?'Not called':'<button type="button" data-pl="call" style="font:inherit;font-size:13px;font-weight:800;padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111418;cursor:pointer;">Call for a review</button>'}</b></div>
   </div>
   ${plFollowUpBanner(c)}
-  <div class="pl-acts" style="margin-bottom:12px;">
+  ${c.view_only?'':`<div class="pl-acts" style="margin-bottom:12px;">
     <button type="button" class="pl-btn" data-pl="rv-email">Send review email</button>
     <button type="button" class="pl-btn" data-pl="rv-sms">Send review text</button>
-  </div>`;
+  </div>`}`;
 }
 // Card notes (owner 2026-09-28): a small notes box on every card.
 function plNotesHtml(c){
   const ns=Array.isArray(c.notes)?c.notes:[];
+  if(c.view_only && !ns.length) return '';
   return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
     ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
-    <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
+    ${c.view_only?'':`<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
       <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
       <button type="button" class="pl-btn" data-pl="note-add">Save</button>
-    </div>`;
+    </div>`}`;
 }
 // Owner only (2026-09-28): move a card forward a step, or mark it lost.
 function plOwnerMoveHtml(c){
@@ -11534,6 +11571,8 @@ function plClick(e){
   }
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
   if(!c) return;
+  // View-only card: reads only; the server refuses the rest (owner 2026-10-03).
+  if(c.view_only && !['toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
   switch(act){
     case 'toggle':
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
@@ -11547,7 +11586,7 @@ function plClick(e){
     case 'manual': _plAsk[c.key]={ mode:'manual' }; paintPipeline(); return;
     case 'ask-yes': case 'ask-no': plAnswer(c, act==='ask-yes', b); return;
     case 'ask-x': delete _plAsk[c.key]; paintPipeline(); return;
-    case 'tl-text': openCallTexts(c.our_phone||'', c.phone, { send:!!c.our_phone }); return;
+    case 'tl-text': openCallTexts(c.our_phone||'', c.phone, { send:!!c.our_phone && !c.view_only }); return;
     case 'tl-call': if(b.dataset.callId){ _plOpen=null; openCallLink(b.dataset.callId); } return;
     case 'text':
       // Same hand-off as the Calls tab's "Send a message": open that exact
@@ -11570,7 +11609,7 @@ function plClick(e){
     case 'job':
       // The job modal on top of the board, borrowing the job's brand only
       // while it's open (openPayrollJob restores `current` on close).
-      openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || (c.business&&c.business.slug));
+      openPayrollJob(c.booking.id, plOwnSlug(c.booking.slug) || plOwnSlug(c.booking.business_slug) || plBizSlug(c) || c.booking.slug || (c.business&&c.business.slug));   // view-only card: the job's own brand (owner 2026-10-03)
       return;
     case 'estview': _plEstOpen=!_plEstOpen; paintPipeline(); return;
     case 'move': {
@@ -18858,7 +18897,8 @@ async function renderGreeting(){
   try{
     // Stats follow the week shown on the schedule — send that week's Sunday.
     const reqs=[
-      api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }}),
+      // Joey's 4 cards come from joey_metrics; a view-only brand 403s summary, which must not hide them (owner 2026-10-03).
+      api('summary',{ params:{ business:current.slug, week:sundayOf(anchorDate||todayStr()) }}).catch(e=>{ if(isJoeyHome()) return {}; throw e; }),
       refreshEstimateBadge(),
       // How many review calls Joey has to make (cross-business, yesterday's jobs).
       // Not part of Heather's (Handy Andy) platform — skip the call entirely.
@@ -18911,7 +18951,8 @@ async function renderGreeting(){
     };
     paintGreeting();
     /* Calls badge = missed calls only (owner 2026-10-02); see refreshCallsBadge. */
-    if(section==='schedule') el.classList.remove('hidden');
+    // One brand's numbers: hidden on the merged Lead Gen calendar. Joey's 4 cards are cross-business and stay (owner 2026-10-03).
+    el.classList.toggle('hidden', section!=='schedule' || (leadGenAllOn() && !isJoeyHome()));
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
 }

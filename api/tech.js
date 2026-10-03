@@ -549,8 +549,10 @@ async function job(req, res, db, auth) {
   // the assigned tech is obviously the supplier, so no card and no completion gate.
   shaped.bracket = null;
   const need = detectBracketQtys(data.line_items || []);
-  // Inventory-exempt viewer (0171): no bracket card, box reminder, or supplier gate.
-  if (data.secondary_technician_id && bracketTotal(need) > 0 && !(await isInventoryExempt(db, auth.tech_id))) {
+  // Inventory-exempt (0171): no bracket card, box reminder, or supplier gate --
+  // only when EVERY tech on the job is exempt, whoever is viewing (a mixed pair
+  // still has a normal tech's stock to count).
+  if (data.secondary_technician_id && bracketTotal(need) > 0 && !(await allJobTechsExempt(db, data.technician_id, data.secondary_technician_id))) {
     try {
       const { data: bs, error: bsErr } = await db.from('bookings').select('bracket_supplied_by').eq('id', id).maybeSingle();
       if (!bsErr) {
@@ -986,7 +988,8 @@ async function status(req, res, db, auth, body) {
     }
     // Gate completion on recording who supplied the bracket — on a two-person job
     // only one tech supplies it, and that tech's inventory must be the one counted.
-    if (!(await isInventoryExempt(db, auth.tech_id)) && await jobNeedsBracketSupplier(db, id)) {
+    // (Skipped only when every tech on the job is inventory-exempt -- see jobNeedsBracketSupplier.)
+    if (await jobNeedsBracketSupplier(db, id)) {
       return res.status(400).json({ error: 'Select which technician supplied the bracket before completing this job.' });
     }
     const en = existing.metadata && existing.metadata.estimate_visit_notes;
@@ -2024,6 +2027,15 @@ async function adjustAppleTvBracketInventory(db, businessId, techId, qty, bookin
   } catch (_) { /* usage log is best-effort */ }
 }
 
+// Inventory-exempt (0171): skip the supplier question only when EVERY tech on
+// the job is exempt; a mixed pair still has a normal tech's stock to count.
+async function allJobTechsExempt(db, ...techIds) {
+  const ids = techIds.filter(Boolean);
+  if (!ids.length) return false;
+  for (const t of ids) if (!(await isInventoryExempt(db, t))) return false;
+  return true;
+}
+
 // Does this job still need a bracket-supplier selection before it can complete?
 // Best-effort: if the bracket_supplied_by column (0035) isn't applied yet, never
 // block completion.
@@ -2033,12 +2045,13 @@ async function jobNeedsBracketSupplier(db, bookingId) {
   if (!techHasSecondCol) return false;
   try {
     const { data: b, error } = await db.from('bookings')
-      .select('bracket_supplied_by, secondary_technician_id, line_items:booking_line_items ( name, quantity )')
+      .select('bracket_supplied_by, technician_id, secondary_technician_id, line_items:booking_line_items ( name, quantity )')
       .eq('id', bookingId).maybeSingle();
     if (error || !b) return false;
     if (!b.secondary_technician_id) return false;   // solo job: assigned tech is the supplier
     if (b.bracket_supplied_by) return false;
-    return bracketTotal(detectBracketQtys(b.line_items || [])) > 0;
+    if (bracketTotal(detectBracketQtys(b.line_items || [])) <= 0) return false;
+    return !(await allJobTechsExempt(db, b.technician_id, b.secondary_technician_id));
   } catch (e) { return false; }
 }
 

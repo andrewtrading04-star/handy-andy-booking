@@ -856,25 +856,39 @@ function setBottomTab(which){
   bar.classList.toggle('hidden',!onTabView);
   document.body.classList.toggle('has-bottombar',onTabView);
   if(onTabView) setTimeout(techTour,600);
+  else techTourHide();   // job / help / login: no tab bar to point at
   bar.querySelectorAll('.bbtab').forEach(b=>b.classList.toggle('active',b.dataset.view===which));
 }
 
 // First-login tour (owner 2026-10-02): three one-time pop-ups pointing at the
 // tabs. Seen once per tech on this phone, never again.
+// Step reached this session, so a tour cut short (a job opened) picks up where
+// it left off the next time the tab bar shows (owner 2026-10-03).
+let techTourAt={ key:'', i:0 };
+// Takes the bubble down WITHOUT marking the tour seen, so it comes back.
+function techTourHide(){
+  const el=document.getElementById('techTour'); if(!el) return;
+  el.remove();
+  document.querySelectorAll('#bottomTabBar .bbtab').forEach(b=>b.style.outline='');
+}
 function techTour(){
   const key='tech_tour_done_'+((tech&&(tech.id||tech.name))||'');
   // Only new techs (owner 2026-10-02): everyone already on the team skips it.
   const OLD_TECHS=['1af25436-7a71-4fb4-80fc-db424b64e8a6','a03d09e2-2099-4e49-b4b2-c6b34be4abc8','125da96c-6289-43a3-b711-ae3a8bcb5555','d9084eb2-755c-43cc-9a41-cfa2ffd583bf','5a3b7ee8-2ba6-4bac-a07a-1774ae430c81','5a443792-2868-46ef-a45e-4b26b7de3006'];
   if(!tech||!tech.id||OLD_TECHS.includes(tech.id)||['Gregory','Juan','Kregg','Steve','TK','Zach'].includes(tech.name)) return;
   if(lsGet(key)||document.getElementById('techTour')) return;
+  const bar=document.getElementById('bottomTabBar');
+  if(!bar||bar.classList.contains('hidden')) return;   // a job opened inside the 600ms wait
   const steps=[['jobsView','New jobs go here'],['availabilityView','Edit your schedule'],['payrollView','This is your income'],['reviewsView','Your reviews']];
   const el=document.createElement('div'); el.id='techTour'; document.body.appendChild(el);
-  let i=0;
+  let i=techTourAt.key===key?Math.min(techTourAt.i,steps.length-1):0;
   const paint=()=>{
     const [view,txt]=steps[i];
     const tab=document.querySelector('#bottomTabBar .bbtab[data-view="'+view+'"]');
-    if(!tab){ el.remove(); return; }
+    if(!tab){ techTourHide(); return; }
     const r=tab.getBoundingClientRect();
+    if(!r.width||!r.height){ techTourHide(); return; }   // tab not on screen: try again next time the bar shows
+    techTourAt={ key, i };
     document.querySelectorAll('#bottomTabBar .bbtab').forEach(b=>b.style.outline=b===tab?'3px solid #2563eb':'');
     const last=i===steps.length-1;
     const w=Math.min(260,window.innerWidth-24), left=Math.max(12,Math.min(r.left+r.width/2-w/2,window.innerWidth-w-12));
