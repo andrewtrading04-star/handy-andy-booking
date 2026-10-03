@@ -107,6 +107,13 @@
   .side-nav{display:flex;flex-direction:column;gap:1px;padding:0 8px 6px;}
   .side-nav button{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font-size:14px;font-weight:600;text-align:left;width:100%;}
   .side-nav button .ic{width:18px;text-align:center;}
+  .side-nav .nav-group-summary{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;text-align:left;width:100%;box-sizing:border-box;cursor:pointer;list-style:none;}
+  .side-nav .nav-group-summary::-webkit-details-marker{display:none;}
+  .side-nav .nav-group-summary:hover{background:var(--line2);}
+  .side-nav .nav-group-summary .ic{width:18px;text-align:center;flex:none;}
+  #joeyCommunication[open] .nav-group-summary .ic{transform:rotate(90deg);}
+  body.sb-glass.sb-mini .sidebar:not(:hover) .nav-group-summary{font-size:0;justify-content:center;padding:12px 0;}
+  body.sb-glass.sb-mini .sidebar:not(:hover) .nav-group-summary .ic{font-size:17px;width:auto;}
   .side-nav button:hover{background:var(--line2);}
   .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
   .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
@@ -1997,7 +2004,9 @@
   .jy .dpl{border-top:1px solid #d4d9e2;margin-top:9px;padding-top:1px;width:100%;}
   .jy .dpl-row{grid-template-columns:repeat(2,minmax(0,1fr));}
   body.joey-nav #sideNav [data-nav="schedule"], body.joey-nav #sideNav [data-nav="estimates"], body.joey-nav #sideNav #navGallery{display:none!important;}
-  .jy-stock{display:flex;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .jy-stock{display:inline-flex;width:fit-content;max-width:100%;align-self:flex-start;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .greeting.gl .greet-stats.jy>.gstat:first-child{align-items:center;justify-content:center;text-align:center;}
+  .jy-coverage{font-size:15px;line-height:1.7;}
   .jy-stock:focus-visible{outline:2px solid #534ab7;outline-offset:3px;}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
   .dpl-cell{border:none;background:#f3f4f8;border-radius:10px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;color:inherit;}
@@ -3846,7 +3855,7 @@ function configureJoeyNav(){
   document.getElementById('navNotes').style.display=joey?'':'none';
   if(!joey) return;
   const comm=document.createElement('details'); comm.id='joeyCommunication';
-  comm.innerHTML='<summary style="padding:12px 14px;cursor:pointer;font-weight:700;">Communication</summary>';
+  comm.innerHTML='<summary class="nav-group-summary"><span class="ic" aria-hidden="true">▸</span>Communication</summary>';
   ['navCallHub','navMessages'].forEach(id=>{const el=document.getElementById(id);comm.appendChild(el);});
   const first=['navPipeline','navTasks','navNotes','navAskAndrew'].map(id=>document.getElementById(id));
   nav.prepend(...first,comm);
@@ -11068,6 +11077,7 @@ async function renderPipeline(){
 // paints even over an open picker. The 30s poll passes false and waits.
 async function plLoad(force){
   const req=++_plReq;
+  if(isJoeyHome()) _plRange='3';
   const params={ range:_plRange };
   if(role==='owner' && _plBiz && _plBiz!=='all') params.business=_plBiz;
   _plLoading=true;
@@ -11191,7 +11201,7 @@ function paintPipeline(){
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
-    <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
+    ${isJoeyHome()?'':`<div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>`}
     ${plMarkedTabs()}
     ${_plView==='marked'?plMarkedHtml():chev+kpis}
     ${''/* Sales funnel + talked-to bars removed (owner 2026-10-03) */}
@@ -11201,7 +11211,7 @@ function paintPipeline(){
   if(_plScrollTo){ const col=document.getElementById('plcol-'+_plScrollTo); _plScrollTo=null; if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }
   const root=document.getElementById('plRoot');
   root.addEventListener('click', plClick);
-  document.getElementById('plRange').addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
+  document.getElementById('plRange')?.addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
   const bs=document.getElementById('plBiz');
   if(bs) bs.addEventListener('change',e=>{ _plBiz=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
   const ss=document.getElementById('plStageSel'); if(ss) ss.addEventListener('change',e=>{ _plStage=e.target.value; e.target.blur(); paintPipeline(); });
@@ -19657,7 +19667,7 @@ function joeyCardsHtml(){
   const card=(l,v)=>`<div class="gstat"><span class="gstat-l">${l}</span>${v}</div>`;
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
-  const covHtml=`<div style="font-size:13px;line-height:1.5;"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
+  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
   const u=Number(j.urgent_tasks)||0;
   const secs=(j.secretaries||[]).map(p=>{ const c=Number(p.conversion)||0;
     // Bars like the owner's booking-rate box (owner 2026-10-03).
