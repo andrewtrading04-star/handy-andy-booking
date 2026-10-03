@@ -2003,7 +2003,11 @@
   .booking-rate-meter{display:flex;align-items:center;gap:10px;}
   .booking-rate-track{flex:1;min-width:0;height:24px;background:#fff;border-radius:7px;}
   .booking-rate-meter>b{min-width:49px;text-align:right;font-size:14px;font-variant-numeric:tabular-nums;color:#1f2937;}
-  #incomeChart,.greeting.gl .ndp-scroll{width:calc(100% + 20px);margin-left:-10px;overflow:visible;}
+  .dashboard-chart-layout{display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;align-items:center;width:calc(100% + 20px);margin-left:-10px;}
+  .dashboard-chart-layout .ndp-seg{display:flex;flex-direction:column;align-self:center;gap:4px;margin:0;}
+  .dashboard-chart-layout .ndp-seg button{width:100%;padding:9px 5px;white-space:normal;}
+  #incomeChart,#ndpChart{width:100%;min-width:0;}
+  .greeting.gl .ndp-scroll{width:100%;overflow:visible;}
   .greeting.gl .ndp-seg button{font-size:12px;padding:5px 10px;}
   .greeting.gl .gstat svg line{stroke:#e5e7eb;}
   .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
@@ -19551,11 +19555,8 @@ function incomePeriodLabel(h, view){
 function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough ${unitWord||'weeks'} yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
-  // Fixed scale, sized to the bucket: floor $0, ceiling passed in by the
-  // caller (bigger for Monthly/3-month sums than for a single week), so a
-  // point over the ceiling still plots (clamped to the top edge) rather than
-  // rescaling the whole chart and squashing every other point flat.
-  const min=0, max=maxScale||10000, range=max-min;
+  // Fit the actual range while retaining zero and any negative profit days.
+  const min=Math.min(0,...vals)*1.1, max=Math.max(100,...vals)*1.1, range=max-min;
   const maxIdx=vals.indexOf(Math.max(...vals));
   // Extra top padding (padY) leaves room for a value label above every dot,
   // not just the peak; alternating label height (near/far) keeps closely
@@ -19564,7 +19565,7 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   // Plot coordinates stretch across the card. Text uses percentage x positions
   // and pixel font sizes, so filling the card never shrinks the labels.
   const w=600;
-  const h=height||172, padX=12, padTop=38, padBottom=30;
+  const h=height||236, padX=12, padTop=38, padBottom=30;
   const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
   const xy=vals.map((v,i)=>{
@@ -19616,7 +19617,7 @@ function ndpChartHtml(cached){
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
   // Scale to the real numbers, with room for larger labels.
   const top=Math.max(100, ...history.map(h=>h.total_made))*1.1;
-  const svg=incomeChartSvg(history, top, 'week', 'days', null, 150);
+  const svg=incomeChartSvg(history, top, 'week', 'days', null, 220);
   return `<div class="ndp-scroll">${svg}</div>`;
 }
 // Secretary conversion card -- one merged dark-hero card: the 7-day rate is
@@ -19715,8 +19716,8 @@ function greetStatsHtml(){
     // card's longer tabs, which need a fresh economics pass from the server.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;">`+
       `<span class="gstat-l">🔒 Income</span>`+
-      `<div class="ndp-seg" style="margin-top:6px;"><button data-iv="week" class="${incomeView==='week'?'on':''}">Weekly</button><button data-iv="month" class="${incomeView==='month'?'on':''}">Monthly</button><button data-iv="quarter" class="${incomeView==='quarter'?'on':''}">3 Months</button></div>`+
-      `<div id="incomeChart">${incomeChartSvg(incomeAggregate(pf.income_history, incomeView), incomeView==='week'?10000:incomeView==='month'?40000:120000, incomeView)}</div>`+
+      `<div class="dashboard-chart-layout"><div class="ndp-seg"><button data-iv="week" class="${incomeView==='week'?'on':''}">Weekly</button><button data-iv="month" class="${incomeView==='month'?'on':''}">Monthly</button><button data-iv="quarter" class="${incomeView==='quarter'?'on':''}">3 Months</button></div>`+
+      `<div id="incomeChart">${incomeChartSvg(incomeAggregate(pf.income_history, incomeView), incomeView==='week'?10000:incomeView==='month'?40000:120000, incomeView)}</div></div>`+
     `</div>`+
     // Combined Profit box (tabbed): one number + split, swapped between
     // This week / Today / Yesterday by the tab row — replaces the old
@@ -19732,8 +19733,8 @@ function greetStatsHtml(){
       // Chart-only box now -- no single-day $ figure or Today/Yesterday
       // toggle, just the trend (see incomeChartSvg reuse notes on ndpChartHtml
       // above). {pay_date,total_made} adaptation happens inside ndpChartHtml.
-      `<div class="ndp-seg" style="margin-top:6px;"><button data-ndv="7d" class="${netDailyChartView==='7d'?'on':''}">Last 7 days</button><button data-ndv="30d" class="${netDailyChartView==='30d'?'on':''}">Last 30 days</button></div>`+
-      `<div id="ndpChart" style="width:100%;">${ndpChartHtml(netDailyChartCache[netDailyChartView])}</div>`+
+      `<div class="dashboard-chart-layout"><div class="ndp-seg"><button data-ndv="7d" class="${netDailyChartView==='7d'?'on':''}">Last 7 days</button><button data-ndv="30d" class="${netDailyChartView==='30d'?'on':''}">Last 30 days</button></div>`+
+      `<div id="ndpChart" style="width:100%;">${ndpChartHtml(netDailyChartCache[netDailyChartView])}</div></div>`+
     `</div>` : '';
   // Revenue this week = every non-canceled job's price over the Sun–Sat work week,
   // both companies combined, with the per-business split below. Job-revenue based
