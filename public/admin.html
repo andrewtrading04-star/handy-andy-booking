@@ -14903,8 +14903,14 @@ function callInbox(groups){
           // We only see an outbound call when someone tapped Call back / logged it
           // (calls go out from their own phones). Show the latest one after the call in.
           const inAt=Date.parse(r.occurred_at)||0; let best=null;
-          for(const x of g.rows){ for(const [t,who] of [[x.called_back_at,x.claimed_by],[x.claimed_at,x.claimed_by]]){ const ms=Date.parse(t||''); if(ms>inAt && (!best||ms>best.ms)) best={ms,who}; } }
-          return best?`<span class="cv-out" style="color:#2563eb;">${CV_ICON.outArrow} Called back${best.who?' · '+esc(best.who):''} · ${esc(new Date(best.ms).toLocaleTimeString('en-US',{timeZone:(CALL_TZ[r.market]||'America/Denver'),hour:'numeric',minute:'2-digit'}))}</span>`:''; })()}`; })()}
+          // Only a real call-back (called_back_at) says "Called back"; a Call back tap whose
+          // own phone never connected says so in grey (owner 2026-10-03).
+          const T=ms=>esc(new Date(ms).toLocaleTimeString('en-US',{timeZone:(CALL_TZ[r.market]||'America/Denver'),hour:'numeric',minute:'2-digit'}));
+          let tried=null;
+          for(const x of g.rows){ const ms=Date.parse(x.called_back_at||''); if(ms>inAt && (!best||ms>best.ms)) best={ms,who:x.called_back_by||x.claimed_by};
+            const cm=Date.parse(x.claimed_at||''); if(cm>inAt && (!tried||cm>tried.ms)) tried={ms:cm,who:x.claimed_by}; }
+          if(best) return `<span class="cv-out" style="color:#2563eb;">${CV_ICON.outArrow} Called back${best.who?' · '+esc(best.who):''} · ${T(best.ms)}</span>`;
+          return tried?`<span class="cv-out" style="color:var(--mute);">${CV_ICON.outArrow} ${tried.who?esc(tried.who)+' tried':'Tried'} · ${T(tried.ms)} · didn't connect</span>`:''; })()}`; })()}
         ${r.transcript&&!/^(Staff|Customer):/m.test(r.transcript)?`<span class="ci-snippet">${esc(r.transcript)}</span>`:''}
       </span>
       <span class="cv-right"><b>${r.duration_sec?esc(callDuration(r.duration_sec)):'—'}</b><span class="cv-chev">›</span></span>
