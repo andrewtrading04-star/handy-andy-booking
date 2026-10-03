@@ -90,6 +90,8 @@
   .lg-group-label{display:block;padding:6px 10px 2px;font-size:12px;font-weight:700;
     text-decoration:underline;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8a93a6);}
   .lg-group-label:first-child{padding-top:2px;}
+  .lg>.lg-main{border-radius:16px 0 0 16px;}
+  .lg>.lg-cx{border-radius:0 16px 16px 0;margin-left:-1px;padding:5px 8px;font-size:9px;}
 
   .seg{display:flex;background:var(--line2);border-radius:9px;padding:3px;margin:4px 14px 12px;}
   .seg button{flex:1;background:transparent;border:none;color:var(--mute);padding:7px;border-radius:7px;font-size:13px;font-weight:700;}
@@ -3752,40 +3754,106 @@ function renderLeadGenMenu(leadGen, isOn){
   return html;
 }
 
+// Owner, 2026-10-03: three groups -- Handy Andy, Dom's, Lead Gen. The main
+// button shows the whole group; its caret picks one branch / brand.
+// Branches are the business's own service_areas (matched by name).
+const GROUP_BRANCHES = {
+  'handy-andy': ['Austin','Denver','DFW','Houston','Los Angeles','Phoenix','San Antonio'],
+  'doms': ['Denver','Oklahoma City','Tulsa'],
+};
+const BRANCH_SHORT = { 'Oklahoma City':'OKC', 'Los Angeles':'LA', 'San Antonio':'SA' };
+let lgAll=false, pendingBranch=null, _grpTech={};
+function isLeadGenBiz(b){ return !!b && !OWN_CHIP_SLUGS.includes(b.slug); }
+function leadGenAllOn(){ return lgAll && isLeadGenBiz(current); }
+function leadGenSlugs(){ return businesses.concat(viewBusinesses).filter(isLeadGenBiz).map(b=>b.slug); }
+function fpMerge(list){
+  const fp={count:0,maxUpdatedAt:''};
+  for(const p of list){ if(!p) continue; fp.count+=p.count||0; if((p.maxUpdatedAt||'')>fp.maxUpdatedAt) fp.maxUpdatedAt=p.maxUpdatedAt; }
+  return fp;
+}
+// Every lead-gen brand's calendar, merged. Each booking keeps its own slug so
+// it opens against the right business (openCalBooking).
+async function fetchLeadGenCalendar(from, to){
+  const rs=await Promise.all(leadGenSlugs().map(sl=>api('calendar',{ params:{ business:sl, from, to } }).then(d=>[sl,d]).catch(()=>null)));
+  const out={ technicians:[], areas:[], bookings:[], ghost_bookings:[] }, seen=new Set(), fps=[];
+  _grpTech={};
+  for(const r of rs){
+    if(!r) continue;
+    const [sl,d]=r;
+    _grpTech[sl]=d.technicians||[];
+    for(const t of (d.technicians||[])) if(!seen.has(t.id)){ seen.add(t.id); out.technicians.push(t); }
+    for(const bk of (d.bookings||[])) out.bookings.push(Object.assign(bk,{ _slug:sl }));
+    fps.push(d.fingerprint);
+  }
+  out.bookings.sort((x,y)=>String(x.scheduled_at).localeCompare(String(y.scheduled_at)));
+  out.fingerprint=fpMerge(fps);
+  return out;
+}
+function openCalBooking(b){
+  if(!b._slug || !current || b._slug===current.slug) return openBooking(b);
+  const biz=businesses.concat(viewBusinesses).find(x=>x.slug===b._slug);
+  if(!biz) return openBooking(b);
+  const prev=current, prevTech=techCache;
+  current=biz; techCache=_grpTech[b._slug]||[];
+  const m=document.getElementById('bkModal');
+  const mo=new MutationObserver(()=>{ if(m.classList.contains('hidden')){ mo.disconnect(); current=prev; techCache=prevTech; } });
+  mo.observe(m,{ attributes:true, attributeFilter:['class'] });
+  openBooking(b);
+}
+
 function renderSwitcher(){
   const el = document.getElementById('switcher');
   const allBiz = businesses.concat(viewBusinesses);
   if(allBiz.length<2){ el.innerHTML=''; return; }
   const own     = OWN_CHIP_SLUGS.map(sl => allBiz.find(b => b.slug === sl)).filter(Boolean);
   const leadGen = allBiz.filter(b => !OWN_CHIP_SLUGS.includes(b.slug));
-  const isOn    = b => current && b.slug === current.slug;
+  const lgOn    = leadGenAllOn();
+  const isOn    = b => !lgOn && current && b.slug === current.slug;
+  const areaName = () => { const a=filterArea && areaCache.find(x=>x.id===filterArea); return a ? a.name : ''; };
+  const wrap = (key, label, on, menu) => `<span class="lg" data-wrap="${key}">
+      <button type="button" class="lg-main ${on?'on':''}" data-grp="${key}">${esc(label)}</button><button type="button" class="lg-cx ${on?'on':''}" data-cx="${key}" aria-label="Choose">▾</button>
+      <span class="lg-menu">${menu}</span>
+    </span>`;
 
-  let html = own.map(b =>
-    `<button data-slug="${b.slug}" class="${isOn(b)?'on':''}">${esc(b.name)}</button>`).join('');
+  let html = own.map(b => {
+    const on = isOn(b);
+    const br = on ? areaName() : '';
+    const items = (GROUP_BRANCHES[b.slug]||[]).map(n =>
+      `<button data-branch="${esc(n)}" data-bslug="${b.slug}" class="${on&&br===n?'on':''}">${esc(n)}</button>`).join('');
+    return wrap(b.slug, br ? `${b.name} · ${BRANCH_SHORT[br]||br}` : b.name, on, items);
+  }).join('');
 
   if(leadGen.length){
-    // Label shows the selected microsite so you can always see where you are
-    // without opening the menu.
-    const sel = leadGen.find(isOn);
-    html += `<span class="lg" id="lgWrap">
-      <button type="button" id="lgToggle" class="${sel?'on':''}">
-        ${esc(sel ? sel.name : 'Lead Gen')}<span class="cx">▾</span>
-      </button>
-      <span class="lg-menu" id="lgMenu">${renderLeadGenMenu(leadGen, isOn)}</span>
-    </span>`;
+    const sel = lgOn ? null : leadGen.find(isOn);
+    html += wrap('leadgen', sel ? `Lead Gen · ${sel.name}` : 'Lead Gen', lgOn || !!sel, renderLeadGenMenu(leadGen, isOn));
   }
   el.innerHTML = html;
 
-  el.querySelectorAll('button[data-slug]').forEach(btn =>
-    btn.addEventListener('click', () => switchToBusiness(btn.dataset.slug)));
+  const go = (fn) => { filterArea=''; pendingBranch=null; fn(); };
+  el.querySelectorAll('button[data-grp]').forEach(btn => btn.addEventListener('click', () => go(() => {
+    const k=btn.dataset.grp;
+    if(k==='leadgen'){ lgAll=true; switchToBusiness(isLeadGenBiz(current) ? current.slug : leadGen[0].slug); }
+    else { lgAll=false; switchToBusiness(k); }
+  })));
+  el.querySelectorAll('button[data-branch]').forEach(btn => btn.addEventListener('click', () => go(() => {
+    lgAll=false; pendingBranch={ slug:btn.dataset.bslug, name:btn.dataset.branch }; switchToBusiness(btn.dataset.bslug);
+  })));
+  el.querySelectorAll('button[data-slug]').forEach(btn => btn.addEventListener('click', () => go(() => {
+    lgAll=false; switchToBusiness(btn.dataset.slug);
+  })));
 
-  const wrap = el.querySelector('#lgWrap'), toggle = el.querySelector('#lgToggle');
-  if(wrap && toggle){
-    toggle.addEventListener('click', e => { e.stopPropagation(); wrap.classList.toggle('open'); });
+  const wraps = [...el.querySelectorAll('.lg')];
+  el.querySelectorAll('button[data-cx]').forEach(t => t.addEventListener('click', e => {
+    e.stopPropagation();
+    const w = t.parentElement, open = !w.classList.contains('open');
+    wraps.forEach(x => x.classList.remove('open'));
+    if(open) w.classList.add('open');
+  }));
+  if(wraps.length){
     // Close on any outside click. Registered once per render and removed on the
     // first fire, so repeated renders cannot stack listeners.
     document.addEventListener('click', function away(ev){
-      if(!wrap.contains(ev.target)) wrap.classList.remove('open');
+      wraps.forEach(w => { if(!w.contains(ev.target)) w.classList.remove('open'); });
       document.removeEventListener('click', away);
     });
   }
@@ -3932,11 +4000,13 @@ async function renderSchedule(silent){
   document.getElementById('jobSearchWrap').style.display='flex';
   if(!silent && calMode==='jobs') view.innerHTML='<div class="empty">Loading…</div>';
   try{
-    const d = await api('calendar', { params:{ business: current.slug, from, to } });
+    const d = leadGenAllOn() ? await fetchLeadGenCalendar(from, to) : await api('calendar', { params:{ business: current.slug, from, to } });
     if(mySeq!==_scheduleRenderSeq) return; // a newer call already landed — this response is stale, discard it
     techCache=d.technicians||[]; areaCache=d.areas||[]; calBookings=d.bookings||[]; ghostBookings=d.ghost_bookings||[];
     if(current && d.business && d.business.timezone) current.timezone=d.business.timezone;
     calFp=d.fingerprint||null;
+    if(pendingBranch){ if(pendingBranch.slug===current.slug) filterArea=areaIdByName(pendingBranch.name)||''; pendingBranch=null; renderSwitcher(); }
+    if(leadGenAllOn()) document.getElementById('bizName').textContent='Lead Gen';
     renderSidebarFilters();
     renderCalBody();
   }catch(err){ if(!silent) view.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
@@ -3953,7 +4023,7 @@ async function pollScheduleIfChanged(){
   try{
     const dates = currentWeekDates();
     const [from,to] = rangeBounds(dates);
-    const p = await api('calendar_probe', { params:{ business: current.slug, from, to } });
+    const p = leadGenAllOn() ? fpMerge(await Promise.all(leadGenSlugs().map(sl=>api('calendar_probe',{ params:{ business:sl, from, to } })))) : await api('calendar_probe', { params:{ business: current.slug, from, to } });
     if(p.count!==calFp.count || p.maxUpdatedAt!==calFp.maxUpdatedAt) await renderSchedule(true);
   }catch(err){ await renderSchedule(true); }
 }
@@ -3961,13 +4031,13 @@ async function pollScheduleIfChanged(){
 function renderSidebarFilters(){
   // Hide territories section for Doms (single-territory business)
   const terr=document.getElementById('territoriesSection');
-  if(current && current.slug==='doms') { terr.style.display='none'; }
+  if(current && (current.slug==='doms' || leadGenAllOn())) { terr.style.display='none'; }
   else {
     terr.style.display='';
     const tl=document.getElementById('territoryList');
     tl.innerHTML=`<button class="sl ${filterArea===''?'on':''}" data-area=""><span class="ic">${ic('location')}</span> All Territories</button>`+
       areaCache.map(a=>`<button class="sl ${filterArea===a.id?'on':''}" data-area="${a.id}"><span class="ic">${ic('location')}</span> ${esc(a.name)}</button>`).join('');
-    tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); }));
+    tl.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ filterArea=b.dataset.area; renderSidebarFilters(); renderCalBody(); renderSwitcher(); }));
   }
 
   const al=document.getElementById('assignList');
@@ -4210,7 +4280,7 @@ function renderJobsView(dates){
   if(calView==='day'){ view.innerHTML=dayGrid(anchorDate); }
   else { view.innerHTML=`<div class="week">${dates.map(dayColumn).join('')}</div>`; }
   document.querySelectorAll('.evt[data-id]').forEach(el=>el.addEventListener('click',()=>{
-    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openCalBooking(b);
   }));
   document.querySelectorAll('.evt-ghost-open').forEach(el=>el.addEventListener('click',()=>openAlertJob(el.dataset.ghostSlug, el.dataset.ghostId)));
 }
@@ -4281,7 +4351,7 @@ function renderListView(dates){
   html+='</div>';
   view.innerHTML = any ? html : '<div class="empty">No jobs this week.</div>';
   document.querySelectorAll('.job.evt-row[data-id]').forEach(el=>el.addEventListener('click',()=>{
-    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openCalBooking(b);
   }));
 }
 
@@ -4369,7 +4439,7 @@ async function renderAvailabilityGrid(dates){
   view.innerHTML=html;
   view.querySelectorAll('.tl-day').forEach(el=>el.addEventListener('click',()=>{ availTlDay=el.dataset.ds; renderAvailabilityGrid(dates); }));
   view.querySelectorAll('.tl-blk[data-id]').forEach(el=>el.addEventListener('click',()=>{
-    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openBooking(b);
+    const b=calBookings.find(x=>x.id===el.dataset.id); if(b) openCalBooking(b);
   }));
   // Edit clicks bind only on techs whose company this login can act on (the
   // .ro rows have no binding and no button role).
