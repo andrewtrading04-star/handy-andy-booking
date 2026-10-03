@@ -176,6 +176,48 @@ export const GMB_LOCATIONS = [
     notifyEmail: 'domstvmounting@gmail.com',
     mailboxEnv: 'GMAIL_USER_2',
   },
+  // Bought from Dom 2026-10 with the OKC and Tulsa brands. Their review alerts
+  // are assumed to land in the same Dom's inbox (unconfirmed as of 2026-10-03):
+  // once three Dom's listings share a mailbox, resolveLocation() falls through
+  // to the EXACT display name, which is distinct for all three. Before these
+  // entries existed, an OKC/Tulsa alert in that inbox would have been filed as
+  // Colorado (the inbox alone resolved to the only Dom's listing).
+  // cid here is the DECIMAL Google CID (no g.page token known yet); mapsUrl is
+  // the listing page, never the write-a-review dialog.
+  {
+    key: 'doms-okc',
+    name: "Dom's TV Mounting OKC",
+    displayName: 'Doms TV Mounting OKC',
+    business: 'doms',
+    metro: 'okc',
+    cid: '516566321774452060',
+    reviewUrl: null,
+    mapsUrl: 'https://www.google.com/maps?cid=516566321774452060',
+    phone: '+1 405-657-6412',
+    address: null,
+    rating: 5.0,
+    reviewCount: 268,
+    statsVerified: '2026-10-03',
+    notifyEmail: 'domstvmounting@gmail.com',
+    mailboxEnv: 'GMAIL_USER_2',
+  },
+  {
+    key: 'doms-tulsa',
+    name: "Dom's TV Mounting Tulsa",
+    displayName: 'Doms TV Mounting Tulsa',
+    business: 'doms',
+    metro: 'tulsa',
+    cid: '14065283668418833000',
+    reviewUrl: null,
+    mapsUrl: 'https://www.google.com/maps?cid=14065283668418833000',
+    phone: '+1 918-237-3122',
+    address: null,
+    rating: 4.8,
+    reviewCount: 51,
+    statsVerified: '2026-10-03',
+    notifyEmail: 'domstvmounting@gmail.com',
+    mailboxEnv: 'GMAIL_USER_2',
+  },
 ];
 
 export const LOCATIONS_BY_KEY = new Map(GMB_LOCATIONS.map((l) => [l.key, l]));
