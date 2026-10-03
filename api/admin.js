@@ -105,6 +105,7 @@ function bookingStripePk(slug) {
 import { uploadImage, deleteImage, uploadPrivateImage, readPrivateImage, notePhotoContentType } from './_lib/storage.js';
 import { denverToday, noteIsLive, noteIsScheduled, resolveSendAt, cleanNotePhotos, isPrivateNotePhoto, NOTE_PHOTO_PREFIX } from './_lib/notes.js';
 import { computeJobPay, paymentState, PAY_DATE_OFFSET_DAYS, isJuan, JUAN_BRACKET_ZERO_FROM } from './_lib/payroll.js';
+import { partsMoney, payrollSunday, makePartsPlan, savePartsCorrection, settlePartsAdjustment, partsCorrectionsFor, partsPaymentSnapshot, partsAdjustmentDetail } from './_lib/payroll-parts.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { couponAmountFor, couponCodesFor, couponCacheClear, multiTvDiscountConfigFor, multiTvDiscountConfigCacheClear } from './book.js';
 
@@ -645,6 +646,9 @@ export default async function handler(req, res) {
       case 'bracket_set_status': return await bracketSetStatus(req, res, db, auth, body);
       case 'payroll': return await payroll(req, res, db, auth);
       case 'payroll_combined': return await payrollCombined(req, res, db, auth);
+      case 'payroll_parts_preview':
+      case 'payroll_parts_save':
+      case 'payroll_parts_settle': return await payrollParts(req, res, db, auth, body, action);
       case 'actual_profit_save': return await actualProfitSave(req, res, db, auth);
       case 'office_pay_save': return await officePaySave(req, res, db, auth);
       case 'office_pay_rate_save': return await officePayRateSave(req, res, db, auth);
@@ -14919,6 +14923,8 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
     }
   } catch (e) { console.warn('[payroll] review bonus lookup failed:', e.message); }
 
+  const partsCorrections=await partsCorrectionsFor(db,parsedWeek,{businessId:biz.id});
+
   // ── One-off bonuses (migration 0105) ─────────────────────────────────────
   // The generic version of the block above: any number per tech, each with its
   // own label. Same pseudo-job treatment for the same reason — it has to reach
@@ -14926,35 +14932,40 @@ async function computeBizPayroll(db, biz, parsedWeek, weekEnd) {
   // bonus in their app that never actually gets paid. awarded_on is a plain
   // date, so a simple inclusive range matches the Sun-Sat week exactly.
   try {
-    const { data: bonuses } = await db.from('tech_bonuses')
-      .select('id, technician_id, amount, reason, awarded_on, technician:technicians!technician_id(name, business_id)')
+    const { data: bonuses, error: bonusError } = await db.from('tech_bonuses')
+      .select('id, technician_id, amount, reason, message, awarded_on, technician:technicians!technician_id(name, business_id)')
       .gte('awarded_on', parsedWeek).lte('awarded_on', weekEnd);
+    if(bonusError) throw bonusError;
     for (const bns of bonuses || []) {
       if (bns.technician?.business_id !== biz.id) continue;   // shows under the tech's own business only
-      const amt = Math.round(Number(bns.amount) || 0);
+      const amt = partsMoney(Number(bns.amount) || 0);
       if (!amt) continue;
+      const detail=partsAdjustmentDetail(partsCorrections,bns,parsedWeek);
+      if(amt<0 && String(bns.message||'').startsWith('Parts reimbursement correction') && !detail) continue;
       const tId = bns.technician_id;
       if (!techPayroll[tId]) techPayroll[tId] = { name: bns.technician?.name || 'Technician', jobs: [], deferred: [], total: 0 };
       techPayroll[tId].jobs.push({
         id: `bonus-${bns.id}`,
         bonus: true,   // the client excludes bonus rows from "jobs worked" counts
         customer_name: bns.reason || 'Bonus',
-        service: 'Bonus',
+        service: amt<0?'Payroll adjustment':'Bonus',
+        adjustment:amt<0,
+        ...(detail||{}),
         time: '',
         scheduled_at: bns.awarded_on,
         business_name: biz.name,
         business_slug: biz.slug,
         tech_pay: amt,
-        breakdown: [{ label: bns.reason || 'Bonus', amount: amt }],
+        breakdown: [{ label: amt<0?(detail?.message||bns.message||bns.reason):(bns.reason||'Bonus'), amount: amt }],
         flags: [],
         needs_review: false,
       });
       techPayroll[tId].total += amt;
     }
-  } catch (e) { console.warn('[payroll] tech bonus lookup failed:', e.message); }
+  } catch (e) { if(partsCorrections.length) throw e; console.warn('[payroll] tech bonus lookup failed:', e.message); }
 
   return Object.entries(techPayroll)
-    .map(([id, t]) => ({ ...t, _id: id }))
+    .map(([id, t]) => ({ ...t, _id: id, total:partsMoney(t.total), paid_snapshot:partsPaymentSnapshot(partsCorrections,id,parsedWeek) }))
     .filter(t => t.jobs.length > 0 || t.deferred.length > 0);
 }
 
@@ -15146,6 +15157,43 @@ async function officePaySave(req, res, db, auth) {
   return res.status(200).json({ ok: true, week_start, field, amount: clear ? null : Number(amount) });
 }
 
+
+// Owner-recorded parts corrections. Amounts already paid remain in a dated
+// snapshot; the recovery is a fixed-week extra-pay row, never a rolling debt.
+async function payrollParts(req, res, db, auth, body, action) {
+  if (auth.role !== 'owner') return res.status(403).json({error:'Owner only'});
+  const write=action!=='payroll_parts_preview';
+  if ((write && req.method!=='POST') || (!write && req.method!=='GET')) return res.status(405).json({error:'Method not allowed'});
+  const input=write?body:req.query;
+  let biz; try { biz=await resolveBusiness(db,auth,input.business); } catch(e) { return bail(res,e); }
+  const {data:b,error}=await db.from('bookings').select('id,business_id,scheduled_at,status,notes,metadata,payment_method,technician_id,secondary_technician_id,customer:customers(name)').eq('id',input.id).eq('business_id',biz.id).maybeSingle();
+  if(error) throw error;
+  if(!b) return res.status(404).json({error:'Booking not found'});
+  if(action==='payroll_parts_settle') return res.status(200).json(await settlePartsAdjustment(db,b,input.adjustment_id));
+  if(b.status!=='completed'||!b.technician_id||!b.secondary_technician_id||b.technician_id===b.secondary_technician_id) return res.status(400).json({error:'Select a completed job with two different assigned technicians.'});
+  if(b.payment_method==='cash') return res.status(400).json({error:'Cash jobs need a separate cash reconciliation before correcting parts reimbursement.'});
+  const sourceWeek=payrollSunday(String(b.scheduled_at).slice(0,10));
+  const weekEnd=addDaysStr(sourceWeek,6), nextWeek=addDaysStr(sourceWeek,7);
+  const {data:techRows,error:techErr}=await db.from('technicians').select('id,name,business_id').in('id',[b.technician_id,b.secondary_technician_id]);
+  if(techErr) throw techErr;
+  if(techRows.length!==2||techRows.some(t=>t.business_id!==biz.id)) return res.status(400).json({error:'Cross-company payroll corrections need separate payment records.'});
+  const prior=b.metadata?.payroll_parts;
+  if(prior && !write) return res.status(200).json({existing:prior});
+  const source=prior?null:await computeBizPayroll(db,biz,sourceWeek,weekEnd);
+  const techs=[b.technician_id,b.secondary_technician_id].map(id=>{
+    const t=techRows.find(x=>x.id===id), pay=source?.find(x=>x._id===id);
+    const saved=prior?.techs.find(x=>x.id===id);
+    const job=pay?.jobs.find(x=>x.id===b.id);
+    return {...t,job_pay:saved?.original_job_pay??job?.tech_pay,weekly_total:saved?.paid_week_total??pay?.total};
+  });
+  if(techs.some(t=>!Number.isFinite(t.job_pay))) return res.status(400).json({error:'The original job pay could not be verified.'});
+  const preview={id:b.id,source_week:sourceWeek,next_week:nextWeek,customer_name:b.customer?.name||'Customer',job_date:String(b.scheduled_at).slice(0,10),techs};
+  if(!write) return res.status(200).json(preview);
+  const plan=makePartsPlan(preview,input,adminAuthorName(auth));
+  const result=await savePartsCorrection(db,b,plan);
+  return res.status(200).json({ok:true,correction:result});
+}
+
 async function payroll(req, res, db, auth) {
   if (auth.role !== 'owner') {
     return res.status(403).json({ error: 'Owner only' });
@@ -15214,6 +15262,7 @@ async function payrollCombined(req, res, db, auth) {
       m.jobs.push(...t.jobs);
       m.deferred.push(...t.deferred);
       m.total += t.total;
+      if(t.paid_snapshot) m.paid_snapshot=t.paid_snapshot;
     }
   }
   const payDate = addDaysStr(weekEnd, PAY_DATE_OFFSET_DAYS);

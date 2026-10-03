@@ -2209,6 +2209,7 @@ async function showPayroll(){
   }
 }
 
+function techPayMoney(value){const n=Number(value)||0;return (n<0?'-$':'$')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:Number.isInteger(n)?0:2,maximumFractionDigits:2});}
 function renderPayroll(data){
   const v=document.getElementById('payrollView');
   const weekEnd=addDaysStr(payrollWeekStart,6);
@@ -2230,7 +2231,7 @@ function renderPayroll(data){
   const reviewCount=paidJobs.filter(j=>j.needs_review).length;
 
   const jobRows=paidJobs.map(j=>{
-    const bd=(j.breakdown||[]).map(b=>`<div style="display:flex;justify-content:space-between;color:var(--mute);font-size:12px;padding:1px 0;"><span>${esc(b.label)}</span><span>$${b.amount}</span></div>`).join('');
+    const bd=(j.breakdown||[]).map(b=>`<div style="display:flex;justify-content:space-between;color:var(--mute);font-size:12px;padding:1px 0;"><span>${esc(b.label)}</span><span>${techPayMoney(b.amount)}</span></div>`).join('');
     const fl=(j.flags||[]).map(f=>`<div style="color:var(--amber);font-size:12px;margin-top:3px;">⚠ ${esc(f)}</div>`).join('');
     return `
     <div style="padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;">
@@ -2241,7 +2242,7 @@ function renderPayroll(data){
           ${bd}
           ${fl}
         </div>
-        <div style="text-align:right;font-weight:800;font-size:15px;">$${j.tech_pay}</div>
+        <div style="text-align:right;font-weight:800;font-size:15px;">${techPayMoney(j.tech_pay)}</div>
       </div>
     </div>`;}).join('');
 
@@ -2264,8 +2265,8 @@ function renderPayroll(data){
       <h3>Week of ${fmtDs(payrollWeekStart,{month:'short',day:'numeric'})} – ${fmtDs(weekEnd,{month:'short',day:'numeric'})}</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:12px;">
         <div>
-          <div style="color:var(--mute);font-size:12px;">Next payout</div>
-          <div style="font-size:20px;font-weight:800;color:var(--green);">$${data.total}</div>
+          <div style="color:var(--mute);font-size:12px;">${data.paid_snapshot?'Corrected earnings':'Next payout'}</div>
+          <div style="font-size:20px;font-weight:800;color:var(--green);">${techPayMoney(data.total)}</div>
         </div>
         <div>
           <div style="color:var(--mute);font-size:12px;">Pay date</div>
@@ -2273,10 +2274,11 @@ function renderPayroll(data){
         </div>
         ${mpRow}
       </div>
+      ${data.paid_snapshot?`<div style="font-size:13px;color:var(--mute);">Already paid: ${techPayMoney(data.paid_snapshot.amount)}. ${data.paid_snapshot.corrections.map(c=>`${techPayMoney(c.deduction)} parts recovery scheduled in the week of ${esc(c.target_week)}.`).join(' ')}</div>`:''}
     </div>
 
     <div class="card">
-      <h3>Paid Jobs (${paidJobs.length})${reviewCount?` <span style="color:var(--amber);font-size:11px;">· ${reviewCount} need review</span>`:''}</h3>
+      <h3>Jobs and payroll adjustments (${paidJobs.filter(j=>!j.bonus).length} jobs)${reviewCount?` <span style="color:var(--amber);font-size:11px;">· ${reviewCount} need review</span>`:''}</h3>
       ${paidJobs.length ? jobRows : '<div class="sub" style="color:var(--mute);">No completed, paid jobs this week.</div>'}
     </div>
 
