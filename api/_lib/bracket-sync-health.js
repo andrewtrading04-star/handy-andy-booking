@@ -262,6 +262,8 @@ export function evaluateBracketSyncHealth({ state, dispatch }, now = new Date())
 
   // Secret pairs.
   for (const x of state.misconfigured || []) {
+    // Owner deferred LA inbox setup; keep scan diagnostics but omit its setup notification.
+    if (String(x.idx) === '8') continue;
     if (x.missing === 'both') push({
       key: `config:${x.idx}`, level: 'amber', title: `Inbox ${x.idx} is not configured`,
       detail: 'The scan expects 7 inboxes and this slot is blank',
