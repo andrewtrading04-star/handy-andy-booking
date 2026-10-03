@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {digitsOf, prettyPhone, GRASSHOPPER_LINES} from '../api/_lib/grasshopper.js';
 
 const source = fs.readFileSync(new URL('../api/admin.js', import.meta.url), 'utf8');
 const fn = source.slice(source.indexOf('async function myCallPerformance('), source.indexOf('// Backs the click-a-day-to-see-the-calls drill-down'));
@@ -21,7 +22,7 @@ test('secretary performance returns only her business, audits, and audit notes',
     };
     return q;
   }};
-  const ctx = vm.createContext({ Promise, Math, Object, Date, console,
+  const ctx = vm.createContext({ Promise, Math, Object, Date, console, digitsOf, prettyPhone, GRASSHOPPER_LINES,
     displayNameFor: () => 'Heather',
     localDayStartUTC: (_tz, offset) => new Date(Date.UTC(2026, 8, 16 + offset)),
   });

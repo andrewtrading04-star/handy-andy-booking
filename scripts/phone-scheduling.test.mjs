@@ -7,7 +7,7 @@ const html=fs.readFileSync(new URL('../public/admin.html',import.meta.url),'utf8
 function cut(start,end){const a=html.indexOf(start),b=html.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,`Missing source: ${start}`);return html.slice(a,b);}
 const helpers=cut('function cwAfterHoursFeeFor(', '// The Frame/Gallery stepper');
 const branch=cut("  if(s==='schedule'){","  if(s==='recap'){");
-const flush=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};
+const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
 function setup({mandatory=false,service='TV Mounting',zip='80202',area='Denver',now='2026-09-16T12:00:00Z'}={}){
   const nodes=new Map(),requests=[],renders=[],tracks=[];
   class Element{
@@ -32,9 +32,9 @@ function setup({mandatory=false,service='TV Mounting',zip='80202',area='Denver',
   const node=id=>{if(!nodes.has(id))nodes.set(id,new Element(id));return nodes.get(id);};
   const draft={id:'call-1',business:'doms',service,zip,areaName:area,step:'schedule',_view:0,_visible:true,resolution:null,calMonth:null,prefDate:'',selectedSlot:null,availDates:null};
   class FixedDate extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return new Date(now).getTime();}}
-  const ctx=vm.createContext({Date:FixedDate,Intl,Set,Promise,console,callWiz:draft,current:{slug:'doms',timezone:'America/Denver'},
+  const ctx=vm.createContext({Date:FixedDate,Intl,Set,Promise,AbortController,console,callWiz:draft,current:{slug:'doms',timezone:'America/Denver'},
     document:{getElementById:node},esc:String,cwBusiness:()=>({slug:'doms',timezone:'America/Denver'}),nbSecondTechMode:()=>mandatory?'mandatory':'none',nbSelectedLiftingKind:()=>null,
-    cwIsActive:(d,view)=>ctx.callWiz===d&&d._visible&&d._view===view,
+    cwIsActive:(d,view)=>ctx.callWiz===d&&d._visible&&(view==null||d._view===view),
     cwInvalidatePrice:d=>{d.priceInvalidations=(d.priceInvalidations||0)+1;},callWizScript:s=>s,cwBackBtnHtml:()=>'',cwWireBack:fn=>{ctx.back=fn;},cwBackFromSchedule:()=>{draft.step='tvopts';},
     cwTrack:(...args)=>tracks.push(args),cwSlotStart:s=>s.split('–')[0].trim(),cwSpokenAmount:String,
     renderCallWiz:()=>renders.push(ctx.callWiz.step),
@@ -149,4 +149,73 @@ test('authoritative response timezone replaces the area fallback only for its ZI
   const f=setup({zip:'99999',area:null});await f.mount();f.dates()[0].resolve({dates:[],timezone:'America/Los_Angeles'});await flush();
   assert.equal(f.ctx.cwScheduleTimezone(f.draft),'America/Los_Angeles');assert.match(f.node('cwTimeZone').textContent,/Pacific time/);
   f.draft.zip='78701';assert.equal(f.ctx.cwScheduleTimezone(f.draft),'America/Chicago');
+});
+
+test('network fetch failure retries once automatically and recovers the calendar',async()=>{
+  const f=setup();await f.mount();f.dates()[0].reject(new TypeError('Failed to fetch'));await flush();
+  assert.equal(f.dates().length,2);assert.equal(f.dates()[1].options.timeoutMs,8000);
+  await f.calendar();assert.ok(f.date('2026-09-17'));assert.equal(f.draft.calReason,null);
+});
+
+test('repeated network failures stop after two attempts and retain a working manual retry',async()=>{
+  const f=setup();await f.mount();f.dates()[0].reject(new TypeError('Failed to fetch'));await flush();
+  f.dates()[1].reject(new TypeError('Failed to fetch'));await flush();
+  assert.equal(f.dates().length,2);assert.match(f.node('cwCalNote').innerHTML,/connection dropped/);
+  const retry=f.node('cwCalRetry').fire();f.dates()[2].resolve({dates:['2026-09-17']});await retry;assert.ok(f.date('2026-09-17'));
+});
+
+test('timeouts and temporary server errors retry but authentication and validation errors do not',async()=>{
+  for(const error of [Object.assign(Error('timeout'),{code:'request_timeout'}),Object.assign(Error('busy'),{status:503}),Object.assign(Error('expired'),{status:401}),Object.assign(Error('invalid'),{status:400})]){
+    const f=setup();await f.mount();f.dates()[0].reject(error);await flush();
+    assert.equal(f.dates().length,[401,400].includes(error.status)?1:2);
+    if(f.dates().length===2)await f.calendar();
+  }
+});
+
+test('changing month cancels the obsolete network request and does not retry it',async()=>{
+  const f=setup();await f.mount();const old=f.dates()[0];await f.node('cwCalNext').fire();
+  assert.equal(old.options.signal.aborted,true);old.reject(new TypeError('Failed to fetch'));await flush();
+  assert.equal(f.dates().length,2);await f.calendar(['2026-10-02']);assert.ok(f.date('2026-10-02'));
+});
+
+test('changing selected technician clears old choices and old responses cannot repaint its calendar',async()=>{
+  const f=setup();await f.mount();const old=f.dates()[0];
+  f.draft.technicianId='tech-2';await f.mount();assert.equal(old.options.signal.aborted,true);
+  assert.equal(f.dates()[1].options.params.technician_id,'tech-2');assert.equal(f.dates()[1].options.params.strict_roster,'1');
+  f.dates()[1].resolve({dates:['2026-09-18'],technicians:[{id:'tech-2',name:'Gregory'}]});await flush();
+  old.resolve({dates:['2026-09-17']});await flush();
+  assert.ok(f.date('2026-09-18'));assert.equal(f.date('2026-09-17'),undefined);
+  assert.match(f.node('cwAvailabilityScope').textContent,/Gregory only/);assert.equal(f.node('cwTechPick').value,'tech-2');
+});
+
+test('fresh bundled month renders and selects times with zero extra network requests',async()=>{
+  const f=setup();await f.mount();f.dates()[0].resolve({dates:['2026-09-17'],technicians:[{id:'tech-1',name:'Steve'}],
+    slots_by_date:{'2026-09-17':[{slot_key:'s2',label:'11 AM',start:'11:00',end:'13:00'}]}});await flush();
+  await f.date('2026-09-17').fire();assert.equal(f.slots().length,0);await f.slot('s2').fire();
+  assert.equal(f.ctx.cwSlotIsVerified(f.draft),true);assert.equal(f.requests.length,1);
+  assert.match(f.node('cwAvailabilityScope').textContent,/eligible technicians/);
+});
+
+test('expired snapshot requires fresh times and a removed slot cannot be selected',async()=>{
+  const f=setup();await f.mount();f.dates()[0].resolve({dates:['2026-09-17'],slots_by_date:{'2026-09-17':[{slot_key:'s2',label:'11 AM',start:'11:00'}]}});await flush();
+  f.draft._calendarSnapshot._checkedAt-=15000;
+  const pending=f.date('2026-09-17').fire();assert.equal(f.slots().length,1);
+  f.slots()[0].resolve({slots:[]});await pending;assert.equal(f.slot('s2'),undefined);assert.equal(f.ctx.cwSlotIsVerified(f.draft),false);
+});
+
+test('bundled times drop elapsed and past slots using the customer timezone',async()=>{
+  const f=setup({now:'2026-09-16T17:00:00Z'});const scope=f.ctx.cwScheduleKey(f.draft);
+  f.draft._calendarSnapshot={_scope:scope,_month:'2026-09',_checkedAt:new Date('2026-09-16T17:00:00Z').getTime(),slots_by_date:{
+    '2026-09-16':[{slot_key:'s2',label:'11 AM',start:'11:00'},{slot_key:'s3',label:'2 PM',start:'14:00'}],
+    '2026-09-15':[{slot_key:'s5',label:'8 PM',start:'20:00'}]}};
+  assert.deepEqual(Array.from(f.ctx.cwFreshMonthSlots(f.draft,'2026-09-16').slots,s=>s.slot_key),['s3']);
+  assert.equal(f.ctx.cwFreshMonthSlots(f.draft,'2026-09-15').slots.length,0);
+});
+
+test('prefetch shares its in-flight request with the visible calendar and failures are evicted',async()=>{
+  const f=setup();const warm=f.ctx.cwMonthAvailability(f.draft,'2026-09');await f.mount();assert.equal(f.dates().length,1);
+  f.dates()[0].resolve({dates:['2026-09-17']});await warm;await flush();assert.ok(f.date('2026-09-17'));
+  const again=f.ctx.cwMonthAvailability(f.draft,'2026-09');await again;assert.equal(f.dates().length,1);
+  const next=f.ctx.cwMonthAvailability(f.draft,'2026-10');const failure=assert.rejects(next,/bad response/);
+  f.dates()[1].reject(Error('bad response'));await failure;assert.equal(f.draft._calendarRequest,null);
 });

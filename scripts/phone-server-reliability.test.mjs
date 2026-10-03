@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {isHoustonBooking} from '../api/_lib/houston-bonus.js';
+import {hasDigits} from '../api/_lib/address.js';
+import {textConsentFor} from '../api/_lib/sms.js';
+import {SLOTS} from '../api/_lib/availability.js';
 
 const source=fs.readFileSync(new URL('../api/admin.js',import.meta.url),'utf8').replaceAll('\r\n','\n');
 function cut(start,end){const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,`Source boundary: ${start}`);return source.slice(a,b);}
@@ -17,6 +20,7 @@ function database(run){
     const b={select(cols){q.cols=cols;return b;},insert(row){q.op='insert';q.row=row;return b;},update(row){q.op='update';q.row=row;return b;},
       eq(k,v){q.filters.push(['eq',k,v]);return b;},neq(k,v){q.filters.push(['neq',k,v]);return b;},
       ilike(k,v){q.filters.push(['ilike',k,v]);return b;},
+      in(k,v){q.filters.push(['in',k,v]);return b;},order(k,v){q.orders=(q.orders||[]).concat([[k,v]]);return b;},limit(n){q.limit=n;return b;},
       maybeSingle:async()=>execute(),single:async()=>execute(),then(a,z){return Promise.resolve().then(execute).then(a,z);}};
     return b;
   }};
@@ -27,7 +31,7 @@ function context(extra={}){
     resolveBusiness:async()=>({id:'biz-1',slug:'doms',name:"Dom's"}),bail:(res,e)=>res.status(e.status||500).json({error:e.message}),
     // Pipeline inbound-call link (api/_lib/pipeline.js): best-effort, nothing to link here.
     inboundForLiveStart:async()=>({}),
-    adminAuthorName:()=> 'Office',...extra});
+    adminAuthorName:()=> 'Office',textConsentFor,hasDigits,...extra});
 }
 const callSource=cut("const CALL_RESOLUTIONS =",'// Block a caller number')+
   cut('async function callLiveStart(', '// ── Click-to-call bridge')+
@@ -97,6 +101,11 @@ test('saved event with failed summary warns without asking to insert it again',a
   await f.ctx.callEvent({method:'POST'},r,bad.db,{}, {business:'doms',call_id:uuid,event:'price_quoted',meta:{total:250,tv_count:1},step:'recap'});
   assert.equal(r.code,200);assert.equal(r.body.recorded,true);assert.match(r.body.warning,/summary/);
 });
+test('technician selection is accepted as a call event instead of failing in the background',async()=>{
+  const f=calls();await f.start();const r=response();
+  await f.ctx.callEvent({method:'POST'},r,f.db,{name:'Joey'}, {business:'doms',call_id:uuid,event:'technician_picked',step:'schedule',meta:{technician_id:'one'}});
+  assert.equal(r.code,200);assert.equal(f.events[0].event,'technician_picked');assert.equal(f.events[0].meta.technician_id,'one');
+});
 
 const bookingSource=cut('async function bookingCreate(', '// ── Booking update:');
 function bookingStage(start,end,extra={}){
@@ -106,7 +115,7 @@ function bookingStage(start,end,extra={}){
     body:{technician_id:'any',require_available:true},rosterScopes:async()=>[],pickAvailableTech:async()=>null,
     pickAvailableTechPair:async()=>({primaryId:null,secondaryId:null}),pickOwnHelperPrimary:async()=>null,
     bringsOwnSecondTech:()=>false,isSecondaryIneligibleName:()=>false,resolveDefaultSecondary:async()=>null,
-    bookedSlotKeysForTech:async()=>new Set(),singleTechSlotKeys:async()=>new Set(['s5']),dayOfWeekFor:()=>2,...extra});
+    batchTechSlotState:async(_db,ids)=>new Map(ids.map(id=>[id,{booked:new Set(),keys:new Set(['s5'])}])),dayOfWeekFor:()=>2,...extra});
   vm.runInContext('async function stage(){\n'+bookingSource.slice(a,b)+'\nreturn {continued:true};}',ctx);
   return {...f,ctx,r};
 }
@@ -135,14 +144,35 @@ test('primary and secondary occupancy conflicts return the same slot refresh cod
   for(const busy of ['one','two']){
     const f=bookingStage('  if (scheduled_at && (technician_id || secondary_technician_id)) {','  const paymentMethod =',{
       scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:'two',body:{scheduled_date:'2026-09-15',scheduled_slot:'s5'},
-      bookedSlotKeysForTech:async(_db,_biz,id)=>new Set(id===busy?['s5']:[])});
+      batchTechSlotState:async(_db,ids)=>new Map(ids.map(id=>[id,{booked:new Set(id===busy?['s5']:[]),keys:new Set(['s5'])}]))});
     await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'slot_unavailable');
   }
 });
 test('a scheduled-tech override still uses tech_unavailable instead of a slot collision',async()=>{
   const f=bookingStage('  if (scheduled_at && (technician_id || secondary_technician_id)) {','  const paymentMethod =',{
-    scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:null,body:{scheduled_date:'2026-09-15',scheduled_slot:'s5'},singleTechSlotKeys:async()=>new Set()});
+    scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:null,body:{scheduled_date:'2026-09-15',scheduled_slot:'s5'},batchTechSlotState:async()=>new Map([['one',{booked:new Set(),keys:new Set()}]])});
   await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'tech_unavailable');assert.equal(f.r.body.tech_id,'one');
+});
+test('phone booking rejects a selected technician or helper who became off or inactive',async()=>{
+  for(const secondary of [false,true])for(const changed of [{name:'Steve',status:'off'},{name:'Steve',active:false},null]){
+    const db=database(q=>({data:q.filters.some(([,key,value])=>key==='id'&&value===(secondary?'two':'one'))?changed:{name:'Steve',active:true}})).db;
+    const f=bookingStage(staffingStart,staffingEnd,{db,body:{technician_id:'one',secondary_technician_id:secondary?'two':null,require_available:true}});
+    await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'slot_unavailable');
+  }
+});
+test('an explicit schedule override cannot waive a collision on either technician',async()=>{
+  for(const busy of ['one','two']){
+    const f=bookingStage('  if (scheduled_at && (technician_id || secondary_technician_id)) {','  const paymentMethod =',{
+      scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:'two',body:{scheduled_date:'2026-09-15',scheduled_slot:'s5',force_unavailable_ids:['one','two']},
+      batchTechSlotState:async(_db,ids)=>new Map(ids.map(id=>[id,{booked:new Set(id===busy?['s5']:[]),keys:new Set()}]))});
+    await f.ctx.stage();assert.equal(f.r.code,409);assert.equal(f.r.body.code,'slot_unavailable');
+  }
+});
+test('failed final availability check rejects the booking even after assignment succeeded',async()=>{
+  const f=bookingStage('  if (scheduled_at && (technician_id || secondary_technician_id)) {','  const paymentMethod =',{
+    scheduled_at:'2026-09-16T01:00:00Z',technician_id:'one',secondary_technician_id:null,body:{scheduled_date:'2026-09-15',scheduled_slot:'s5'},
+    batchTechSlotState:async()=>{throw Error('Schedule offline');}});
+  await assert.rejects(f.ctx.stage(),/Schedule offline/);assert.equal(f.r.code,undefined);
 });
 test('the database final slot collision also asks the phone to refresh availability',async()=>{
   const f=bookingStage("    if (bErr.code === '23505' && /bookings_tech_slot_unique/",'    const missing =',{
@@ -198,6 +228,36 @@ test('missing card configuration and failed card linkage both warn on the saved 
 test('thrown line-item persistence cannot turn a saved booking into failed create',async()=>{
   const db=database(q=>{if(q.table==='booking_line_items')throw Error('network lost');return {data:null};}).db;
   const f=bookingFinish({db,body:{selections:[{label:'Mounting',quantity:1,price:150}]}});await f.ctx.finish();assert.equal(f.r.body.id,'booking-1');assert.match(f.r.body.warning,/setup did not finish/);
+});
+
+function notificationFinish(extra={}){
+  const pending=new Map();
+  const gate=name=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});pending.set(name,{resolve,reject});return promise;};
+  const db=database(q=>({data:q.table==='technicians'?[{id:'one',name:'Steve'},{id:'two',name:'TK'}]:null})).db;
+  const f=bookingFinish({db,SLOTS,smsConsent:true,c:{name:'Test Caller',phone:'2025550147',email:'test@example.test'},
+    auth:{role:'secretary',name:'Test'},technician_id:'one',secondary_technician_id:'two',scheduled_at:'2026-10-05T14:00:00Z',
+    body:{selections:[],scheduled_date:'2026-10-05',scheduled_slot:'s1'},bookingConfirmMessage:()=> 'Your booking is confirmed',
+    sendSMSResult:()=>gate('customer'),logAutomatedMessage:()=>gate('sms-log'),notifyTechAssigned:(_db,_biz,id)=>gate(id),
+    bookingConfirmationEmail:()=>({subject:'Confirmed',html:'fixture'}),gdsUpsellUrlFor:()=>null,rescheduleUrlFor:()=>null,brandFor:()=>({}),emailConfig:()=>({from:'test@example.test'}),
+    sendEmail:()=>gate('email'),persistConfirmationEmailStatus:()=>gate('email-status'),sendOwnerBookingAlert:()=>gate('owner'),...extra});
+  return {...f,pending};
+}
+test('booking notifications start together and response waits for every send and delivery log',async()=>{
+  const f=notificationFinish(),run=f.ctx.finish();await new Promise(r=>setImmediate(r));
+  assert.deepEqual([...f.pending.keys()].sort(),['customer','email','one','owner','two']);assert.equal(f.r.code,undefined);
+  f.pending.get('customer').resolve({ok:true});f.pending.get('email').resolve({sent:true});await new Promise(r=>setImmediate(r));
+  assert(f.pending.has('sms-log'));assert(f.pending.has('email-status'));
+  for(const name of ['one','two','owner','email-status'])f.pending.get(name).resolve({ok:true});
+  await new Promise(r=>setImmediate(r));assert.equal(f.r.code,undefined,'customer delivery log is still unfinished');
+  f.pending.get('sms-log').resolve();await run;assert.equal(f.r.code,200);assert.equal(f.r.body.warning,undefined);
+});
+test('one failed notification cannot release the response while other deliveries are still running',async()=>{
+  const f=notificationFinish({persistConfirmationEmailStatus:async()=>{throw Error('status offline');}}),run=f.ctx.finish();
+  await new Promise(r=>setImmediate(r));f.pending.get('email').resolve({sent:true});
+  await new Promise(r=>setImmediate(r));assert.equal(f.r.code,undefined);
+  for(const name of ['customer','one','two','owner'])f.pending.get(name).resolve({ok:true});
+  await new Promise(r=>setImmediate(r));assert.equal(f.r.code,undefined);f.pending.get('sms-log').resolve();
+  await run;assert.equal(f.r.code,200);assert.equal(f.r.body.id,'booking-1');assert.match(f.r.body.warning,/notifications/);
 });
 
 const estimateSource=cut('function normalizeTaxRate(', '// Normalize quote line items')+
