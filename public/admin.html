@@ -1994,6 +1994,10 @@
   .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
   .dpl .st-new{--st:#93c5fd;} .dpl .st-talked{--st:#fbbf24;} .dpl .st-quoted{--st:#a3d65c;} .dpl .st-booked{--st:#22d3ee;} .dpl .st-completed{--st:#a78bfa;}
   .dpl .dpl-cell{background:color-mix(in srgb,var(--st) 28%,#fff);border-top:3px solid var(--st);} .dpl .dpl-cell:hover{background:color-mix(in srgb,var(--st) 42%,#fff);}
+  .jy .dpl{border-top:1px solid #d4d9e2;margin-top:9px;padding-top:1px;width:100%;}
+  .jy .dpl-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .jy-stock{display:flex;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .jy-stock:focus-visible{outline:2px solid #534ab7;outline-offset:3px;}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
   .dpl-cell{border:none;background:#f3f4f8;border-radius:10px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;color:inherit;}
   .dpl-cell:hover{background:#e9ebf3;} .dpl-cell b{font-size:18px;font-weight:850;line-height:1.1;} .dpl-cell span{font-size:10px;color:#6b7280;font-weight:700;text-align:center;line-height:1.15;}
@@ -18965,13 +18969,14 @@ async function renderGreeting(){
       // Joey's 4 home cards (owner 2026-10-03).
       isJoeyHome() ? api('joey_metrics').catch(()=>null) : Promise.resolve(null),
     ];
-    // Owner: also check for pending brackets + current per-tech stock levels
-    // (the stock feeds the low-stock warning in the Predicted-income box).
-    if(role==='owner'){
-      reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
-      reqs.push(api('bracket_inventory',{ params:{ business:current.slug }}).catch(()=>({inventory:[]})));
-      reqs.push(api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}).catch(()=>({purchases:[]})));
-      reqs.push(api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})));
+    // Shared stock warning for the owner and Joey's assistant dashboard.
+    const wantsStock=role==='owner'||isJoeyHome();
+    const stockBusiness=isJoeyHome()?scope:current.slug;
+    if(wantsStock){
+      reqs.push(api('bracket_pending',{ params:{ business:stockBusiness }}).catch(()=>({pending:[]})));
+      reqs.push(api('bracket_inventory',{ params:{ business:stockBusiness }}).catch(()=>({inventory:[]})));
+      reqs.push(api('bracket_purchases',{ params:{ business:stockBusiness, limit:'20' }}).catch(()=>({purchases:[]})));
+      reqs.push(api('wire_plate_orders',{ params:{ business:stockBusiness }}).catch(()=>({orders:[]})));
     }
     // Secretary conversion card (Handy Andy / Doms only -- my_call_performance
     // 403s any other scope, see api/admin.js). Two non-overlapping trailing
@@ -18987,8 +18992,8 @@ async function renderGreeting(){
     }
     const [s,newEst,rc,jm,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
-    const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
-    if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
+    const bracketInv=wantsStock && rest[1] ? (rest[1].inventory||[]) : [];
+    if(wantsStock) attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
     const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
@@ -19333,14 +19338,15 @@ const AVG_SCALE_MAX=500;      // bars are full at $500 (fixed scale, not relativ
 // background, refreshed at most every 2 minutes; tap a count to open that stage.
 let _dashPl=null, _dashPlAt=0, _dashPlBusy=false;
 function dashPipelineHtml(){
-  if(role!=='owner') return '';
+  const joey=isJoeyHome();
+  if(role!=='owner' && !joey) return '';
   if(!_dashPlBusy && Date.now()-_dashPlAt>120000){
     _dashPlBusy=true;
     api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule') paintGreeting(); });
   }
   const st=_dashPl;
   const cell=([k,l])=>`<button type="button" class="dpl-cell st-${k}" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
-  return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline · last 3 days</div><div class="dpl-row">${PL_STAGES.map(cell).join('')}</div></div>`;
+  return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline${joey?'':' · last 3 days'}</div><div class="dpl-row">${PL_STAGES.filter(([k])=>!joey||k!=='booked').map(cell).join('')}</div></div>`;
 }
 function avgTicketBoxHtml(pf, r){
   const useCache = avgTicketRange!=='7d' && avgTicketCache[avgTicketRange];
@@ -19597,9 +19603,11 @@ function joeyCardsHtml(){
     const pct=p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–', hue=`hsl(${convHue(c)} 70% 50%)`, w=p.calls?Math.min(Math.max(c,6),100):0;
     return `<div style="margin-top:7px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><b>${esc(p.person)}</b><span style="color:#6b7280;">${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>`+
       `<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:18px;background:#fff;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${hue};border-radius:6px;"></div></div><b style="font-size:12px;color:${p.calls?hue:'#6b7280'};min-width:34px;text-align:right;">${pct}</b></div></div>`; }).join('');
-  return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
+  const low=Number(greetingData.lowStockTechs)||0;
+  const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
+  return stockNotice+`<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
     card('Covering today',covHtml)+
-    card('Jobs today',big(Number(j.jobs_today)||0))+
+    card('Jobs today',big(Number(j.jobs_today)||0)+dashPipelineHtml())+
     card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>`)+
     card('Booking rate · 7 days',secs)+
   `</div>`;
