@@ -1996,7 +1996,15 @@
   .greeting.gl .greet-stats>.gstat:nth-child(5){grid-area:pf;}
   .greeting.gl .greet-stats>.gstat:nth-child(6){grid-area:ndp;}
   .greeting.gl .gstat .gstat-l{color:#6b7280;opacity:1;}
-  .greeting.gl .gstat svg text{fill:#6b7280;}
+  .greeting.gl .gstat svg text{fill:#374151;}
+  .booking-rate-row{margin-top:12px;min-width:0;}
+  .booking-rate-label{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:7px;font-size:14px;}
+  .booking-rate-label span{font-size:13px;color:#4b5563;}
+  .booking-rate-meter{display:flex;align-items:center;gap:10px;}
+  .booking-rate-track{flex:1;min-width:0;height:24px;background:#fff;border-radius:7px;}
+  .booking-rate-meter>b{min-width:49px;text-align:right;font-size:14px;font-variant-numeric:tabular-nums;color:#1f2937;}
+  #incomeChart,.greeting.gl .ndp-scroll{width:calc(100% + 20px);margin-left:-10px;overflow:visible;}
+  .greeting.gl .ndp-seg button{font-size:12px;padding:5px 10px;}
   .greeting.gl .gstat svg line{stroke:#e5e7eb;}
   .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
   .dpl .st-new{--st:#93c5fd;} .dpl .st-talked{--st:#fbbf24;} .dpl .st-quoted{--st:#a3d65c;} .dpl .st-booked{--st:#22d3ee;} .dpl .st-completed{--st:#a78bfa;}
@@ -19553,13 +19561,10 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   // not just the peak; alternating label height (near/far) keeps closely
   // spaced weeks from overlapping each other's text. padBottom now also
   // leaves room for the small period row under the baseline.
-  // pointWidth (px per point, opt-in) is for series with too many points to
-  // fit every label at a fixed 380px -- e.g. Net Daily Profit's 30-day tab --
-  // it makes the SVG genuinely wider than its container instead of squishing
-  // labels together, and the caller wraps it in a horizontal-scroll div. The
-  // Income box never passes this, so its behavior is byte-for-byte unchanged.
-  const w = pointWidth ? (20 + pointWidth*(history.length-1)) : 380;
-  const h=height||172, padX=10, padTop=34, padBottom=28;
+  // Plot coordinates stretch across the card. Text uses percentage x positions
+  // and pixel font sizes, so filling the card never shrinks the labels.
+  const w=600;
+  const h=height||172, padX=12, padTop=38, padBottom=30;
   const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
   const xy=vals.map((v,i)=>{
@@ -19567,8 +19572,11 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
     return [padX+i*stepX, padTop+(1-(clamped-min)/range)*innerH];
   });
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
-  const dots=xy.map(([x,y],i)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="${i===maxIdx?'#86efac':'#4ade80'}"/>`).join('');
+  const dots=xy.map(([x,y],i)=>`<circle cx="${(x/w*100).toFixed(2)}%" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="#16a34a"><title>${esc(incomePeriodLabel(history[i],view||'week'))}: ${money(vals[i])}</title></circle>`).join('');
+  // Keep every plotted point; label up to seven evenly spaced dates.
+  const labelIds=new Set(Array.from({length:Math.min(7,n)},(_,i)=>Math.round(i*(n-1)/(Math.min(7,n)-1))));
   const labels=xy.map(([x,y],i)=>{
+    if(!labelIds.has(i)) return '';
     const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
     const ly=Math.max(9, y-far);
     // The first/last point's label used to center on the dot (text-anchor
@@ -19579,20 +19587,19 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
     // the label grows inward and always stays on-canvas, regardless of width.
     const anchor = i===0 ? 'start' : i===n-1 ? 'end' : 'middle';
     const lx = i===0 ? x+3 : i===n-1 ? x-3 : x;
-    return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" font-size="8.5" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
+    return `<text x="${(lx/w*100).toFixed(2)}%" y="${ly.toFixed(1)}" text-anchor="${anchor}" font-size="12" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
   }).join('');
   const periodY=h-padBottom+12;
   const periods = view ? xy.map(([x],i)=>{
+    if(!labelIds.has(i)) return '';
     const anchor = i===0 ? 'start' : i===n-1 ? 'end' : 'middle';
     const lx = i===0 ? padX : i===n-1 ? w-padX : x;
-    return `<text x="${lx.toFixed(1)}" y="${periodY}" text-anchor="${anchor}" font-size="6.5" fill="rgba(255,255,255,.32)">${esc(incomePeriodLabel(history[i], view))}</text>`;
+    return `<text x="${(lx/w*100).toFixed(2)}%" y="${periodY}" text-anchor="${anchor}" font-size="11" fill="rgba(255,255,255,.32)">${esc(incomePeriodLabel(history[i], view))}</text>`;
   }).join('') : '';
-  const widthStyle = pointWidth ? `width:${w}px;flex:none;` : 'width:100%;';
-  return `<svg viewBox="0 0 ${w} ${h}" style="${widthStyle}height:${h}px;margin-top:4px;">`+
-      `<line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
-      `<polyline points="${pts}" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`+
-      dots+labels+periods+
-    `</svg>`;
+  return `<svg role="img" aria-label="${esc(unitWord||view||'Income')} trend" style="display:block;width:100%;height:${h}px;margin-top:8px;overflow:visible;">`+
+      `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="#d1d5db" stroke-width="1"/><polyline points="${pts}" fill="none" stroke="#16a34a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>`+
+      dots+labels+periods+`</svg>`;
+
 }
 // Net Daily Profit's chart. `cached` is undefined until the first fetch lands
 // (net_daily_range), so this doubles as the loading state. Reuses
@@ -19602,17 +19609,13 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
 // formatting (incomePeriodLabel's 'week' case), not because this is weekly
 // data. $1,500/day ceiling: net PROFIT, not revenue, so a day that clips
 // against it is a genuinely exceptional day, not a normal one squashed flat.
-// pointWidth=44 gives every day's label real horizontal room to avoid the
-// illegible pile-up a fixed 380px produces once there are 30 points -- the
-// chart becomes wider than the card and scrolls horizontally (wrapped below)
-// rather than cramming every number into a fixed width no 30-point series
-// could ever fit cleanly.
+// Longer ranges retain all points and use a sparse, readable label set.
 function ndpChartHtml(cached){
   if(!cached) return `<div class="gstat-s" style="margin-top:8px;">Loading…</div>`;
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
-  // Shorter box (owner 2026-10-03): scale to the real numbers, 120px tall.
+  // Scale to the real numbers, with room for larger labels.
   const top=Math.max(100, ...history.map(h=>h.total_made))*1.1;
-  const svg=incomeChartSvg(history, top, 'week', 'days', 44, 120);
+  const svg=incomeChartSvg(history, top, 'week', 'days', null, 150);
   return `<div class="ndp-scroll">${svg}</div>`;
 }
 // Secretary conversion card -- one merged dark-hero card: the 7-day rate is
@@ -19629,14 +19632,24 @@ function convHue(p){
   if (p <= 50) return 52 + (p - 40) / 10 * 100;    // amber -> green
   return 152;                                      // green, flat from here up
 }
+function conversionColors(p){
+  const h=convHue(Number(p)||0);
+  return {color:`hsl(${h} 70% 56%)`,glow:`hsl(${h} 70% 56% / .45)`};
+}
+function bookingRateBarHtml(p){
+  const value=Number(p.conversion)||0, {color,glow}=conversionColors(value);
+  const width=p.calls?Math.max(0,Math.min(100,value)):0;
+  const pct=p.calls?`${Math.round(value*10)/10}%`:'–';
+  return `<div class="booking-rate-row"><div class="booking-rate-label"><b>${esc(p.person)}</b><span>${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>
+    <div class="booking-rate-meter"><div class="booking-rate-track"><div style="height:100%;width:${width}%;background:${color};border-radius:7px;box-shadow:0 0 9px 1px ${glow},0 0 22px 3px ${glow};"></div></div><b>${pct}</b></div></div>`;
+}
 function secretaryConversionHtml(){
   const cp=greetingData && greetingData.callPerf;
   if(!cp || !cp.thisWeek) return '';
   const tw=cp.thisWeek, lw=cp.lastWeek;
   const p=Number(tw.conversion)||0;
   const prev=(lw && lw.calls) ? (Number(lw.conversion)||0) : null;
-  const h=convHue(p);
-  const color=`hsl(${h} 70% 56%)`, glow=`hsl(${h} 70% 56% / .45)`;
+  const {color,glow}=conversionColors(p);
   const fillW=Math.max(0,Math.min(100,p));
   const deltaHtml = prev==null ? '' : (()=>{
     const delta=Math.round((p-prev)*10)/10, up=delta>=0;
@@ -19669,11 +19682,7 @@ function joeyCardsHtml(){
   const cov=j.covering||{};
   const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
   const u=Number(j.urgent_tasks)||0;
-  const secs=(j.secretaries||[]).map(p=>{ const c=Number(p.conversion)||0;
-    // Bars like the owner's booking-rate box (owner 2026-10-03).
-    const pct=p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–', hue=`hsl(${convHue(c)} 70% 50%)`, w=p.calls?Math.min(Math.max(c,6),100):0;
-    return `<div style="margin-top:7px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><b>${esc(p.person)}</b><span style="color:#6b7280;">${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>`+
-      `<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:18px;background:#fff;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${hue};border-radius:6px;"></div></div><b style="font-size:12px;color:${p.calls?hue:'#6b7280'};min-width:34px;text-align:right;">${pct}</b></div></div>`; }).join('');
+  const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
   const low=Number(greetingData.lowStockTechs)||0;
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
   return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
@@ -19738,15 +19747,7 @@ function greetStatsHtml(){
   const secHtml=secs.length?(
     `<div class="rev-sec"><div class="rev-sec-h">Booking rate · last 7 days</div>`+
     // Same bar style as the Avg ticket box (owner 2026-10-02).
-    secs.map(p=>{ const pctTxt=p.calls?(Math.round(p.conversion*10)/10).toString().replace(/\.0$/,'')+'%':'–';
-      const w=p.calls?Math.min(Math.max(Number(p.conversion)||0,6),100):0, inside=w>=26;
-      const hue=`hsl(${convHue(Number(p.conversion)||0)} 70% 50%)`;   // same red→amber→green as the secretaries' card
-      return `<div style="margin-top:9px;">`+
-        `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;"><span style="font-weight:800;font-size:12px;">${esc(p.person)}</span>`+
-        `<span style="opacity:.75;font-size:11px;font-variant-numeric:tabular-nums;">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls'}</span></div>`+
-        `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:22px;background:#eef0f5;border-radius:7px;overflow:hidden;">`+
-          `<div style="height:100%;width:${w.toFixed(1)}%;background:${hue};border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
-        (inside?'':`<span style="font-weight:800;font-size:13px;min-width:40px;text-align:right;color:${hue};">${pctTxt}</span>`)+`</div></div>`; }).join('')+
+    secs.map(bookingRateBarHtml).join('')+
     `</div>`):'';
   return `<div class="greet-stats">`+
     `<div class="gstat gstat-rev"><div class="rev-split${secs.length?' has-sec':''}"><div class="rev-left"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
