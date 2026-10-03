@@ -12936,14 +12936,24 @@ async function fetchTwilioSmsReadiness() {
 async function callNumbers(req, res, db, auth) {
   if (auth.role !== 'owner' && !auth.auditor) return res.status(403).json({ error: 'Owner only' });   // the call auditor may read this too
 
-  const [{ data: numbers }, { data: businesses }, voiceUrlByPhone, sms] = await Promise.all([
+  const [{ data: numbers }, { data: businesses }, voiceUrlByPhone, sms, staff, schedules] = await Promise.all([
     db.from('tracking_numbers')
       .select('phone, label, display_name, business_slug, market, forward_to, after_hours_forward_to, active, hours_start, hours_end, hours_timezone')
       .order('business_slug'),
     db.from('businesses').select('slug, name, url'),
     fetchTwilioVoiceUrls(),
     fetchTwilioSmsReadiness(),
+    db.from('staff_users').select('name, phone').eq('active', true),
+    db.from('staff_schedules').select('name, phone'),
   ]);
+  if(staff.error) throw staff.error;
+  if(schedules.error) throw schedules.error;
+  const recipientNames=new Map([['3032190118','Joey'],['7207223653','Heather'],['3374997817','Andrew']]);
+  for(const person of [...(schedules.data||[]),...(staff.data||[])]) {
+    const phone=digitsOf(person.phone).slice(-10);
+    if(phone && person.name) recipientNames.set(phone,person.name);
+  }
+  const recipientName=phone=>phone?(recipientNames.get(digitsOf(phone).slice(-10))||'Unknown contact'):'Voicemail only';
   // Filled by fetchTwilioVoiceUrls() above (already awaited), so safe to read.
   const smsCapByPhone = (_twilioNumbersCache && _twilioNumbersCache.smsCap) || new Map();
   const twilioListOk = !!(_twilioNumbersCache && _twilioNumbersCache.ok);
@@ -12961,6 +12971,8 @@ async function callNumbers(req, res, db, auth) {
     return {
       ...n,
       business_name: biz.name || n.business_slug,
+      forward_name:recipientName(n.forward_to),
+      after_hours_forward_name:recipientName(n.after_hours_forward_to),
       // What every screen should actually show as this LINE's name (migration
       // 0132) -- label is a legal disclosure sentence, business_name collapses
       // every Handy Andy lead-gen city number to the same word. Falls back to

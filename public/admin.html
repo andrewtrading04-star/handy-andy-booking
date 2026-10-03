@@ -13668,10 +13668,11 @@ async function renderCallAudit(){
 // purpose (unlike Audit/Performance, which follow the sidebar's current
 // business): a routing directory is only useful seen whole, not one row at a
 // time. api/admin.js callNumbers() enforces owner-only server-side.
-const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17207223653':'Heather', '+13374997817':'Owner' }; // Heather's number updated 2026-09-18
-function friendlyForward(e164){
+const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17207223653':'Heather', '+13374997817':'Andrew' }; // Heather's number updated 2026-09-18
+function friendlyForward(e164,name){
+  if(name) return name;
   if(!e164) return 'Voicemail only';
-  return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));
+  return NUMBER_FRIENDLY_FORWARD[e164] || 'Unknown contact';
 }
 // Three states, not two -- Andrew, 2026-09-22: red = not connected, yellow =
 // connected but no one to answer (e.g. the LA number that's live with no
@@ -13719,7 +13720,7 @@ async function renderCallNumbers(){
 function matchingNumbers(numbers,query,status){
   const term=query.trim().toLowerCase(), digits=term.replace(/\D/g,'');
   return numbers.filter(n=>(status==='all'||(status==='active'?n.active:!n.active)) &&
-    (!term || [n.phone,fmtPhone(n.phone),n.business_name,n.line_name,n.market,friendlyForward(n.forward_to),friendlyForward(n.after_hours_forward_to)].join(' ').toLowerCase().includes(term) ||
+    (!term || [n.phone,fmtPhone(n.phone),n.business_name,n.line_name,n.market,friendlyForward(n.forward_to,n.forward_name),friendlyForward(n.after_hours_forward_to,n.after_hours_forward_name)].join(' ').toLowerCase().includes(term) ||
       (digits.length>=3 && !/[a-z]/i.test(term) && String(n.phone).replace(/\D/g,'').includes(digits))))
     .sort((a,b)=>(a.business_name||'').localeCompare(b.business_name||'') || String(a.phone).localeCompare(String(b.phone)));
 }
@@ -13753,11 +13754,11 @@ function paintNumberDirectory(){
     ${rows.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
       <span class="num-dot" style="background:${numberStatusColor(n)}" aria-hidden="true"></span>
       <span class="num-id"><strong>${esc(n.line_name||n.business_name)}</strong><span>${esc(prettyNum(n.phone))}</span></span>
-      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to))}</span>
+      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to,n.forward_name))}</span>
     </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
       <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.line_name||selected.business_name)}${selected.line_name&&selected.line_name!==selected.business_name?' &middot; '+esc(selected.business_name):''}</p>
       ${numberVolumeHtml(selected.volume)}
-      <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to))}${detail('After hours',friendlyForward(selected.after_hours_forward_to))}${detail('Hours',hours)}</dl>
+      <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to,selected.forward_name))}${detail('After hours',friendlyForward(selected.after_hours_forward_to,selected.after_hours_forward_name))}${detail('Hours',hours)}</dl>
       <div class="ch-section-label">Connection status</div><div class="ch-connections">
         <div><span>AI voice</span>${aiVoiceBadge(selected.ai_voice_status)}</div><div><span>Texting</span>${textingBadge(selected.texting_status)}</div>
       </div>
