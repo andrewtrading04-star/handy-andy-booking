@@ -460,7 +460,7 @@ export default async function handler(req, res) {
       case 'launch_traffic':       return await launchTraffic(req, res, db, auth);
       case 'launch_checklist_set': return await launchChecklistSet(req, res, db, auth, body);
       case 'launch_market_checklist_set': return await launchMarketChecklistSet(req, res, db, auth, body);
-      case 'launch_market_address_set': return await launchMarketAddressSet(req, res, db, auth, body);
+      case 'launch_health':        return await launchHealth(req, res, db, auth);
       case 'launch_notes_set':     return await launchNotesSet(req, res, db, auth, body);
       case 'zb_import':         return await zbImport(req, res, db, body);
       case 'summary':           return await summary(req, res, db, auth);
@@ -2548,7 +2548,7 @@ const MARKET_CHECKLIST_ITEMS = LAUNCH_CHECKLIST_ITEMS.map(({ key, label }) => ({
 
 async function launchMarketRows(db) {
   const { data: markets, error } = await db.from('markets')
-    .select('id, slug, name, parent_business_slug, url, address, active, settings, created_at')
+    .select('id, slug, name, parent_business_slug, url, active, settings, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
 
@@ -2559,7 +2559,9 @@ async function launchMarketRows(db) {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 6000);
+        const t0 = Date.now();
         const r = await fetch(m.url, { signal: ctrl.signal, redirect: 'follow' });
+        site.ms = Date.now() - t0;
         clearTimeout(t);
         site.status = r.status;
         site.ok = r.ok;
@@ -2572,7 +2574,7 @@ async function launchMarketRows(db) {
     return {
       id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
       city: (m.settings && m.settings.city) || m.name,
-      url: m.url, address: m.address || null, active: m.active, created_at: m.created_at, site, checklist, notes,
+      url: m.url, active: m.active, created_at: m.created_at, site, checklist, notes,
     };
   }));
 }
@@ -2630,6 +2632,151 @@ async function launchTraffic(req, res, db, auth) {
   return res.status(200).json({ days, series, marketSeries });
 }
 
+// GET ?action=launch_health — "how is it going" numbers for every LIVE Launch
+// card, business and market alike, keyed like the traffic chart ('slug' for a
+// business, 'm:slug' for a market). A handful of batched reads over the last
+// 35 days, then everything is bucketed in memory: no per-card queries. Each
+// metric is computed fail-soft: a failing read leaves that metric null (the
+// card shows a grey dash) and never breaks the payload. Website / Stripe /
+// traffic are NOT here — the card already has them from launch_status and
+// launch_traffic.
+async function launchHealth(req, res, db, auth) {
+  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+  const DAY = 24 * 60 * 60 * 1000, now = Date.now();
+  const since = (d) => new Date(now - d * DAY).toISOString();
+  const soft = (p) => Promise.resolve(p).then(r => (r && r.error) ? null : (r ? r.data : null)).catch(() => null);
+  const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+
+  const [businesses, markets, numbers, areas, calls, msgs, attempts, bookings, reviews] = await Promise.all([
+    soft(db.from('businesses').select('id, slug')),
+    soft(db.from('markets').select('slug, name, parent_business_slug, url, settings')),
+    soft(db.from('tracking_numbers').select('phone, label, business_slug, market, active').eq('active', true)),
+    soft(db.from('service_areas').select('id, name, business_id')),
+    soft(db.from('calls').select('grasshopper_number, kind, answered, caller_phone, occurred_at, called_back_at')
+      .gte('occurred_at', since(30)).limit(20000)),
+    soft(db.from('messages').select('our_phone, direction, status, created_at').gte('created_at', since(30)).limit(20000)),
+    soft(db.from('call_attempts').select('phone, started_at').gte('started_at', since(8)).limit(10000)),
+    soft(db.from('bookings').select('business_id, service_area_id, status, metadata, created_at').gte('created_at', since(35)).limit(10000)),
+    soft(db.from('google_reviews').select('business_id, location_key, rating, review_date').is('dismissed_at', null).limit(10000)),
+  ]);
+  const bizById = new Map((businesses || []).map(b => [b.id, b.slug]));
+  const bizBySlug = new Map((businesses || []).map(b => [b.slug, b.id]));
+  const pathOf = (u) => { try { return new URL(u).pathname.replace(/\/+$/, '') || '/'; } catch { return null; } };
+
+  // Cards: every business, every market.
+  const cards = {};
+  for (const b of (businesses || [])) cards[b.slug] = { kind: 'business', slug: b.slug, bizId: b.id, numbers: [] };
+  for (const m of (markets || [])) {
+    const city = (m.settings && m.settings.city) || m.name;
+    const parentId = bizBySlug.get(m.parent_business_slug);
+    // Dom's OKC/Tulsa are real service areas; Handy Andy pages are credited by
+    // the booking's source page (see booking source attribution).
+    const area = (areas || []).find(a => a.business_id === parentId && (a.name === city || a.name === m.name));
+    cards['m:' + m.slug] = {
+      kind: 'market', slug: m.slug, bizId: parentId, areaId: area ? area.id : null,
+      path: m.parent_business_slug === 'handy-andy' ? pathOf(m.url) : null,
+      // google_reviews.location_key: ha-golden, doms-okc, ...
+      reviewKey: m.parent_business_slug === 'handy-andy' ? 'ha-' + String(m.slug).replace(/-ha$/, '')
+        : (m.parent_business_slug === 'doms' ? 'doms-' + String(m.slug).replace(/-doms$/, '') : null),
+      name: m.name, parent: m.parent_business_slug, numbers: [],
+    };
+  }
+  // Tracking numbers: a market owns the parent's numbers whose label names it
+  // ("Handy Andy Golden"); a business owns all of its own.
+  for (const n of (numbers || [])) {
+    const ph = last10(n.phone);
+    if (cards[n.business_slug]) cards[n.business_slug].numbers.push(ph);
+    for (const c of Object.values(cards)) {
+      if (c.kind !== 'market' || c.parent !== n.business_slug) continue;
+      const label = ' ' + String(n.label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ') + ' ';
+      if (label.includes(' ' + String(c.name).toLowerCase() + ' ')) c.numbers.push(ph);
+    }
+  }
+
+  // Index calls / messages by our number.
+  const inbound = {}, outTexts = {}, missed = {};
+  if (calls) for (const c of calls) {
+    const ph = last10(c.grasshopper_number); if (!ph) continue;
+    const t = Date.parse(c.occurred_at);
+    if (c.kind === 'inbound' || c.kind === 'sms') (inbound[ph] = inbound[ph] || []).push(t);
+    if (c.kind === 'inbound' && c.answered === false && t >= now - 7 * DAY) (missed[ph] = missed[ph] || []).push(c);
+  }
+  if (msgs) for (const m of msgs) {
+    const ph = last10(m.our_phone); if (!ph) continue;
+    const t = Date.parse(m.created_at);
+    if (m.direction === 'in') (inbound[ph] = inbound[ph] || []).push(t);
+    else if (m.direction === 'out' && t >= now - 7 * DAY) {
+      const o = outTexts[ph] || (outTexts[ph] = { sent: 0, failed: 0 });
+      o.sent++;
+      if (m.status === 'failed' || m.status === 'undelivered') o.failed++;
+    }
+  }
+  // Returned = called back (called_back_at), a later answered call from the
+  // same caller on any line, or a staff call attempt to them after the miss.
+  const answeredBy = {}, attemptBy = {};
+  if (calls) for (const c of calls) if (c.answered) { const p = last10(c.caller_phone); (answeredBy[p] = answeredBy[p] || []).push(Date.parse(c.occurred_at)); }
+  if (attempts) for (const a of attempts) { const p = last10(a.phone); (attemptBy[p] = attemptBy[p] || []).push(Date.parse(a.started_at)); }
+  const returned = (c) => {
+    if (c.called_back_at) return true;
+    const p = last10(c.caller_phone), t = Date.parse(c.occurred_at);
+    return (answeredBy[p] || []).some(x => x > t) || (attemptBy[p] || []).some(x => x > t);
+  };
+
+  const out = {};
+  for (const [key, c] of Object.entries(cards)) {
+    const h = { numbers: c.numbers.length };
+    // Phone line
+    if (calls !== null || msgs !== null) {
+      if (!c.numbers.length) h.phone = null;
+      else {
+        const ts = c.numbers.flatMap(n => inbound[n] || []);
+        const lastIn = ts.length ? Math.max(...ts) : null;
+        const prior = ts.filter(t => t < now - 2 * DAY).length;   // 28 days before the last 48h
+        const o = c.numbers.reduce((a, n) => { const x = outTexts[n]; if (x) { a.sent += x.sent; a.failed += x.failed; } return a; }, { sent: 0, failed: 0 });
+        h.phone = { lastIn: lastIn ? new Date(lastIn).toISOString() : null, usual: prior >= 3, textsSent: o.sent, textsFailed: o.failed };
+      }
+    }
+    // Missed calls this week
+    if (calls !== null && c.numbers.length) {
+      const ms = c.numbers.flatMap(n => missed[n] || []);
+      // One per caller: three rings from the same number are one missed lead.
+      const byCaller = new Map();
+      for (const x of ms) { const p = last10(x.caller_phone); if (!byCaller.has(p) || Date.parse(x.occurred_at) > Date.parse(byCaller.get(p).occurred_at)) byCaller.set(p, x); }
+      const list = [...byCaller.values()];
+      h.missed = { count: list.length, notReturned: list.filter(x => !returned(x)).length };
+    }
+    // Bookings: this 7 days vs the 7 before, plus the 4 weeks before this one.
+    if (bookings !== null && c.bizId) {
+      const mine = bookings.filter(b => {
+        if (b.status === 'cancelled' || b.business_id !== c.bizId) return false;
+        if (c.kind === 'market') {
+          if (c.areaId) return b.service_area_id === c.areaId;
+          if (c.path) return ((b.metadata && b.metadata.source_page) || '').replace(/\/+$/, '') === c.path;
+          return false;
+        }
+        // A business card leaves out bookings credited to its own market cards.
+        return !Object.values(cards).some(m => m.kind === 'market' && m.bizId === c.bizId && m.areaId && m.areaId === b.service_area_id);
+      }).map(b => Date.parse(b.created_at));
+      h.bookings = {
+        week: mine.filter(t => t >= now - 7 * DAY).length,
+        prev: mine.filter(t => t < now - 7 * DAY && t >= now - 14 * DAY).length,
+        prior4w: mine.filter(t => t < now - 7 * DAY).length,
+      };
+    }
+    // Google reviews (only where captured reviews exist for the card)
+    if (reviews !== null && c.bizId) {
+      const rs = reviews.filter(r => r.business_id === c.bizId && (c.kind === 'business' || r.location_key === c.reviewKey));
+      if (rs.length) {
+        const month = new Date(now).toISOString().slice(0, 7);
+        h.reviews = { month: rs.filter(r => String(r.review_date || '').slice(0, 7) === month).length,
+          rating: Math.round(rs.reduce((a, r) => a + (Number(r.rating) || 0), 0) / rs.length * 10) / 10, total: rs.length };
+      }
+    }
+    out[key] = h;
+  }
+  return res.status(200).json({ health: out, at: new Date().toISOString() });
+}
+
 async function launchStatus(req, res, db, auth) {
   if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
   const { data: businesses, error } = await db.from('businesses')
@@ -2653,7 +2800,9 @@ async function launchStatus(req, res, db, auth) {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 6000);
+        const t0 = Date.now();
         const r = await fetch(biz.url, { signal: ctrl.signal, redirect: 'follow' });
+        site.ms = Date.now() - t0;
         clearTimeout(t);
         site.status = r.status;
         site.ok = r.ok;
@@ -2684,26 +2833,6 @@ async function launchStatus(req, res, db, auth) {
     items: LAUNCH_CHECKLIST_ITEMS, businesses: results,
     marketItems: MARKET_CHECKLIST_ITEMS, markets,
   });
-}
-
-async function launchMarketAddressSet(req, res, db, auth, body) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
-  const marketId = String(body.market_id || '').trim();
-  if (!marketId) return res.status(400).json({ error: 'market_id is required' });
-  // Blank clears it back to "no address on file" rather than storing an
-  // empty string that would read as a real (missing) value everywhere else.
-  const address = String(body.address || '').trim().slice(0, 300) || null;
-
-  const { data: m, error: readErr } = await db.from('markets').select('id').eq('id', marketId).maybeSingle();
-  if (readErr) throw readErr;
-  if (!m) return res.status(404).json({ error: 'Market not found' });
-
-  const { error: writeErr } = await db.from('markets')
-    .update({ address, updated_at: new Date().toISOString() })
-    .eq('id', marketId);
-  if (writeErr) throw writeErr;
-
-  return res.status(200).json({ ok: true, address });
 }
 
 // POST ?action=launch_notes_set — free-text notes on a launch card, business

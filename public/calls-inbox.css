@@ -54,12 +54,13 @@
 .launch-workspace .launch-card:hover{transform:translateY(-2px);box-shadow:0 9px 20px #202c431c}
 .launch-workspace .launch-card:has(.launch-detail[style*="display: block"]){border-color:#315ad7!important;box-shadow:inset 4px 0 #315ad7,0 9px 22px #202c4320}
 .launch-score{display:inline-flex;align-items:center;justify-content:center;min-width:48px;min-height:40px;border-radius:8px;background:#eef2fc;color:#315ad7;font-weight:700;font-size:14px;flex:none}
-.launch-score.blocked{color:#b53343;background:#fceff1}
+.launch-score.blocked{color:#475569;background:#f1f5f9}
 .launch-workspace .launch-detail input,.launch-workspace .launch-detail textarea{min-width:0;accent-color:#315ad7}
 .launch-workspace .launch-detail label{min-height:40px}
 /* Launch hub map: each city is a hub, its businesses feed in on wires. Status
    colours are their own tokens because .launch-workspace remaps --green to blue. */
-.launch-workspace{--launch-live:#1f9d57;--launch-progress:#c07a12;--launch-blocked:#b53343}
+/* Not-yet-launched (blocked) is grey, not red: red is only for emergencies (owner 2026-10-04). */
+.launch-workspace{--launch-live:#1f9d57;--launch-progress:#c07a12;--launch-blocked:#94a3b8}
 [data-launch-status="live"]{--c:var(--launch-live)}[data-launch-status="progress"]{--c:var(--launch-progress)}[data-launch-status="blocked"]{--c:var(--launch-blocked)}
 .launch-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px}
 .launch-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:6px 14px;border:1px solid #dce2ec;border-radius:999px;background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:#536277;cursor:pointer}

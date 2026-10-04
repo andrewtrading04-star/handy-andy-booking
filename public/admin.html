@@ -16,7 +16,7 @@
 <!-- Chart.js 4 is lazy-injected by ensureChartJs() on first Analytics/Website
      Analytics open — see that function — instead of loading render-blocking
      in <head> on every dashboard visit, when most opens never touch a chart. -->
-<link rel="stylesheet" href="/calls-inbox.css?v=7">
+<link rel="stylesheet" href="/calls-inbox.css?v=8">
 <style>
   :root{
     --bg:#f5f6f8; --side:#ffffff; --panel:#ffffff; --line:#e7e9ee; --line2:#eef0f3;
@@ -8886,7 +8886,7 @@ function wireLaunchNotes(detail, onSaved){
   });
 }
 function launchDetailHtml(b, items){
-  items = launchItemsFor(b, items);
+  items = launchItemsFor(b, items).filter(it => !(LAUNCH_AUTO_OF[it.key] ? launchEffective(b, it.key) : !!b.checklist[it.key]));
   const checklist=items.map(it=>{
     const isAuto = !!LAUNCH_AUTO_OF[it.key];
     const checked = isAuto ? launchEffective(b, it.key) : !!b.checklist[it.key];
@@ -8967,7 +8967,7 @@ function launchSparkHtml(key){
   if(!_launchTraffic) return '<div style="font-size:11px;color:var(--mute);">Loading traffic…</div>';
   const isMarket=key.startsWith('m:');
   const d=isMarket ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key];
-  if(!d) return '<div style="font-size:11px;color:var(--mute);">No traffic data for this card</div>';
+  if(!d) return '';   // no website / no tracked traffic: no graph (owner 2026-10-04)
   const pts=d.s, views=d.v, days=_launchTraffic.days||[], n=pts.length;
   const W=320,H=72,L=20,R=4,T=6,B=14, max=Math.max(1,...pts);
   const x=i=>L+(n>1?i*(W-L-R)/(n-1):0), y=v=>T+(1-v/max)*(H-T-B);
@@ -9011,24 +9011,120 @@ async function loadLaunchTraffic(){
   }
   document.querySelectorAll('[data-launch-spark]').forEach(el=>{ el.innerHTML=launchSparkHtml(el.dataset.launchSpark); });
 }
+// ── Live vs launching ────────────────────────────────────────────────────────
+// A card whose checklist is 100% is LIVE: no checklist at all, just a health
+// card ("how is it going"). Anything less is LAUNCHING: only what's missing,
+// plus the next step. Switches by itself as items get ticked.
+function launchIsLive(b, items){ const s=launchScoreOf(b, items); return !s.blocked && s.passed===s.total; }
+function launchMarketIsLive(m, items){ const s=launchMarketScoreOf(m, items); return s.passed===s.total; }
+// Owner color rule: red ONLY for real emergencies (site down, phone line dead,
+// card payments broken). Worth-a-look is amber. Good is green. Info is grey.
+const LH_COLOR={ red:'var(--red)', amber:'#d97706', green:'var(--green)', grey:'#9ca3af' };
+let _launchHealth=null, _launchHealthAt=0;
+async function loadLaunchHealth(){
+  if(_launchHealth && Date.now()-_launchHealthAt<120000) return;
+  try{
+    const r=await api('launch_health',{timeoutMs:30000});
+    _launchHealth=r.health||{}; _launchHealthAt=Date.now();
+    if(_launchLastData && onScreen('launch') && !document.querySelector('.launch-open[aria-expanded="true"]')){ _launchFresh=_launchLastData; renderLaunch(); }
+  }catch(e){ if(!_launchHealth){ _launchHealth={}; _launchHealthAt=Date.now(); } }
+}
+function lhAgo(iso){
+  if(!iso) return 'never';
+  const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/60000));
+  if(m<60) return m+'m ago';
+  const h=Math.round(m/60); if(h<48) return h+'h ago';
+  return Math.round(h/24)+'d ago';
+}
+function lhTiny(pts){
+  if(!pts||!pts.length) return '';
+  const W=56,H=14,max=Math.max(1,...pts),n=pts.length;
+  const d=pts.map((v,i)=>`${i?'L':'M'}${(n>1?i*W/(n-1):0).toFixed(1)},${(H-1-(v/max)*(H-2)).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="vertical-align:middle;margin-left:4px;" aria-hidden="true"><path d="${d}" fill="none" stroke="#2563eb" stroke-width="1.2"/></svg>`;
+}
+// Rows for one live card. `site` = launch_status site check; `stripe` only for
+// businesses. Every metric is fail-soft: missing data = grey dash.
+function launchHealthRows(key, site, stripe){
+  const h=(_launchHealth||{})[key]||null, rows=[];
+  if(!site||!site.checked) rows.push({k:'Website',l:'grey',t:'—'});
+  else if(site.ok) rows.push({k:'Website',l:'green',t:'Up'+(site.ms?` · ${site.ms}ms`:'')});
+  else rows.push({k:'Website',l:'red',t:'Down',p:'Website down'});
+  if(stripe && stripe.ready===false) rows.push({k:'Payments',l:'red',t:'Off',p:'Card payments off'});
+  const tr=_launchTraffic ? (key.startsWith('m:') ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key]) : null;
+  if(!tr) rows.push({k:'Visitors',l:'grey',t:'—'});
+  else{
+    const sum=a=>a.reduce((p,c)=>p+c,0), w=sum(tr.s.slice(-7)), pw=sum(tr.s.slice(-14,-7));
+    const down=pw>=5 && w<pw*0.7;
+    rows.push({k:'Visitors',l:down?'amber':(w>0?'green':'grey'),t:`${w} <span style="color:var(--mute);">vs ${pw}</span>${lhTiny(tr.s.slice(-14))}`,p:down?'Traffic down':null});
+  }
+  if(!_launchHealth){ rows.push({k:'Bookings',l:'grey',t:'…'},{k:'Phone',l:'grey',t:'…'}); return rows; }
+  if(!h||!h.bookings) rows.push({k:'Bookings',l:'grey',t:'—'});
+  else{
+    const b=h.bookings, zero=b.week===0 && b.prior4w>0;
+    rows.push({k:'Bookings',l:zero?'amber':(b.week>0?'green':'grey'),t:`${b.week} <span style="color:var(--mute);">vs ${b.prev}</span>`,p:zero?'No bookings this week':null});
+  }
+  if(!h) rows.push({k:'Phone',l:'grey',t:'—'});
+  else if(!h.numbers) rows.push({k:'Phone',l:'grey',t:'No number'});
+  else if(!h.phone) rows.push({k:'Phone',l:'grey',t:'—'});
+  else{
+    const ph=h.phone, quiet=ph.usual && (!ph.lastIn || Date.now()-Date.parse(ph.lastIn)>48*3600000);
+    const failing=ph.textsSent>=4 && ph.textsFailed/ph.textsSent>=0.5;
+    const txt=ph.textsSent ? ` · texts ${ph.textsSent-ph.textsFailed}/${ph.textsSent} ok` : '';
+    rows.push({k:'Phone',l:(quiet||failing)?'red':'green',t:`In ${lhAgo(ph.lastIn)}${txt}`,p:quiet?'Phone silent 48h':(failing?'Texts failing':null)});
+  }
+  // Call-back info is not shown on Launch (owner 2026-10-04): it lives in Calls.
+  if(h && h.reviews) rows.push({k:'Reviews',l:h.reviews.month?'green':'grey',t:`+${h.reviews.month} this month · ${h.reviews.rating}★`});
+  return rows;
+}
+// 0 red, 1 amber, 2 launching, 3 all good — the in-hub sort order.
+function launchSeverity(rows){
+  if(rows.some(r=>r.l==='red')) return 0;
+  if(rows.some(r=>r.l==='amber')) return 1;
+  return 3;
+}
+// Every card with a website gets the traffic graph, launching or live (owner 2026-10-04).
+function launchSparkBox(key){ const h=launchSparkHtml(key); return h?`<div data-launch-spark="${esc(key)}" style="margin:8px 0;">${h}</div>`:''; }
+function launchHealthHtml(rows, key){
+  const dot=l=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${LH_COLOR[l]};flex:none;"></span>`;
+  const probs=[...rows.filter(r=>r.p&&r.l==='red'),...rows.filter(r=>r.p&&r.l==='amber')];
+  const top=probs.length
+    ? probs.map(r=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:10px;color:${LH_COLOR[r.l]};font-weight:700;">${dot(r.l)}${esc(r.p)}</span>`).join('')
+    : `<span style="display:inline-flex;align-items:center;gap:5px;color:var(--green);font-weight:700;">${dot('green')}All good</span>`;
+  // Owner 2026-10-04: the traffic chart is what shows; tap Stats for the rest.
+  return `<div style="margin-top:10px;font-size:12px;">${top}</div>
+    ${key?launchSparkBox(key):''}
+    <details class="lh-more" style="margin-top:8px;" onclick="event.stopPropagation()"><summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--mute);">Stats</summary>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin-top:8px;font-size:12px;align-items:center;">
+      ${rows.map(r=>`<span style="display:inline-flex;align-items:center;gap:6px;color:var(--mute);">${dot(r.l)}${esc(r.k)}</span><span style="color:var(--ink-2);">${r.t}</span>`).join('')}
+    </div></details>`;
+}
 function launchCardHtml(b, items){
-  const { passed, total, blocked } = launchScoreOf(b, items);
+  const live=launchIsLive(b, items), s=launchScoreOf(b, items);
+  const head=`<div style="display:flex;align-items:center;gap:10px;">
+      ${live ? '' : `<div class="launch-ring" style="display:contents;">${launchRingHtml(s.passed, s.total, s.blocked)}</div>`}
+      <div style="min-width:0;">
+        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(b.name)} ${launchNotesFlagHtml(b.notes)}</div>
+        ${launchContactHtml(b)}
+      </div>
+    </div>`;
+  if(live){
+    return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
+      ${head}
+      ${launchHealthHtml(launchHealthRows(b.slug, b.site, b.stripe), b.slug)}
+      <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">Notes</button>
+      <div class="launch-detail" style="display:none;"></div>
+    </div>`;
+  }
   const nextText = esc(launchNextAction(b, items));
   const href = launchActionHref(b);
   const nextInner = href
     ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
     : nextText;
   return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
-      <div style="min-width:0;">
-        <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(b.name)} ${launchNotesFlagHtml(b.notes)}</div>
-        ${launchContactHtml(b)}
-      </div>
-    </div>
-    <div class="launch-spark" data-launch-spark="${esc(b.slug)}" style="margin-top:10px;">${launchSparkHtml(b.slug)}</div>
+    ${head}
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${nextInner}</p>
-    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
+    ${launchSparkBox(b.slug)}
+    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">Missing (${s.total-s.passed})</button>
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
@@ -9057,57 +9153,48 @@ function launchMarketDetailHtml(m, items){
     if(m.site.error) siteLine = `<span style="color:var(--red);">✕ Page</span> — could not reach ${esc(m.url)} (${esc(m.site.error)})<br>`;
     else siteLine = `<span style="color:${m.site.ok?'var(--green)':'var(--red)'};">${m.site.ok?'✓':'✕'} Page</span> ${m.site.ok?`live (${m.site.status})`:`returned ${m.site.status}`}<br>`;
   }
-  const checklist=items.map(it=>{
+  const checklist=items.filter(it=>!m.checklist[it.key]).map(it=>{
     const checked=!!m.checklist[it.key];
     return `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:${checked?'#111':'var(--mute)'};cursor:pointer;padding:3px 0;">
       <input type="checkbox" data-launch-market="${m.id}" data-launch-key="${it.key}" ${checked?'checked':''} style="width:15px;height:15px;flex:none;">
       ${esc(it.label)}
     </label>`;
   }).join('');
-  // Street address: a saved text field, not a checkbox — this is the exact
-  // address Google's video verifier will check the location against, so
-  // WHAT it is matters, not just whether someone glanced at one.
-  const addressRow = `<div style="margin:0 0 8px;" onclick="event.stopPropagation();">
-    <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin-bottom:4px;">Street address (for GBP video verification)</label>
-    <div style="display:flex;gap:6px;">
-      <input type="text" data-launch-market-address-input="${m.id}" value="${esc(m.address||'')}" placeholder="123 Main St, City, ST 00000" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;">
-      <button type="button" data-launch-market-address-save="${m.id}" class="btn ghost" style="width:auto;padding:7px 14px;font-size:12px;">Save</button>
-    </div>
-  </div>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;line-height:1.9;">
     <p style="margin:0 0 6px;font-size:12px;color:var(--mute);">Shares ${esc(m.parentSlug)}'s Stripe, Resend, and website — that's by design, not tracked here.</p>
     ${siteLine}
-    ${addressRow}
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr;gap:2px;">
       ${checklist}
     </div>
     ${launchNotesHtml('market', m.id, m.notes)}
   </div>`;
 }
-function launchMarketAddressLineHtml(m){
-  if(m.parentSlug==='handy-andy') return ''; // owner call 2026-09-22: no address line on Handy Andy locations
-  return m.address
-    ? `<span style="font-size:11px;color:var(--mute);">${esc(m.address)}</span>`
-    : (m.checklist && m.checklist.gbp_created ? '' : `<span style="font-size:11px;color:var(--red);">No street address on file</span>`);
-}
 // A market's name is its city (it doubles as the hub key), so the card title
 // adds the parent brand: "Handy Andy Austin" feeds the Austin hub as its own
 // business, not as the city itself.
 function launchMarketTitle(m){ return m.parentSlug==='handy-andy' ? `Handy Andy ${m.name}` : m.name; }
 function launchMarketCardHtml(m, items){
-  const { passed, total, blocked } = launchMarketScoreOf(m, items);
-  return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <div class="launch-ring" style="display:contents;">${launchRingHtml(passed, total, blocked)}</div>
+  const live=launchMarketIsLive(m, items), s=launchMarketScoreOf(m, items);
+  const head=`<div style="display:flex;align-items:center;gap:10px;">
+      ${live ? '' : `<div class="launch-ring" style="display:contents;">${launchRingHtml(s.passed, s.total, s.blocked)}</div>`}
       <div style="min-width:0;">
         <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(launchMarketTitle(m))} ${launchNotesFlagHtml(m.notes)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
-        <div class="launch-market-address" style="margin-top:2px;">${launchMarketAddressLineHtml(m)}</div>
       </div>
-    </div>
-    <div class="launch-spark" data-launch-spark="m:${esc(m.slug)}" style="margin-top:10px;">${launchSparkHtml('m:'+m.slug)}</div>
+    </div>`;
+  if(live){
+    return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
+      ${head}
+      ${launchHealthHtml(launchHealthRows('m:'+m.slug, m.site, null), 'm:'+m.slug)}
+      <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">Notes</button>
+      <div class="launch-detail" style="display:none;"></div>
+    </div>`;
+  }
+  return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
+    ${head}
     <p class="launch-next" style="margin:10px 0 0;font-size:12px;color:var(--ink-2);">${esc(launchMarketNextAction(m, items))}</p>
-    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">View checklist</button>
+    ${launchSparkBox('m:'+m.slug)}
+    <button type="button" class="rc-btn ghost launch-open" aria-expanded="false">Missing (${s.total-s.passed})</button>
     <div class="launch-detail" style="display:none;"></div>
   </div>`;
 }
@@ -9185,6 +9272,7 @@ async function renderLaunch(){
 
   _launchLastData=data;
   loadLaunchTraffic(); // refreshes on every visit; fills the sparklines when it lands
+  loadLaunchHealth();  // live-card health; repaints when it lands
   const items=data.items||[];
   const businesses=data.businesses||[];
   const marketItems=data.marketItems||[];
@@ -9198,8 +9286,8 @@ async function renderLaunch(){
   // `score` is a function, not a snapshot: ticking a box changes it, and sync()
   // below re-reads it to recolour the card, its wire, the hub ring and the tiles.
   const entries=[
-    ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ traffic:b.slug, sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
-    ...markets.map(m=>({ traffic:'m:'+m.slug, sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
+    ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ sev:launchIsLive(b, items) ? launchSeverity(launchHealthRows(b.slug, b.site, b.stripe)) : 2, traffic:b.slug, sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
+    ...markets.map(m=>({ sev:launchMarketIsLive(m, marketItems) ? launchSeverity(launchHealthRows('m:'+m.slug, m.site, null)) : 2, traffic:'m:'+m.slug, sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
   ];
   const statusOf=s=>s.blocked ? 'blocked' : (s.passed===s.total ? 'live' : 'progress');
 
@@ -9213,7 +9301,8 @@ async function renderLaunch(){
   const hubHtml=(city)=>{
     // Busiest first (30-day sessions), dealt left-right so the top row of a hub
     // is its two busiest sites. Before traffic has loaded the order is as-is.
-    const rows=_launchTraffic ? [...byCity[city]].sort((a,b)=>launchTrafficTotal(b.traffic)-launchTrafficTotal(a.traffic)) : byCity[city];
+    // Red first, then amber, then launching, then all good; busiest first within each.
+    const rows=[...byCity[city]].sort((a,b)=>(a.sev-b.sev) || (_launchTraffic ? launchTrafficTotal(b.traffic)-launchTrafficTotal(a.traffic) : 0));
     return `<section class="launch-city" data-launch-city="${esc(city)}"><div class="launch-hub-map">
       <svg class="launch-wires" aria-hidden="true"></svg>
       <div class="launch-hub-row"><button type="button" class="launch-hub" data-launch-hub="${esc(city)}"></button><span class="launch-hub-side">${esc(city)}</span></div>
@@ -9223,7 +9312,7 @@ async function renderLaunch(){
   };
 
   view.innerHTML=`<div class="wrap">
-    <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Each city is a hub. Its businesses feed into it. Open a business to review checks and notes.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
+    <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Live cards show health. Launching cards show what's missing.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
     <div class="launch-stats"></div>
     <div class="launch-chips">
       <button type="button" class="launch-chip" data-launch-filter="All">All cities</button>
@@ -9291,7 +9380,7 @@ async function renderLaunch(){
         // the stripe/email/website rows changes the "live check disagrees"
         // line underneath it, so the panel has to be rebuilt to stay honest.
         const paint=()=>{
-          detail.innerHTML=launchDetailHtml(b, items);
+          detail.innerHTML=launchIsLive(b, items) ? `<div style="margin-top:10px;padding-top:4px;border-top:1px solid var(--line);">${launchNotesHtml('business', b.id, b.notes)}</div>` : launchDetailHtml(b, items);
           detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
             cb.addEventListener('click', ev=>ev.stopPropagation());
             cb.addEventListener('change', async ()=>{
@@ -9300,6 +9389,8 @@ async function renderLaunch(){
               try{
                 await api('launch_checklist_set',{method:'POST',body:{business_id,key,value}});
                 b.checklist[key]=value;
+                if(launchIsLive(b, items)){ view.querySelectorAll('.launch-open').forEach(x=>x.setAttribute('aria-expanded','false')); _launchFresh=_launchLastData; renderLaunch(); return; }
+                card.querySelector('.launch-open').textContent=`Missing (${launchScoreOf(b, items).total-launchScoreOf(b, items).passed})`;
                 const nextText=esc(launchNextAction(b, items)), href=launchActionHref(b);
                 card.querySelector('.launch-next').innerHTML = href
                   ? `<a href="${esc(href)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation();">${nextText}</a>`
@@ -9334,7 +9425,7 @@ async function renderLaunch(){
       view.querySelectorAll('.launch-open').forEach(b=>b.setAttribute('aria-expanded','false'));
       card.querySelector('.launch-open').setAttribute('aria-expanded',String(!open));
       if(!open){
-        detail.innerHTML=launchMarketDetailHtml(m, marketItems);
+        detail.innerHTML=launchMarketIsLive(m, marketItems) ? `<div style="margin-top:10px;padding-top:4px;border-top:1px solid var(--line);">${launchNotesHtml('market', m.id, m.notes)}</div>` : launchMarketDetailHtml(m, marketItems);
         detail.style.display='block';
         detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
           cb.addEventListener('click', ev=>ev.stopPropagation());
@@ -9344,6 +9435,9 @@ async function renderLaunch(){
             try{
               await api('launch_market_checklist_set',{method:'POST',body:{market_id,key,value}});
               m.checklist[key]=value;
+              if(launchMarketIsLive(m, marketItems)){ view.querySelectorAll('.launch-open').forEach(x=>x.setAttribute('aria-expanded','false')); _launchFresh=_launchLastData; renderLaunch(); return; }
+              if(value) cb.closest('label').remove();
+              card.querySelector('.launch-open').textContent=`Missing (${launchMarketScoreOf(m, marketItems).total-launchMarketScoreOf(m, marketItems).passed})`;
               card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
               const s=launchMarketScoreOf(m, marketItems);
               card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
@@ -9352,24 +9446,6 @@ async function renderLaunch(){
             catch(e){ cb.checked=!value; toast(e.message||'Could not save'); }
             finally{ cb.disabled=false; }
           });
-        });
-        const addrBtn=detail.querySelector('[data-launch-market-address-save]');
-        if(addrBtn) addrBtn.addEventListener('click', async ()=>{
-          const input=detail.querySelector('[data-launch-market-address-input]');
-          const market_id=addrBtn.dataset.launchMarketAddressSave, address=input.value.trim();
-          addrBtn.disabled=true;
-          try{
-            const r=await api('launch_market_address_set',{method:'POST',body:{market_id,address}});
-            m.address=r.address;
-            input.value=m.address||'';
-            card.querySelector('.launch-market-address').innerHTML=launchMarketAddressLineHtml(m);
-            card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
-            const s=launchMarketScoreOf(m, marketItems);
-            card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
-            toast('Address saved');
-          }
-          catch(e){ toast(e.message||'Could not save'); }
-          finally{ addrBtn.disabled=false; }
         });
         wireLaunchNotes(detail, (notes)=>{
           m.notes=notes;
