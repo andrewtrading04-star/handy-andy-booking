@@ -15585,9 +15585,14 @@ function ntLabel(t){ return '<div style="font-size:11px;font-weight:800;text-tra
 
 function ntStepFrom(body, close){
   if(!_ntLines.length){ body.innerHTML='<div class="empty">No numbers to text from.</div>'; return; }
+  const btn=(l)=>{ const i=_ntLines.indexOf(l), off=l.status==='blocked';
+    return '<button type="button" class="btn ghost" data-ntline="'+i+'"'+(off?' disabled':'')+' style="width:100%;text-align:left;padding:10px 12px;font-size:14px;display:flex;justify-content:space-between;gap:8px;'+(off?'opacity:.5;cursor:not-allowed;':'')+'">'
+      +'<span>'+esc(l.label)+'</span>'+(off?'<span class="rc-meta">Can\'t text yet</span>':'')+'</button>'; };
+  const main=_ntLines.filter(l=>l.main), rest=_ntLines.filter(l=>!l.main);
   body.innerHTML=ntLabel('Text from')
-    +'<div style="display:grid;gap:6px;max-height:55vh;overflow:auto;">'
-    +_ntLines.map((l,i)=>'<button type="button" class="btn ghost" data-ntline="'+i+'" style="width:100%;text-align:left;padding:10px 12px;font-size:14px;">'+esc(l.label)+'</button>').join('')
+    +'<div style="display:grid;gap:6px;max-height:60vh;overflow:auto;">'
+    +main.map(btn).join('')
+    +(rest.length?'<div style="margin:10px 0 2px;border-top:1px solid var(--line);padding-top:10px;">'+ntLabel('Other businesses')+'</div>'+rest.map(btn).join(''):'')
     +'</div>';
   body.querySelectorAll('[data-ntline]').forEach(b=>b.addEventListener('click',()=>ntStepTo(body, close, _ntLines[+b.dataset.ntline])));
 }

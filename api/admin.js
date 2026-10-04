@@ -17675,6 +17675,9 @@ function phoneIlike(d10) {
   return '%' + d10.slice(0, 3) + '%' + d10.slice(3, 6) + '%' + d10.slice(6) + '%';
 }
 
+// HA Denver line 2 and HA Houston line 2 are not used for new texts (owner, 2026-10-04).
+const NEW_TEXT_HIDDEN = new Set(['7207401120', '2816265853']);
+
 // GET ?action=messages_new_lines — the numbers this login may text from.
 async function messagesNewLines(req, res, db, auth) {
   const allowed = allowedSlugsFor(auth);
@@ -17687,12 +17690,28 @@ async function messagesNewLines(req, res, db, auth) {
   for (const l of lines || []) {
     if (!l.business_slug) continue;
     if (allowed !== null && !allowed.includes(l.business_slug)) continue;
+    if (NEW_TEXT_HIDDEN.has(digitsOf(l.phone))) continue;
     const b = bySlug.get(l.business_slug);
     out.push({ phone: digitsOf(l.phone), slug: l.business_slug, company: b ? b.name : l.business_slug, label: lineLabel(l, b && b.name) });
   }
+  // Can each line text yet? Its newest staff/auto text from the last 60 days
+  // says: blocked by the carriers (30034, not registered) vs delivered.
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  const { data: sent } = await db.from('messages').select('our_phone, status, error, created_at')
+    .eq('direction', 'out').in('our_phone', out.map((l) => l.phone)).gte('created_at', since)
+    .order('created_at', { ascending: false }).limit(2000);
+  const last = new Map();
+  for (const m of sent || []) {
+    if (last.has(m.our_phone)) continue;
+    if (m.status === 'delivered') last.set(m.our_phone, 'ok');
+    else if (/30034|not been registered|unregistered/i.test(m.error || '')) last.set(m.our_phone, 'blocked');
+  }
+  const MAIN = ['handy-andy', 'doms'];
+  for (const l of out) { l.main = MAIN.includes(l.slug); l.status = last.get(l.phone) || 'untested'; }
+  // Handy Andy + Dom's first (owner, 2026-10-04), then everyone else.
   // Two lines with the same name (e.g. two Houston numbers) get "line 2".
   const seen = new Map();
-  out.sort((a, b) => a.label.localeCompare(b.label) || a.phone.localeCompare(b.phone));
+  out.sort((a, b) => (b.main - a.main) || a.label.localeCompare(b.label) || a.phone.localeCompare(b.phone));
   for (const l of out) { const n = (seen.get(l.label) || 0) + 1; seen.set(l.label, n); if (n > 1) l.label += ' (line ' + n + ')'; }
   return res.status(200).json({ lines: out });
 }
