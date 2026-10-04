@@ -8559,6 +8559,8 @@ const GMB_LISTINGS = {
   },
   // A1 TV Mounting, DFW (owner 2026-10-01).
   a1tvmounting: { _all: ['https://g.page/r/CeBT0JzNUua1EBM/review'] },
+  // Astraea TV Mounting Austin (austinmounting.com), owner 2026-10-04.
+  austin: { _all: ['https://g.page/r/Cfy3b1Mtk59QEBM/review'] },
 };
 // Oklahoma locations bought from Dom (owner 2026-10-01). Any business's job
 // with an Oklahoma address gets these, whichever brand booked it.
