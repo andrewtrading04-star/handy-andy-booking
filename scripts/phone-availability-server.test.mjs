@@ -117,6 +117,69 @@ test('calendar pair requests share the same-pool roster query',async()=>{
   let reads=0;const f=setup({extra:{scopedRosterTechs:async()=>{reads++;return [[{id:'one',name:'Steve'},{id:'two',name:'Gregory'}]];}}});
   await f.dates({secondary_technician_id:'any',pool:'own',pool2:'own'});assert.equal(reads,1);
 });
+
+test('selected own-helper primary remains available for lifting without another roster technician',async()=>{
+  for(const name of ['Juan','Zach']){
+    const f=setup({techs:[{id:'tech-1',name}],rows:[{technician_id:'tech-1',day_of_week:2,slot_key:'s5'}]});
+    const r=await f.dates({technician_id:'tech-1',secondary_technician_id:'any',pool:'own',pool2:'own',needs_lifting:'1',include_slots:'1',strict_roster:'1'});
+    assert.ok(r.body.dates.includes('2026-09-15'));assert.deepEqual(r.body.slots_by_date['2026-09-15'].map(s=>s.slot_key),['s5']);
+  }
+});
+
+test('selecting a different primary never borrows the own-helper technicians availability',async()=>{
+  const f=setup({techs:[{id:'tech-1',name:'Steve'},{id:'tech-2',name:'Juan'}],rows:[{technician_id:'tech-2',day_of_week:2,slot_key:'s5'}]});
+  const r=await f.dates({technician_id:'tech-1',secondary_technician_id:'any',pool:'own',pool2:'own',needs_lifting:'1',include_slots:'1',strict_roster:'1'});
+  assert.deepEqual(r.body.dates,[]);assert.deepEqual(r.body.slots_by_date,{});
+});
+
+test('bundled calendar has exact selected-tech slots and excludes occupied primary and helper slots',async()=>{
+  const techs=[{id:'tech-1',name:'Steve'},{id:'tech-2',name:'Gregory'}];
+  const rows=techs.flatMap(t=>['s1','s2','s3'].map(slot_key=>({technician_id:t.id,day_of_week:3,slot_key})));
+  const f=setup({techs,rows,bookings:[{technician_id:'tech-1',scheduled_at:'2026-09-16T14:00:00Z'},{technician_id:'other',secondary_technician_id:'tech-1',scheduled_at:'2026-09-16T17:00:00Z'}]});
+  const selected=await f.dates({technician_id:'tech-1',include_slots:'1',strict_roster:'1'});
+  assert.deepEqual(selected.body.slots_by_date['2026-09-16'].map(s=>s.slot_key),['s3']);
+  const auto=await f.dates({include_slots:'1',strict_roster:'1'});
+  assert.deepEqual(auto.body.slots_by_date['2026-09-16'].map(s=>s.slot_key),['s1','s2','s3']);
+  const pair=await f.dates({include_slots:'1',secondary_technician_id:'any'});
+  assert.deepEqual(pair.body.slots_by_date['2026-09-16'].map(s=>s.slot_key),['s3']);
+  assert.deepEqual(selected.body.technicians,techs);
+});
+
+test('phone calendar refuses a selected technician outside its server roster',async()=>{
+  const f=setup({rows:[{technician_id:'outside',day_of_week:2,slot_key:'s5'}]});
+  const r=await f.dates({technician_id:'outside',include_slots:'1',strict_roster:'1'});
+  assert.deepEqual(r.body.dates,[]);assert.equal(r.body.reason,'technician_unavailable');
+  assert.equal(f.db.queries.filter(q=>q.table==='bookings').length,0);
+});
+
+test('phone roster and availability exclude technicians switched off without broadening a selected technician',async()=>{
+  const f=setup({techs:[{id:'tech-1',name:'Juan',status:'off'}],rows:[{technician_id:'tech-1',day_of_week:2,slot_key:'s5'}]});
+  for(const id of ['any','tech-1']){
+    const r=await f.dates({technician_id:id,include_slots:'1',strict_roster:'1'});
+    assert.deepEqual(r.body.technicians,[]);assert.deepEqual(r.body.dates,[]);
+  }
+});
+
+test('selected technician times reuse one roster state and allow only that technicians own helper',async()=>{
+  const techs=[{id:'tech-1',name:'Juan'},{id:'tech-2',name:'Steve'}];
+  const state=new Map([['tech-1',{keys:new Set(['s5']),booked:new Set()}],['tech-2',{keys:new Set(),booked:new Set()}]]);
+  let reads=0;const f=setup({extra:{rosterSlotState:async()=>{reads++;return {techs,state};},availableSlotKeys:()=>{throw Error('duplicate query');},freeSlotTechMap:()=>{throw Error('duplicate query');}}});
+  vm.runInContext(['freeMapFromState','freeKeysFromState','freeTechsByKeyFromState'].map(fn).join('\n'),f.ctx);
+  for(const id of ['tech-1','tech-2','outside']){
+    const r=await f.slots('2026-09-15',{technician_id:id,secondary_technician_id:'any',pool:'own',pool2:'own',needs_lifting:'1',strict_roster:'1'});
+    assert.deepEqual(r.body.slots.map(s=>s.slot_key),id==='tech-1'?['s5']:[]);
+  }
+  assert.equal(reads,3);
+});
+
+test('recurring, exceptions and bookings start together without a serial occupancy round trip',async()=>{
+  const started=[],pending=[];const f=setup();
+  const db=dbFor(q=>new Promise(resolve=>{started.push(q.table);pending.push(resolve);}));
+  const result=f.ctx.batchTechSlotState(db,['tech-1'],'2026-09-15',2,'America/Denver');
+  for(let i=0;i<5;i++)await Promise.resolve();
+  assert.deepEqual(new Set(started),new Set(['technician_availability','technician_availability_exceptions','bookings']));
+  pending.forEach(resolve=>resolve({data:[]}));await result;
+});
 test('booking own-helper fallback picks an available helper owner rather than another free single tech',async()=>{
   const f=setup({extra:{rosterSlotState:async()=>({techs:[{id:'steve',name:'Steve'},{id:'busy-juan',name:'Juan'},{id:'zach',name:'Zach'}],
     state:new Map([['steve',{keys:new Set(['s5']),booked:new Set()}],['busy-juan',{keys:new Set(['s5']),booked:new Set(['s5'])}],['zach',{keys:new Set(['s5']),booked:new Set()}]])})}});

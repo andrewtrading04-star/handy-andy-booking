@@ -8,7 +8,7 @@ import {signToken,verifyToken} from '../api/_lib/auth.js';
 const html=fs.readFileSync(new URL('../public/admin.html',import.meta.url),'utf8');
 const source=html.slice(html.indexOf('let _callsData='),html.indexOf('// Scroll to (and briefly ring)'));
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function context(extra={}){return vm.createContext({console,Date,Set,Promise,API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
+function context(extra={}){return vm.createContext({console,Date,Set,Promise,window:{innerWidth:1280},API:'/api/admin',token:'test',role:'owner',current:{slug:'handy-andy'},esc:escape,fmtDateTime:s=>s,fmtPhone:s=>s,money:s=>String(s),_callFocusId:null,...extra});}
 test('admin scripts parse',()=>{for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))if(m[1].trim())new vm.Script(m[1]);});
 
 test('texts, pending calls and answered calls never produce missed-call banners',()=>{
@@ -73,7 +73,7 @@ test('late report responses cannot replace another tab',async()=>{
 test('hub navigation survives child repaint and stays separate from content',async()=>{
  const view={innerHTML:'',classList:{toggle(){}},closest:()=>null},navigation={hidden:true,innerHTML:'',querySelectorAll:()=>[],querySelector:()=>({addEventListener(){}})};
  const tabs=[{id:'log',label:'Incoming Calls',show:()=>true,render:async()=>{view.innerHTML='Calls loaded';}},{id:'review',label:'Review Calls',show:()=>true,render:async()=>{view.innerHTML='Reviews loaded';}}];
- const ctx=vm.createContext({document:{getElementById:id=>id==='view'?view:navigation},CALL_TABS:tabs,ANALYTICS_TABS:[],callHubTab:'log',_hubScrollKey:'',esc:escape,hubBackBar:()=>'<button id="hubBack">Back</button>'});
+ const ctx=vm.createContext({document:{getElementById:id=>id==='view'?view:navigation},tabsToSelect:()=>{},CALL_TABS:tabs,ANALYTICS_TABS:[],callHubTab:'log',_hubScrollKey:'',esc:escape,hubBackBar:()=>'<button id="hubBack">Back</button>'});
  vm.runInContext(html.slice(html.indexOf('async function renderHub('),html.indexOf('async function renderCallHub(')),ctx);
  await ctx.renderHub(tabs,'log',()=>{});const before=navigation.innerHTML;
  view.innerHTML='Calls repainted after filter or poll';assert.equal(navigation.innerHTML,before);assert.equal(navigation.hidden,false);assert.match(before,/Incoming Calls/);
@@ -83,8 +83,8 @@ test('hub navigation survives child repaint and stays separate from content',asy
 test('inbox escapes content and selects notification target',()=>{
  const ctx=context();vm.runInContext(source,ctx);
  ctx.rows=[{id:'a',customer:{name:'<img onerror=alert(1)>'},transcript:'<script>bad</script>',status:'new',answered:false,occurred_at:'2026-09-15T10:00:00Z'}, {id:'b',status:'resolved',answered:true,occurred_at:'2026-09-15T11:00:00Z'}];
- const markup=vm.runInContext('callInbox(rows)',ctx);assert.ok(markup.includes('&lt;img'));assert.ok(!markup.includes('<script>bad'));
- vm.runInContext("_callFocusId='b'",ctx);assert.match(vm.runInContext('callInbox(rows)',ctx),/data-callselect="b" aria-pressed="true"/);
+ const markup=vm.runInContext('callInbox(callGroups(rows))',ctx);assert.ok(markup.includes('&lt;img'));assert.ok(!markup.includes('<script>bad'));
+ vm.runInContext("_callFocusId='b'",ctx);assert.match(vm.runInContext('callInbox(callGroups(rows))',ctx),/data-callselect="ib" aria-pressed="true"/);
  assert.equal(vm.runInContext('callOutcome({answered:false,called_back_at:"now"})',ctx),'Missed');
 });
 test('stale refresh and navigation cannot overwrite new results',async()=>{

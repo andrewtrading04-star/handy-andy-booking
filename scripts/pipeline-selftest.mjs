@@ -72,6 +72,21 @@ async function check(name, fn) {
   catch (e) { failed++; console.log(`FAIL ${name}\n     ${e.message.split('\n').join('\n     ')}`); }
 }
 
+await check('email-only sent estimate follows its explicit call link', () => {
+  const call = liveRow({caller_phone:CUST});
+  const quote = estimate({customer_phone:null,call_id:call.id,texted_at:null,emailed_at:ago(H)});
+  const card = one(raw({calls:[call],estimates:[quote]}));
+  assert.equal(card.stage,'quoted');
+  const viaEvent = {...quote,call_id:null};
+  assert.equal(one(raw({calls:[call],estimates:[viaEvent],callEvents:[{call_id:call.id,event:'estimate_sent',meta:{estimate_id:quote.id}}]})).stage,'quoted');
+  assert.equal(one(raw({calls:[call],estimates:[viaEvent]})).stage,'talked');
+  const other=liveRow({caller_phone:CUST2});
+  const ambiguous=board(raw({calls:[call,other],estimates:[quote],callEvents:[{call_id:other.id,event:'estimate_sent',meta:{estimate_id:quote.id}}]}));
+  assert.ok(ambiguous.cards.every(c=>c.stage==='talked'));
+  const crossBrand={...quote,business_id:'b-doms'};
+  assert.equal(one(raw({calls:[call],estimates:[crossBrand]})).stage,'talked');
+});
+
 // ── The spec's verification cases ───────────────────────────────────────────
 await check('missed call -> 2 failed tries -> Lost "Never reached"', () => {
   const c = missed({ occurred_at: ago(5 * H) });
@@ -612,15 +627,17 @@ await check('GET through the handler: scoping by login', async () => {
   assert.equal((await post(db, AUDITOR, { op: 'reopen', card_key: 'c_' + ha.id })).code, 403);
 });
 
-await check("Joey: another brand's card is view only (every write and the Call button refused)", async () => {
+await check("Joey: other-brand actions stay restricted while visible cards allow notes", async () => {
   const { db, ha, dom } = seedDb();
   const key = 'c_' + ha.id;
-  for (const b of [{ op: 'mark_lost', reason: 'Spam' }, { op: 'not_a_lead' }, { op: 'reopen' }, { op: 'talk', call_id: ha.id },
-    { op: 'no_talk', call_id: ha.id }, { op: 'log_attempt', phone: CUST, talked: false }, { op: 'add_note', body: 'called her' }]) {
+  for (const b of [{ op: 'mark_lost', reason: 'Spam' }, { op: 'reopen' }, { op: 'talk', call_id: ha.id },
+    { op: 'no_talk', call_id: ha.id }, { op: 'log_attempt', phone: CUST, talked: false }]) {
     assert.equal((await post(db, JOEY, { ...b, card_key: key })).code, 403, b.op);
   }
   assert.deepEqual([db.tables.pipeline_marks.length, db.tables.call_attempts.length, (db.tables.pipeline_notes || []).length], [0, 0, 0], 'nothing stored');
   assert.ok((await pipelineCallTarget(db, JOEY, CUST, 'handy-andy')).line, 'may dial a Handy Andy customer (dashboard access)');
+  assert.equal((await post(db, JOEY, { op: 'add_note', card_key: key, body: 'Team follow-up note' })).code, 200);
+  assert.equal((await post(db, JOEY, { op: 'add_note', card_key: 'c_00000000-0000-4000-8000-999999999999', body: 'x' })).code, 404);
   // Her own family still works.
   assert.equal((await post(db, JOEY, { op: 'add_note', card_key: 'c_' + dom.id, body: 'left a voicemail' })).code, 200);
   assert.equal((await post(db, JOEY, { op: 'mark_lost', card_key: 'c_' + dom.id, reason: 'Spam' })).code, 200);
@@ -628,7 +645,9 @@ await check("Joey: another brand's card is view only (every write and the Call b
   assert.equal((await post(db, HEATHER, { op: 'add_note', card_key: 'c_' + dom.id, body: 'x' })).code, 403);
   assert.equal((await post(db, HEATHER, { op: 'add_note', card_key: 'c_00000000-0000-4000-8000-999999999999', body: 'x' })).code, 404);
   assert.equal((await post(db, OWNER_AUTH, { op: 'add_note', card_key: key, body: 'owner note' })).code, 200);
-  assert.equal(db.tables.pipeline_notes.length, 2);
+  assert.equal(db.tables.pipeline_notes.length, 3);
+  assert.equal((await post(db, JOEY, { op: 'not_a_lead', card_key: key })).code, 200);
+  assert.equal(db.tables.pipeline_marks.at(-1).not_a_lead_by, 'Joey');
 });
 
 await check('POST mark_lost / not_a_lead / reopen', async () => {

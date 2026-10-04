@@ -39,6 +39,7 @@ function jobStripePk(slug) {
 import { uploadImage, deleteImage, readPrivateImage, notePhotoContentType } from './_lib/storage.js';
 import { denverToday, noteIsLive, isPrivateNotePhoto } from './_lib/notes.js';
 import { computeJobPay, PAY_DATE_OFFSET_DAYS, isJuan, isRetired } from './_lib/payroll.js';
+import { partsMoney, partsCorrectionsFor, partsPaymentSnapshot, partsAdjustmentDetail } from './_lib/payroll-parts.js';
 import { isHoustonBooking } from './_lib/houston-bonus.js';
 import { formatAddress, isLikelyStreetAddress } from './_lib/address.js';
 import { techIcs, calTechId, calLinks } from './_lib/tech-calendar.js';
@@ -2246,6 +2247,7 @@ async function techPayroll(req, res, db, auth) {
   // Per-zip travel payout (the "$X paid to the tech" half of the surcharge tier).
   const travelPayoutByZip = await travelPayoutMap(db, auth.business_id);
 
+  const partsCorrections=await partsCorrectionsFor(db,weekStart,{technicianId:techId});
   const paidJobs = [];
   const deferredJobs = [];
   let totalPay = 0;
@@ -2327,28 +2329,33 @@ async function techPayroll(req, res, db, auth) {
   // Unlike the review bonus there can be several, so they're listed, not
   // collapsed. Best-effort — a missing table just means no lines.
   try {
-    const { data: bonuses } = await db.from('tech_bonuses')
-      .select('id, amount, reason, awarded_on')
+    const { data: bonuses, error: bonusError } = await db.from('tech_bonuses')
+      .select('id, technician_id, amount, reason, message, awarded_on')
       .eq('technician_id', techId)
       .gte('awarded_on', weekStart).lte('awarded_on', weekEnd)
       .order('awarded_on', { ascending: true });
+    if(bonusError) throw bonusError;
     for (const b of bonuses || []) {
-      const amt = Math.round(Number(b.amount) || 0);
+      const amt = partsMoney(Number(b.amount) || 0);
       if (!amt) continue;
+      const detail=partsAdjustmentDetail(partsCorrections,b,weekStart);
+      if(amt<0 && String(b.message||'').startsWith('Parts reimbursement correction') && !detail) continue;
       paidJobs.push({
         id: `bonus-${b.id}`,
         bonus: true,   // mirrors admin payroll's flag: not a worked job
         customer_name: b.reason || 'Bonus',
-        service: 'Bonus',
+        service: amt<0?'Payroll adjustment':'Bonus',
+        adjustment:amt<0,
+        ...(detail||{}),
         time: '',
         tech_pay: amt,
-        breakdown: [{ label: b.reason || 'Bonus', amount: amt }],
+        breakdown: [{ label: amt<0?(detail?.message||b.message||b.reason):(b.reason||'Bonus'), amount: amt }],
         flags: [],
         needs_review: false,
       });
       totalPay += amt;
     }
-  } catch { /* migration 0105 not applied yet */ }
+  } catch(e) { if(partsCorrections.length) throw e; /* migration 0105 not applied yet */ }
 
   return res.status(200).json({
     week_start: weekStart,
@@ -2357,7 +2364,8 @@ async function techPayroll(req, res, db, auth) {
     tech_name: techName,
     jobs: paidJobs,
     deferred: deferredJobs,
-    total: totalPay,
+    total: partsMoney(totalPay),
+    paid_snapshot:partsPaymentSnapshot(partsCorrections,techId,weekStart),
     manual_pay: manualPay,
   });
 }
@@ -2445,6 +2453,7 @@ async function techBonusUnseen(req, res, db, auth) {
     .select('id, amount, reason, message, awarded_on')
     .eq('technician_id', auth.tech_id)
     .is('acknowledged_at', null)
+    .gt('amount',0)
     .not('message', 'is', null)
     .order('awarded_on', { ascending: true })
     .limit(5);

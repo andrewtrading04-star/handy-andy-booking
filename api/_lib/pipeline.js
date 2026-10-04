@@ -351,10 +351,19 @@ export function buildTouches(raw, ctx = makeContext(raw), now = Date.now()) {
     // its key -- and its Not a lead / Lost marks -- when the archive happens;
     // a card made of nothing else is dropped (groupCards). Review 2026-09-24.
     const archivedUnsent = e.status === 'archived' && !stamps.length;
-    const phone = phone10(e.customer_phone); if (ctx.isExcluded(phone)) continue;
+    const slug = ctx.slugOf(e);
+    let phone = phone10(e.customer_phone);
+    // Email-only phone estimates still belong to their explicitly linked call.
+    // Never infer a customer from an amount, email address, or nearby timestamp.
+    if (!phone) {
+      const linkedIds = new Set(e.call_id ? [e.call_id] : []);
+      for (const ev of raw.callEvents || []) if (ev.event === 'estimate_sent' && ev.meta?.estimate_id === e.id) linkedIds.add(ev.call_id);
+      const phones = new Set(touches.filter(t => (t.type === 'wizard' || t.type === 'call_in') && linkedIds.has(t.id) && t.family === familyOf(slug)).map(t => t.phone).filter(Boolean));
+      if (phones.size === 1) phone = [...phones][0];
+    }
+    if (ctx.isExcluded(phone)) continue;
     if (TEST_NAME.test(e.customer_name || '')) continue;
     const atMs = msOf(e.created_at); if (atMs == null) continue;
-    const slug = ctx.slugOf(e);
     const sent = e.status === 'contacted' || e.status === 'scheduled' || stamps.length > 0;
     // The quote clock (owner rule 2026-09-24): a phone estimate goes out the
     // moment it is created; a web one when it was FIRST sent. Resends
@@ -1133,7 +1142,7 @@ export function buildPipeline(raw, now = Date.now(), opts = {}) {
     .sort((a, b) => b.talked - a.talked || a.name.localeCompare(b.name));
   // A secretary sees only her own row (owner rule 2026-09-24).
   if (!isOwner) scoreboard = scoreboard.filter((r) => r.name === opts.viewerName);
-  shaped.sort((a, b) => (Number(b.leak) - Number(a.leak)) || (a.last_at < b.last_at ? 1 : a.last_at > b.last_at ? -1 : 0));
+  shaped.sort((a, b) => String(a.opened_at || a.last_at || '').localeCompare(String(b.opened_at || b.last_at || '')) || a.key.localeCompare(b.key));
   if (shaped.length > CARD_CAP) shaped = shaped.slice(0, CARD_CAP);
   return {
     floor: PIPELINE_FLOOR,
@@ -1277,10 +1286,9 @@ export async function pipelineHandler(req, res, db, auth, body) {
   if (body && body.op === 'add_note') {
     const key = String(body.card_key || ''), text = String(body.body || '').trim().slice(0, 1000);
     if (!/^c_[0-9a-f-]{36}$/i.test(key) || !text) return res.status(400).json({ error: 'Write a note first.' });
-    // A note is a write: same card check as the ops below (Joey's other
-    // brands are view only, owner 2026-10-03).
-    const act = pipelineWriteSlugsFor(auth);
-    if (act !== null) {
+    // Secretaries may add notes to every card they can see, including Joey's other brands.
+    const act = pipelineSlugsFor(auth);
+    if (auth.role !== 'owner') {
       const nowMs = Date.now();
       const card = computeCards(await loadPipelineRaw(db, { nowMs }), nowMs).cards.find((c) => c.key === key);
       if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
@@ -1376,7 +1384,8 @@ async function pipelineOp(res, db, auth, body) {
   const { cards, ctx } = computeCards(raw, nowMs);
   const card = cards.find((c) => c.key === key);
   if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
-  if (!cardVisible(card, pipelineWriteSlugsFor(auth))) return res.status(403).json({ error: 'Forbidden for this business' });
+  const actionScope=op==='not_a_lead' && auth.role==='secretary' && auth.name==='Joey' ? pipelineSlugsFor(auth) : pipelineWriteSlugsFor(auth);
+  if (!cardVisible(card, actionScope)) return res.status(403).json({ error: 'Forbidden for this business' });
   const biz = card.shownSlug && ctx.bizBySlug.get(card.shownSlug);
   const bizId = biz ? biz.id : null;
 

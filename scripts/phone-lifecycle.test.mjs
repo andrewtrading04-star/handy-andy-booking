@@ -63,6 +63,7 @@ function setup(){
     nbHandymanActive:false,nbHandymanHours:0,nbHandymanLabel:'',nbHandymanNote:'',nbAssurionActive:false,nbAssurionSel:new Set(),nbGdsActive:false,nbNoChargeActive:false,nbCustomTaskActive:false,
     closeSidebar(){},renderNbConvertSummary(){},nbRenderCustomLines(){},onScreen(){return false;},openNewBooking(){},
     cwWarmTvCatalog(slug){const warm={slug,...deferred()};warmups.push(warm);return warm.promise;},
+    cwLoadStripeLibrary:async()=>{},
     toast:s=>toasts.push(s),esc:String,callWizScript:s=>s,cwBackBtnHtml:()=>'',cwWireBack(){},
     HANDYMAN_HOURLY:85,TAX_RATE:0.0825,money:value=>'$'+value,
     callWizChoiceRow:opts=>opts.map(o=>`<button data-cwchoice="${o.value}">${o.label}</button>`).join(''),
@@ -102,6 +103,13 @@ test('TV catalog warmup runs alongside logging and cannot block or repaint the Z
   const view=f.ctx.draft()._view;f.warmups[0].reject(Error('Warmup offline'));await new Promise(r=>setImmediate(r));
   assert.equal(f.ctx.draft().step,'zip');assert.equal(f.ctx.draft()._view,view);assert.equal(f.node('callWizErr').textContent,'');
   f.ctx.draft().step='greet';await f.ctx.renderCallWiz();await f.choose('Handyman');assert.equal(f.warmups.length,1);
+});
+test('card processor starts loading during TV questions and a failed prefetch never blocks the call',async()=>{
+  const f=setup(),card=deferred();let loads=0;f.ctx.cwLoadStripeLibrary=()=>{loads++;return card.promise;};
+  f.ctx.openTakeCall();const starting=f.choose();assert.equal(loads,1);assert.equal(f.starts().length,1);
+  f.starts()[0].resolve({id:'call-1'});await starting;assert.equal(f.ctx.draft().step,'zip');
+  card.reject(Error('processor offline'));await new Promise(r=>setImmediate(r));assert.equal(f.ctx.draft().step,'zip');assert.equal(f.node('callWizErr').textContent,'');
+  f.ctx.draft().step='greet';await f.ctx.renderCallWiz();await f.choose('Handyman');assert.equal(loads,1);
 });
 
 test('a different service keeps one call record and clears only old service answers',async()=>{
@@ -218,7 +226,7 @@ test('a paused phone quote restores all shared pricing fields after the real New
 test('actual New Booking open pauses the phone before resetting and cannot overwrite it on return',async()=>{
   const f=setup(),draft=await f.begin(),data=deferred();draft.step='tvopts';draft.optsLoaded=true;
   Object.assign(f.ctx,{nbOptionGroups:[{id:'size',options:[{id:'large',price:125}]}],nbQty:{size:{large:2}},nbServices:[{id:'phone-service'}],nbServiceId:'phone-service',nbAreaName:'Austin',nbZipAreaId:'area-1',nbAutoTravel:'25',nbUpsSel:{},nbUpsCustom:[],
-    smsConsentScript:()=>'',nbStartProgressTimer(){},attachAddressAutocomplete(){},loadNbCalendar(){},renderNbRequestedTimes(){},nbZipReplyIdle(){},nbEnsureDataCached:()=>data.promise,
+    TEXTS_ON_LABEL:'Text customer job updates',smsConsentScript:()=>'',nbStartProgressTimer(){},attachAddressAutocomplete(){},loadNbCalendar(){},renderNbRequestedTimes(){},nbZipReplyIdle(){},nbEnsureDataCached:()=>data.promise,
   });
   f.node('nbTravelFee').value='25';f.ctx.document.getElementById=f.node;f.ctx.document.querySelector=()=>f.node('nbSubmit');
   const start=html.indexOf('async function openNewBooking(prefill){'),end=html.indexOf('\n}\n',start)+3;

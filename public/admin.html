@@ -107,6 +107,13 @@
   .side-nav{display:flex;flex-direction:column;gap:1px;padding:0 8px 6px;}
   .side-nav button{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font-size:14px;font-weight:600;text-align:left;width:100%;}
   .side-nav button .ic{width:18px;text-align:center;}
+  .side-nav .nav-group-summary{display:flex;align-items:center;gap:10px;background:transparent;border:none;color:var(--ink-2);padding:9px 10px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;text-align:left;width:100%;box-sizing:border-box;cursor:pointer;list-style:none;}
+  .side-nav .nav-group-summary::-webkit-details-marker{display:none;}
+  .side-nav .nav-group-summary:hover{background:var(--line2);}
+  .side-nav .nav-group-summary .ic{width:18px;text-align:center;flex:none;}
+  #joeyCommunication[open] .nav-group-summary .ic{transform:rotate(90deg);}
+  body.sb-glass.sb-mini .sidebar:not(:hover) .nav-group-summary{font-size:0;justify-content:center;padding:12px 0;}
+  body.sb-glass.sb-mini .sidebar:not(:hover) .nav-group-summary .ic{font-size:17px;width:auto;}
   .side-nav button:hover{background:var(--line2);}
   .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
   .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
@@ -1989,11 +1996,30 @@
   .greeting.gl .greet-stats>.gstat:nth-child(5){grid-area:pf;}
   .greeting.gl .greet-stats>.gstat:nth-child(6){grid-area:ndp;}
   .greeting.gl .gstat .gstat-l{color:#6b7280;opacity:1;}
-  .greeting.gl .gstat svg text{fill:#6b7280;}
+  .greeting.gl .gstat svg text{fill:#374151;}
+  .booking-rate-row{margin-top:12px;min-width:0;}
+  .booking-rate-label{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:7px;font-size:14px;}
+  .booking-rate-label span{font-size:13px;color:#4b5563;}
+  .booking-rate-meter{display:flex;align-items:center;gap:10px;}
+  .booking-rate-track{flex:1;min-width:0;height:24px;background:#fff;border-radius:7px;}
+  .booking-rate-meter>b{min-width:49px;text-align:right;font-size:14px;font-variant-numeric:tabular-nums;color:#1f2937;}
+  .dashboard-chart-layout{display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;align-items:center;width:calc(100% + 20px);margin-left:-10px;}
+  .dashboard-chart-layout .ndp-seg{display:flex;flex-direction:column;align-self:center;gap:4px;margin:0;}
+  .dashboard-chart-layout .ndp-seg button{width:100%;padding:9px 5px;white-space:normal;}
+  #incomeChart,#ndpChart{width:100%;min-width:0;}
+  .greeting.gl .ndp-scroll{width:100%;overflow:visible;}
+  .greeting.gl .ndp-seg button{font-size:12px;padding:5px 10px;}
   .greeting.gl .gstat svg line{stroke:#e5e7eb;}
   .greeting.gl .gstat .rev-sec-bar{background:#eef0f5;}
   .dpl .st-new{--st:#93c5fd;} .dpl .st-talked{--st:#fbbf24;} .dpl .st-quoted{--st:#a3d65c;} .dpl .st-booked{--st:#22d3ee;} .dpl .st-completed{--st:#a78bfa;}
   .dpl .dpl-cell{background:color-mix(in srgb,var(--st) 28%,#fff);border-top:3px solid var(--st);} .dpl .dpl-cell:hover{background:color-mix(in srgb,var(--st) 42%,#fff);}
+  .jy .dpl{border-top:1px solid #d4d9e2;margin-top:9px;padding-top:1px;width:100%;}
+  .jy .dpl-row{grid-template-columns:repeat(2,minmax(0,1fr));}
+  body.joey-nav #sideNav [data-nav="schedule"], body.joey-nav #sideNav [data-nav="estimates"], body.joey-nav #sideNav #navGallery{display:none!important;}
+  .jy-stock{display:inline-flex;width:fit-content;max-width:100%;align-self:flex-start;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .greeting.gl .greet-stats.jy>.gstat:first-child{align-items:center;justify-content:center;text-align:center;}
+  .jy-coverage{font-size:15px;line-height:1.7;}
+  .jy-stock:focus-visible{outline:2px solid #534ab7;outline-offset:3px;}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
   .dpl-cell{border:none;background:#f3f4f8;border-radius:10px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;color:inherit;}
   .dpl-cell:hover{background:#e9ebf3;} .dpl-cell b{font-size:18px;font-weight:850;line-height:1.1;} .dpl-cell span{font-size:10px;color:#6b7280;font-weight:700;text-align:center;line-height:1.15;}
@@ -2871,7 +2897,7 @@ let availViewSlug = null;      // which business the Availability tab is viewing
 const PALETTE = ['#2563eb','#16a34a','#db2777','#9333ea','#0891b2','#ea580c','#ca8a04','#0d9488','#dc2626','#4f46e5'];
 
 // ── API helper ───────────────────────────────────────────────────────────
-async function api(action, { method='GET', params={}, body=null, timeoutMs=45000, authToken=null } = {}) {
+async function api(action, { method='GET', params={}, body=null, timeoutMs=45000, authToken=null, signal=null } = {}) {
   const url = new URL(API, location.origin);
   url.searchParams.set('action', action);
   for (const [k,v] of Object.entries(params)) if (v!=null && v!=='') url.searchParams.set(k, v);
@@ -2884,6 +2910,9 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
   // connection eventually gives up and lets the UI recover.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const cancel=()=>ctrl.abort();
+  if(signal?.aborted) ctrl.abort();
+  else signal?.addEventListener('abort',cancel,{once:true});
   // authToken: send a different session than the current one (View As -> Jiyah
   // needs the stashed OWNER token while this tab is running as a secretary).
   const sent=authToken||token;   // the session this request goes out with (see the 401 branch)
@@ -2894,13 +2923,17 @@ async function api(action, { method='GET', params={}, body=null, timeoutMs=45000
       headers: { 'Content-Type':'application/json', ...(sent && { Authorization:`Bearer ${sent}` }) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
+      ...(['available_dates','available_slots'].includes(action) && {cache:'no-store'}),
     });
     // Keep the deadline active while downloading the body as well as headers.
     data = await res.json().catch(e=>{ if(e.name==='AbortError') throw e; return {}; });
   } catch (e) {
-    throw e.name === 'AbortError' ? new Error('Request timed out — check your connection and try again.') : e;
+    if(signal?.aborted) { const cancelled=new Error('Request cancelled'); cancelled.name='AbortError'; throw cancelled; }
+    if(e.name==='AbortError') { const timeout=new Error('Request timed out — check your connection and try again.'); timeout.code='request_timeout'; throw timeout; }
+    throw e;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort',cancel);
   }
   // A 401 on an AUTHENTICATED call means the saved token is stale — log out and
   // prompt re-login. But a 401 from the login / session_status calls is just a
@@ -3159,7 +3192,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 function dismissAllOverlays(){
   const step=fn=>{ try{ fn(); }catch(_){} };
   step(()=>cwCaptureQuote());
-  step(()=>{ if(callWiz){ callWiz._visible=false; callWiz._view++; } });
+  step(()=>{ if(callWiz){ callWiz._visible=false; callWiz._view++; callWiz._calendarRequest?.controller.abort(); callWiz._slotRequestController?.abort(); } });
   step(()=>nbStopProgressTimer());
   step(()=>{ nbModalSession++; });   // in-flight New Booking submits must not re-hide/re-show #modal later
   ['modal','callWizModal','bkModal','availModal','custModal','custDetailModal','estModal','lightbox','viewAsPopover']
@@ -3462,7 +3495,7 @@ function enterApp(){
   if(navRev) navRev.style.display = role==='owner' ? '' : 'none';
   // My Availability: secretary only (Heather sees hers on Handy Andy, Joey
   // his on Dom's — same per-business login scoping the whole feature rides
-  // on). Secretaries: owner only, read-only view of both.
+  // on). Joey can also open the read-only team roster under Other.
   const navMyAvail=document.getElementById('navMyAvailability');
   if(navMyAvail) navMyAvail.style.display = role==='secretary' ? '' : 'none';
   // Collapsible menu for every login (owner 2026-10-01). Collapse is remembered per browser.
@@ -3472,7 +3505,7 @@ function enterApp(){
   if(sbC && !sbC._wired){ sbC._wired=true; sbC.addEventListener('click',()=>{ const on=!document.body.classList.contains('sb-mini'); document.body.classList.toggle('sb-mini',on); sbC.textContent=on?'›':'‹'; try{ localStorage.setItem('sb_mini',on?'1':'0'); }catch(_){} }); }
   if(sbC) sbC.textContent=document.body.classList.contains('sb-mini')?'›':'‹';
   const navOther=document.getElementById('navOther');
-  if(navOther) navOther.style.display = role==='owner' ? '' : 'none';
+  if(navOther) navOther.style.display = (role==='owner'||(role==='secretary'&&userName==='Joey')) ? '' : 'none';
   // Technicians: everyone (owner + each secretary sees/manages only their own
   // business's technicians; the API is scoped by business_id server-side).
   const navTech=document.getElementById('navTechnicians');
@@ -3485,6 +3518,7 @@ function enterApp(){
   document.body.classList.toggle('pl-on', role==='secretary');
   // Review Calls: Joey's tool (cross-business outreach) — not part of Heather's
   // (Handy Andy secretary) workflow, so it's hidden on her platform specifically.
+  configureJoeyNav();
   renderSwitcher();
   // Arriving from the "new estimate" text (/admin.html?estimate=<id>): open the
   // Estimates tab straight away instead of the schedule, then focusPendingEstimate()
@@ -3493,7 +3527,7 @@ function enterApp(){
   let _urlCall=null; try{ _urlCall=new URLSearchParams(location.search).get('call'); }catch(_){}
   if(pendingEstimateId){ estFilter='all'; navTo('estimates'); }
   else if(_urlCall){ openCallLink(_urlCall); }
-  else navTo('schedule');
+  else navTo(isJoeyHome()?'pipeline':'schedule');
   // navTo('schedule') already runs renderGreeting(), which itself calls
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
   // Bad-review alert banner: load now, then refresh every 60s while signed in.
@@ -3679,7 +3713,7 @@ function renderBadAlerts(alerts){
 // other business temporarily points `current` at that business (the modal's
 // photo/note/edit calls all key off current.slug) and restores it on close.
 document.addEventListener('click', e=>{
-  const tr=e.target.closest && e.target.closest('tr[data-pr-job]');
+  const tr=e.target.closest && e.target.closest('[data-pr-job]');
   if(tr) openPayrollJob(tr.dataset.prJob, tr.dataset.prSlug);
 });
 async function openPayrollJob(id, slug){
@@ -3821,6 +3855,23 @@ function openCalBooking(b){
   openBooking(b);
 }
 
+function configureJoeyNav(){
+  const nav=document.getElementById('sideNav');
+  if(!nav._originalOrder) nav._originalOrder=Array.from(nav.children);
+  nav._originalOrder.forEach(el=>nav.appendChild(el));
+  document.getElementById('joeyCommunication')?.remove();
+  const joey=role==='secretary'&&userName==='Joey';
+  const task=document.getElementById('navTasks');
+  Array.from(task.childNodes).filter(n=>n.nodeType===3).forEach(n=>{if(n.textContent.trim()) n.textContent=joey?' Tasks ':' Task ';});
+  document.body.classList.toggle('joey-nav',joey);
+  document.getElementById('navNotes').style.display=joey?'':'none';
+  if(!joey) return;
+  const comm=document.createElement('details'); comm.id='joeyCommunication';
+  comm.innerHTML='<summary class="nav-group-summary"><span class="ic" aria-hidden="true">▸</span>Communication</summary>';
+  ['navCallHub','navMessages'].forEach(id=>{const el=document.getElementById(id);comm.appendChild(el);});
+  const first=['navPipeline','navTasks','navNotes','navAskAndrew'].map(id=>document.getElementById(id));
+  nav.prepend(...first,comm);
+}
 function renderSwitcher(){
   const el = document.getElementById('switcher');
   const allBiz = businesses.concat(viewBusinesses);
@@ -3934,7 +3985,7 @@ function navTo(s){
     else if(s==='notes') renderNotes();
     else if(s==='myday') renderMyDay();
     else if(s==='tasks') renderTasks();
-    else if(s==='pipeline') renderPipeline();
+    else if(s==='pipeline'){ renderPipeline(); if(isJoeyHome()) renderGreeting(); }
     else if(s==='askandrew') renderAskAndrew();
   }
 }
@@ -5174,12 +5225,46 @@ function openBooking(b){
   document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
   document.getElementById('bkAddNote').onclick=()=>addBookingNote(b.id);
   mountLineItemsEditor(b);
+  if(role==='owner'&&b.status==='completed'&&b.secondary_technician_id){
+    const box=document.createElement('div'); box.id='bkPartsPayroll'; box.style.cssText='padding:14px 0;border-top:1px solid var(--line);';
+    box.innerHTML='<span class="bk-dl">Payroll correction</span><button class="btn ghost sm" id="bkPartsStart">Correct parts reimbursement</button>';
+    document.getElementById('bkBody').appendChild(box);
+    document.getElementById('bkPartsStart').onclick=()=>editPartsPayroll(b);
+  }
   const ce=document.getElementById('bkContactEdit'); if(ce) ce.onclick=()=>editBookingContact(b);
 }
 
 // Inline editor: fix a booking's SERVICE address + the customer's phone/email
 // after the job is booked. Address saves to the booking; phone/email to the
 // customer record. Available to any office user (owner / Joey / Heather).
+
+async function editPartsPayroll(b){
+  const box=document.getElementById('bkPartsPayroll'); if(!box) return;
+  box.textContent='Loading payroll…';
+  try{
+    const d=await api('payroll_parts_preview',{params:{business:current.slug,id:b.id}});
+    const show=c=>{box.innerHTML=`<span class="bk-dl">Payroll correction saved</span><p>${esc(c.techs.map(t=>`${t.name}: $${t.corrected_job_pay.toFixed(2)} job pay; $${t.deduction.toFixed(2)} deduction`).join(' · '))}</p><p>Deduction week: ${esc(c.target_week)}. Previously paid: ${esc(c.techs.map(t=>`${t.name} $${t.paid_week_total.toFixed(2)}`).join(' · '))}.</p><p style="font-size:13px;">${esc(c.message)}</p>`;};
+    if(d.existing?.status==='complete'){show(d.existing);return;}
+    const p=d.existing||null;
+    const techs=p?p.techs.map(t=>({...t,weekly_total:t.paid_week_total})):d.techs;
+    const fieldStyle='width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;margin:4px 0 10px;';
+    box.innerHTML=`<span class="bk-dl">Parts reimbursement correction</span><p style="font-size:13px;">Parts were paid for by Andrew. Record the corrected job pay and recover the difference once.</p>
+      <label>Corrected total tech pay<input id="partsTotal" type="number" step="0.01" min="0" style="${fieldStyle}" value="${p?p.corrected_total:''}"></label>
+      ${techs.map(t=>`<label>Already paid to ${esc(t.name)} for the original week<input type="number" step="0.01" min="0" data-parts-paid="${esc(t.id)}" style="${fieldStyle}" value="${t.weekly_total}"></label>`).join('')}
+      <label>Deduct in payroll week beginning<input id="partsWeek" type="date" style="${fieldStyle}" value="${p?p.target_week:d.next_week}"></label>
+      <button class="btn ghost sm" id="partsSave">Save payroll correction</button><div id="partsStatus" style="margin-top:8px;font-size:13px;"></div>`;
+    document.getElementById('partsSave').onclick=async()=>{
+      const btn=document.getElementById('partsSave'),status=document.getElementById('partsStatus'); btn.disabled=true;
+      try{
+        if(!document.getElementById('partsTotal').value.trim() || [...box.querySelectorAll('[data-parts-paid]')].some(i=>!i.value.trim())) throw new Error('Enter corrected pay and both amounts already paid.');
+        const paid_totals=Object.fromEntries([...box.querySelectorAll('[data-parts-paid]')].map(i=>[i.dataset.partsPaid,Number(i.value)]));
+        const r=await api('payroll_parts_save',{method:'POST',body:{business:current.slug,id:b.id,corrected_total:Number(document.getElementById('partsTotal').value),target_week:document.getElementById('partsWeek').value,paid_totals}});
+        show(r.correction); loadBookingNotes(b.id); if(section==='payroll') loadPayroll(); toast('Payroll correction saved');
+      }catch(e){status.textContent=e.message;btn.disabled=false;}
+    };
+  }catch(e){box.textContent=e.message;}
+}
+
 function editBookingContact(b){
   const row=document.getElementById('bkAddrRow'); if(!row) return;
   ['bkPhoneRow','bkEmailRow'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
@@ -9364,7 +9449,7 @@ async function loadPayroll(){
 // Negatives read "-$256", not "$-256". A cash job pays the tech a NEGATIVE
 // amount (they kept the customer's money), and the deduction line inside a
 // pay breakdown is negative too, so this is now a normal case here.
-function payFmtUSD(n){ const v=Number(n||0); return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US'); }
+function payFmtUSD(n){ const v=Number(n||0); return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:Number.isInteger(v)?0:2,maximumFractionDigits:2}); }
 // Joey is paid in Philippine pesos, Heather in US dollars — each secretary
 // row carries its own `currency` (see office_pay_weekly / SECRETARY_RATE in
 // admin.js), so amounts are never silently mixed into one $ figure.
@@ -9591,7 +9676,7 @@ function renderPayrollData(d){
     }
     html+=`<tr class="${i%2?'z':''}">
       <td class="pr-name">${esc(t.name)}</td>
-      <td class="r">${realJobs(t)}${t.jobs.some(j=>j.bonus)?' <span title="Plus the $100 review bonus" style="color:var(--green,#16a34a);">+💵</span>':''}</td>
+      <td class="r">${realJobs(t)}${t.jobs.some(j=>j.bonus&&!j.adjustment)?' <span title="Plus a bonus" style="color:var(--green,#16a34a);">+💵</span>':''}</td>
       <td class="r">${t.deferred.length?`<span class="pr-defer-amt">${t.deferred.length}</span>`:'—'}</td>
       <td class="r"><span class="pr-money">${payFmtUSD(t.total)}</span></td>
     </tr>`;
@@ -9612,7 +9697,8 @@ function renderPayrollData(d){
     html+=`<div class="pr-sec">Per-Tech Job Breakdown</div>`;
     html+=`<div class="pr-note">Every paid job per technician — customer, pay breakdown, and total pay. ⚠️ flags a job that needs review.</div>`;
     for(const t of techsWithJobs){
-      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${realJobs(t)} job${realJobs(t)===1?'':'s'}${t.jobs.some(j=>j.bonus)?' + $100 review bonus':''}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
+      html+=`<div class="pr-sec" style="font-size:16px; margin-top:24px;">${esc(t.name)} <span class="meta">— ${realJobs(t)} job${realJobs(t)===1?'':'s'}${t.jobs.some(j=>j.bonus&&!j.adjustment)?' + bonus':''}, <span class="amt">${payFmtUSD(t.total)}</span></span></div>`;
+      if(t.paid_snapshot) html+=`<div class="pr-note">Already paid ${payFmtUSD(t.paid_snapshot.amount)}. Corrected earnings ${payFmtUSD(t.total)}. ${t.paid_snapshot.corrections.map(c=>`${payFmtUSD(c.deduction)} recovery scheduled for week of ${esc(c.target_week)}.`).join(' ')}</div>`;
       html+=`<table class="pr-tbl"><thead><tr>
           <th>Time</th><th>Customer</th><th>Pay breakdown</th><th class="r">Pay</th>
         </tr></thead><tbody>`;
@@ -9623,7 +9709,7 @@ function renderPayrollData(d){
         html+=`<tr class="${i%2?'z':''}"${job.id&&!String(job.id).startsWith('bonus-')&&!String(job.id).startsWith('review-bonus-')?` data-pr-job="${esc(job.id)}" data-pr-slug="${esc(job.business_slug||'')}" title="Open this job"`:''}>
           <td style="white-space:nowrap; color:var(--mute);">${esc(job.time)}</td>
           <td><span class="pr-name">${esc(job.customer_name)}</span>${bizBadge(job)}<div class="pr-li">${esc(job.service)}</div></td>
-          <td><div class="pr-li" style="margin-top:0;">${bd}</div></td>
+          <td><div class="pr-li" style="margin-top:0;">${bd}</div>${job.adjustment_id?`<div style="margin-top:8px;"><button class="btn ghost sm" data-pr-job="${esc(job.source_booking_id)}" data-pr-slug="${esc(job.business_slug||'')}">Open original job</button> ${job.settled_at?'<span>Adjustment applied</span>':`<button class="btn ghost sm" data-parts-settle="${esc(job.adjustment_id)}" data-parts-job="${esc(job.source_booking_id)}" data-parts-biz="${esc(job.business_slug||'')}">Mark deduction applied</button>`}</div>`:''}</td>
           <td class="r"><span class="pr-money">${payFmtUSD(job.tech_pay)}</span>${job.needs_review?`<span class="pr-flag-ic">⚠️</span>`:''}</td>
         </tr>`;
         if(job.flags && job.flags.length){
@@ -9665,6 +9751,7 @@ function renderPayrollData(d){
     payrollTechFilter = e.target.value || null;
     if(payrollRawData) renderPayrollData(payrollRawData);
   });
+  content.querySelectorAll('[data-parts-settle]').forEach(btn=>btn.onclick=async e=>{e.stopPropagation();btn.disabled=true;try{await api('payroll_parts_settle',{method:'POST',body:{business:btn.dataset.partsBiz,id:btn.dataset.partsJob,adjustment_id:btn.dataset.partsSettle}});await loadPayroll();}catch(err){toast(err.message);btn.disabled=false;}});
   wireActualProfit();
   // Live USD reference next to Joey's peso input — updates as he types, no
   // save/round-trip needed. Uses the server-provided fx_rate (the manual
@@ -9844,12 +9931,12 @@ async function renderMyAvailability(){
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
 
-// ── Secretaries (owner) ──────────────────────────────────────────────────────
-// Read-only: Heather's and Joey's weekly work/off pattern side by side, plus
-// any upcoming date-specific exceptions. Editing happens only from each
-// secretary's own "My Availability" tab.
+// ── Secretaries ──────────────────────────────────────────────────────────────
+// Owner manages schedule exceptions; Joey sees a read-only view of everyone's
+// weekly work/off days and can open the staff-note composer from this screen.
 async function renderSecretaries(){
   const view=document.getElementById('view');
+  const isJoey=role==='secretary'&&userName==='Joey';
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
   try{
     const d=await api('secretaries_list');
@@ -9860,7 +9947,7 @@ async function renderSecretaries(){
         const on=!!patternByDow[dow];
         return `<div class="job" style="display:flex;align-items:center;justify-content:space-between;">
           <div class="name">${esc(d.day_names[dow])}</div>
-          <div class="meta" style="font-weight:700;color:${on?'var(--accent)':'var(--mute)'};">${on?'Working':'Off'}</div>
+          ${role==='owner'?`<button type="button" class="btn ghost sm" style="width:auto;color:${on?'var(--accent)':'var(--mute)'};" data-sec-week="${dow}" data-sec-name="${esc(s.name)}" data-sec-biz="${esc(s.business_slug)}" data-sec-working="${on?'1':'0'}" aria-label="${esc(s.name)} ${esc(d.day_names[dow])}: ${on?'Working':'Off'}">${on?'Working':'Off'}</button>`:`<div class="meta" style="font-weight:700;color:${on?'var(--accent)':'var(--mute)'};">${on?'Working':'Off'}</div>`}
         </div>`;
       }).join('');
       const upcoming=(s.exceptions||[]).filter(e=>e.exception_date>=today).sort((a,b)=>a.exception_date.localeCompare(b.exception_date));
@@ -9870,55 +9957,48 @@ async function renderSecretaries(){
             <div class="name">${esc(niceDate(e.exception_date))}</div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="meta" style="font-weight:700;color:${e.is_available?'var(--accent)':'#b91c1c'};">${e.is_available?'Working':'Off'}</span>
-              <button type="button" class="btn ghost sm" data-sec-exc-del="${esc(e.exception_date)}" data-sec-biz="${esc(s.business_slug)}"
-                title="Remove this override so the date goes back to the normal weekly schedule" style="width:auto;padding:3px 8px;">✕</button>
+              ${role==='owner'&&!s.schedule_source?`<button type="button" class="btn ghost sm" data-sec-exc-del="${esc(e.exception_date)}" data-sec-biz="${esc(s.business_slug)}" title="Remove this override so the date goes back to the normal weekly schedule" style="width:auto;padding:3px 8px;">✕</button>`:''}
             </div>
           </div>`).join('')
         : `<div class="meta" style="padding:8px 2px;">No one-off days set.</div>`;
-      // Owner-only: book a specific date off (or on) without logging in as them.
-      const addHtml=`
+      const canEdit=role==='owner'&&!s.schedule_source;
+      const addHtml=canEdit?`
         <div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;">
           <input type="date" class="search" style="margin:0;width:auto;flex:1;min-width:150px;" data-sec-date="${esc(s.business_slug)}" min="${esc(today)}">
-          <button type="button" class="btn sm" style="width:auto;background:#b91c1c;border-color:#b91c1c;"
-            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="0">Mark off</button>
-          <button type="button" class="btn ghost sm" style="width:auto;"
-            data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="1">Mark working</button>
-        </div>`;
-      return `<div style="flex:1;min-width:260px;">
-        <h2 style="margin:0 0 10px;">${esc(s.name)} <span class="meta" style="font-weight:400;">(${s.business_slug==='handy-andy'?'Handy Andy':"Dom's"} · ${payFmtMoney(s.daily_rate,s.currency)}/day)</span></h2>
+          <button type="button" class="btn sm" style="width:auto;background:#b91c1c;border-color:#b91c1c;" data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="0">Mark off</button>
+          <button type="button" class="btn ghost sm" style="width:auto;" data-sec-exc-add="${esc(s.business_slug)}" data-sec-avail="1">Mark working</button>
+        </div>`:'';
+      const business=s.business_slug==='handy-andy'?'Handy Andy':"Dom's";
+      const rate=role==='owner'&&s.daily_rate!=null?` · ${payFmtMoney(s.daily_rate,s.currency)}/day`:'';
+      const subtitle=`${business}${rate}`;
+      const phoneHtml=s.phone?`<div style="font-size:13px;margin:-5px 0 9px 1px;">📞 <a href="tel:${esc(s.phone)}" style="color:var(--accent);text-decoration:none;">${esc(fmtPhone(s.phone))}</a></div>`:'';
+      return `<div style="flex:1;min-width:250px;max-width:390px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;">
+        <h2 style="margin:0 0 10px;font-size:18px;">${esc(s.name)} <span class="meta" style="font-weight:400;font-size:13px;">(${esc(subtitle)})</span></h2>
+        ${phoneHtml}
         ${rows}
-        <div class="side-section" style="margin-top:14px;">One-off days</div>
-        ${excHtml}
+        ${s.schedule_source?'':`<div class="side-section" style="margin-top:14px;">One-off days</div>${excHtml}`}
         ${addHtml}
       </div>`;
     };
-    // Recent schedule changes (app.secretary_schedule_changes). Best-effort:
-    // the schedule cards below are the point of this page, so a feed failure
-    // must not blank the whole view.
     let feed={ changes:[], unseen:0 };
-    try{ feed=await api('secretary_changes'); }catch(_){}
+    if(role==='owner') try{ feed=await api('secretary_changes'); }catch(_){}
     const changeLine=(c)=>{
       const when=c.kind==='weekly'
         ? `every ${esc(c.day_name||'')}`
         : (()=>{ try{ return new Date(c.exception_date+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}); }catch{ return esc(c.exception_date||''); } })();
       const off=!c.is_available;
-      const what=off
-        ? (c.kind==='weekly'?`is now OFF ${when}`:`took ${when} OFF`)
-        : (c.kind==='weekly'?`is now WORKING ${when}`:`is now WORKING on ${when}`);
+      const what=off ? (c.kind==='weekly'?`is now OFF ${when}`:`took ${when} OFF`) : (c.kind==='weekly'?`is now WORKING ${when}`:`is now WORKING on ${when}`);
       const ago=(()=>{ try{ return new Date(c.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch{ return ''; } })();
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);${c.seen?'opacity:.55;':''}">
         <span style="width:8px;height:8px;border-radius:50%;flex:none;background:${c.seen?'transparent':(off?'#ef4444':'#16a34a')};"></span>
-        <div style="flex:1;font-size:14px;"><b>${esc(c.changed_by||'Secretary')}</b> ${what}
-          <span class="meta" style="font-size:12px;"> · ${esc(c.business_name||'')}</span></div>
+        <div style="flex:1;font-size:14px;"><b>${esc(c.changed_by||'Secretary')}</b> ${what}<span class="meta" style="font-size:12px;"> · ${esc(c.business_name||'')}</span></div>
         <div class="meta" style="font-size:12px;white-space:nowrap;">${esc(ago)}</div>
       </div>`;
     };
     const feedHtml=(feed.changes||[]).length ? `
       <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;max-width:720px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:12px;">
-          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);">
-            Schedule changes${feed.unseen?` · ${feed.unseen} new`:''}
-          </div>
+          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);">Schedule changes${feed.unseen?` · ${feed.unseen} new`:''}</div>
           ${feed.unseen?`<button class="btn ghost sm" id="secSeenAll" style="width:auto;">Mark all read</button>`:''}
         </div>
         ${feed.changes.map(changeLine).join('')}
@@ -9926,42 +10006,35 @@ async function renderSecretaries(){
 
     view.innerHTML=`<div class="wrap">
       <button class="btn ghost sm" onclick="renderOther()" style="margin-bottom:10px;width:auto;">← Other</button>
+      ${isJoey?`<div style="margin-bottom:14px;"><button type="button" class="btn" id="secSendNote" style="width:auto;">📌 Send a note to the secretaries</button></div>`:''}
       ${feedHtml}
-      <div style="margin-bottom:14px;"><div class="meta">The weekly pattern is set by each secretary from their own "My Availability" tab. You can add one-off days here, and they will see it on their side.</div></div>
-      <div style="display:flex;gap:32px;flex-wrap:wrap;">${(d.secretaries||[]).map(cardFor).join('')}</div>
+      <div style="margin-bottom:14px;"><div class="meta">${isJoey?'See the team’s regular workdays and any upcoming days off.':'Click Working or Off to change regular workdays. Alex and Joe’s workdays also control phone coverage.'}</div></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">${(d.secretaries||[]).map(cardFor).join('')}</div>
     </div>`;
+    view.querySelectorAll('[data-sec-week]').forEach(btn=>btn.addEventListener('click',async()=>{
+      btn.disabled=true;
+      try{ await api('secretary_availability_set',{method:'POST',body:{business:btn.dataset.secBiz,name:btn.dataset.secName,day_of_week:Number(btn.dataset.secWeek),is_available:btn.dataset.secWorking!=='1'}}); await renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not save workday'); }
+    }));
+    const sendNote=document.getElementById('secSendNote');
+    if(sendNote) sendNote.onclick=()=>{ _notesTab='staff'; renderNotes(); };
     const seenBtn=document.getElementById('secSeenAll');
     if(seenBtn) seenBtn.addEventListener('click',async()=>{
       seenBtn.disabled=true;
       try{ await api('secretary_changes_seen',{ method:'POST', body:{ all:true }}); renderSecretaries(); }
       catch(e){ seenBtn.disabled=false; toast(e.message); }
     });
-    // Add a one-off day for a secretary. The date input is per-card, so the
-    // button reads the one belonging to the same business it was rendered for.
     view.querySelectorAll('[data-sec-exc-add]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const slug=btn.dataset.secExcAdd;
-      const input=view.querySelector(`[data-sec-date="${slug}"]`);
-      const date=input&&input.value;
+      const slug=btn.dataset.secExcAdd, input=view.querySelector(`[data-sec-date="${slug}"]`), date=input&&input.value;
       if(!date){ toast('Pick a date first'); if(input) input.focus(); return; }
-      const wantAvailable=btn.dataset.secAvail==='1';
-      btn.disabled=true;
-      try{
-        await api('secretary_availability_exception_set',{ method:'POST',
-          body:{ business:slug, date, is_available:wantAvailable }});
-        toast(wantAvailable?'Marked working':'Marked off');
-        renderSecretaries();
-      }catch(e){ btn.disabled=false; toast(e.message||'Could not save that day'); }
+      const wantAvailable=btn.dataset.secAvail==='1'; btn.disabled=true;
+      try{ await api('secretary_availability_exception_set',{ method:'POST', body:{ business:slug, date, is_available:wantAvailable }}); toast(wantAvailable?'Marked working':'Marked off'); renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not save that day'); }
     }));
-    // Remove an override so the date reverts to the normal weekly schedule.
     view.querySelectorAll('[data-sec-exc-del]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const date=btn.dataset.secExcDel, slug=btn.dataset.secBiz;
-      btn.disabled=true;
-      try{
-        await api('secretary_availability_exception_set',{ method:'POST',
-          body:{ business:slug, date, remove:true }});
-        toast('Back to the normal schedule');
-        renderSecretaries();
-      }catch(e){ btn.disabled=false; toast(e.message||'Could not remove that day'); }
+      const date=btn.dataset.secExcDel, slug=btn.dataset.secBiz; btn.disabled=true;
+      try{ await api('secretary_availability_exception_set',{ method:'POST', body:{ business:slug, date, remove:true }}); toast('Back to the normal schedule'); renderSecretaries(); }
+      catch(e){ btn.disabled=false; toast(e.message||'Could not remove that day'); }
     }));
   }catch(err){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(err.message)}</div></div>`; }
 }
@@ -10745,7 +10818,7 @@ async function renderTasks(){
 }
 function tasksBadge(){
   const el=document.getElementById('tasksBadge'); if(!el) return;
-  const n=_tk.tasks.filter(t=>!t.done_at).length;
+  const n=_tk.tasks.filter(t=>!t.done_at&&t.color!=='white').length;
   el.textContent=n; el.style.display=(n&&role!=='owner')?'':'none';
 }
 function paintTasks(){
@@ -10774,7 +10847,8 @@ function paintTasks(){
     </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
-    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b><span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span></button>`).join('')}</div>
+    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
+    ${isJoeyHome()?'<details class="tk-add-wrap" style="margin:12px 0;max-width:760px;"><summary style="cursor:pointer;padding:12px;border:1px solid var(--line);border-radius:10px;font-weight:700;">Add my own task</summary>':''}
     <div class="tk-add" style="max-width:760px;">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
       ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
@@ -10783,6 +10857,7 @@ function paintTasks(){
       <div id="tkPhotoHost"></div>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
+    ${isJoeyHome()?'</details>':''}
     <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k);
       return `<div class="plv-col${_tk.filter===k?' on':''}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}</div></div>`; }).join('')}</div>
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
@@ -10892,7 +10967,8 @@ const _plBusy=new Set();   // in-flight posts, so a double tap can't send twice
 // Every sign-in and View As switch (enterApp) starts the board clean: the last
 // login's cached cards -- the owner's audit notes and full scoreboard -- must
 // never be painted for a secretary session, not even until the refetch lands.
-function plReset(){ _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; _plMarked=null; _plView='board'; }
+let _plReview={};
+function plReset(){ _plReview={}; _pl=null; _plErr=null; _plReq++; _plLoading=false; _plStage=null; _plOpen=null; _plAsk={}; _plLost=null; _plBiz='all'; _plMarked=null; _plView='board'; }
 
 const plStageLabel=s=>(PL_STAGES.find(x=>x[0]===s)||[s,s])[1];
 function plCard(key){ return ((_pl&&Array.isArray(_pl.cards))?_pl.cards:[]).find(c=>c&&c.key===key)||((_plView==='marked'&&_plMarked&&_plMarked.rows)||[]).map(r=>r.card).find(c=>c&&c.key===key)||null; }
@@ -11020,6 +11096,7 @@ async function renderPipeline(){
 // paints even over an open picker. The 30s poll passes false and waits.
 async function plLoad(force){
   const req=++_plReq;
+  if(isJoeyHome()) _plRange='3';
   const params={ range:_plRange };
   if(role==='owner' && _plBiz && _plBiz!=='all') params.business=_plBiz;
   _plLoading=true;
@@ -11143,7 +11220,7 @@ function paintPipeline(){
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
   view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
-    <div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>
+    ${isJoeyHome()?'':`<div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>`}
     ${plMarkedTabs()}
     ${_plView==='marked'?plMarkedHtml():chev+kpis}
     ${''/* Sales funnel + talked-to bars removed (owner 2026-10-03) */}
@@ -11153,7 +11230,7 @@ function paintPipeline(){
   if(_plScrollTo){ const col=document.getElementById('plcol-'+_plScrollTo); _plScrollTo=null; if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); }
   const root=document.getElementById('plRoot');
   root.addEventListener('click', plClick);
-  document.getElementById('plRange').addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
+  document.getElementById('plRange')?.addEventListener('change',e=>{ _plRange=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
   const bs=document.getElementById('plBiz');
   if(bs) bs.addEventListener('change',e=>{ _plBiz=e.target.value; e.target.blur(); plLoad(true); paintPipeline(); });
   const ss=document.getElementById('plStageSel'); if(ss) ss.addEventListener('change',e=>{ _plStage=e.target.value; e.target.blur(); paintPipeline(); });
@@ -11249,7 +11326,7 @@ function plDetailHtml(c){
   const picking=!!(_plLost && _plLost.key===c.key);
   const vo=!!c.view_only;   // Joey on another family's brand: read-only card (owner 2026-10-03)
   const top=[];
-  if(_plAsk[c.key]) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
+  if(_plAsk[c.key]&&!plIsReviewCall(c)) top.push(`<div class="pl-ask" role="group" aria-label="Call outcome"><span>Did you talk to them?</span>
       <button type="button" class="pl-btn pri" data-pl="ask-yes">Yes</button><button type="button" class="pl-btn" data-pl="ask-no">No answer</button>
       <button type="button" class="pl-link pl-x" data-pl="ask-x">Not now</button></div>`);
   if(unconf && !vo) top.push(`<div class="pl-ask" role="group" aria-label="Talk or voicemail"><span>Answered, but was it a real talk?</span>
@@ -11279,8 +11356,8 @@ function plDetailHtml(c){
   if(!lost && !closed && !liveJob && !picking) b.push('<button type="button" class="pl-btn red" data-pl="lost">Mark lost</button>');
   if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
   if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
-  // View-only: open the job or estimate, nothing that writes or calls.
-  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); b.length=0; }
+  // Other-brand cards allow notes and Not a lead; keep remaining actions restricted.
+  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); const notLead=b.filter(x=>x.includes('data-pl="notlead"')); b.length=0; b.push(...notLead); }
   const f=[];
   f.push(phone
     ? `<b>${esc(c.phone_pretty||fmtPhone(c.phone))}</b>${c.business&&c.business.name?' · '+esc(c.business.name):''}`
@@ -11345,6 +11422,7 @@ function plDetailHtml(c){
        ${plStoryHtml(c)}
        ${plNotesHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}
+       ${plReviewOutcomeHtml(c)}
        ${plOwnerMoveHtml(c)}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
   const un=c.unanswered, who=c.secretary||'the office';
@@ -11442,13 +11520,12 @@ function plReviewHtml(c){
 // Card notes (owner 2026-09-28): a small notes box on every card.
 function plNotesHtml(c){
   const ns=Array.isArray(c.notes)?c.notes:[];
-  if(c.view_only && !ns.length) return '';
   return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
     ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
-    ${c.view_only?'':`<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
+    <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
       <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
       <button type="button" class="pl-btn" data-pl="note-add">Save</button>
-    </div>`}`;
+    </div>`;
 }
 // Owner only (2026-09-28): move a card forward a step, or mark it lost.
 function plOwnerMoveHtml(c){
@@ -11540,6 +11617,32 @@ async function plOp(c, body, okMsg, onSaved){
 // customer, from the brand's tracking line (never her personal caller ID).
 // The server logs the attempt and returns its id; she then says whether they
 // actually talked, which settles the "2 tries" and leak rules.
+document.addEventListener('input',e=>{if(e.target.id==='plReviewNote'&&_plReview[_plOpen]) _plReview[_plOpen].note=e.target.value;});
+function plIsReviewCall(c){ return !!(c.booking?.id&&(c.stage==='completed'||c.booking.completed_at||c.booking.paid_at)); }
+function plReviewOutcomeHtml(c){
+  if(!plIsReviewCall(c)||c.view_only) return '';
+  const w=_plReview[c.key];
+  if(!w) return '<button type="button" class="pl-link" data-pl="review-open">Log review call</button>';
+  return `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;" role="group" aria-label="Review call outcome"><b>How did it go?</b>
+    <div class="rc-opts">${RC_OUTCOMES.map(o=>`<button type="button" class="rc-opt ${o.tone}${w.outcome===o.v?' on':''}" data-pl="review-pick" data-outcome="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+    ${w.outcome==='issue'?`<textarea id="plReviewNote" maxlength="500" placeholder="What happened?">${esc(w.note||'')}</textarea>`:''}
+    ${w.outcome?'<button type="button" class="pl-btn pri" data-pl="review-save">Save outcome</button>':''}
+  </div>`;
+}
+async function plSaveReviewOutcome(c,btn){
+  const w=_plReview[c.key], status=w&&RC_OUT_STATUS[w.outcome];
+  if(!status||!plIsReviewCall(c)) return;
+  const note=document.getElementById('plReviewNote')?.value.trim()||'';
+  if(w.outcome==='issue'&&!note){ toast('Write down what happened first'); return; }
+  btn.disabled=true;
+  try{
+    const attempt=_plAsk[c.key];
+    if(attempt?.attempt_id) await api('pipeline',{method:'POST',body:{op:'attempt_outcome',attempt_id:attempt.attempt_id,talked:w.outcome!=='noanswer'}});
+    await api('review_call_log',{method:'POST',body:{id:c.booking.id,status,notes:note,tags:[],from_pipeline:true}});
+    delete _plAsk[c.key]; delete _plReview[c.key];
+    await plLoad(true); toast('Review call outcome saved');
+  }catch(e){btn.disabled=false;toast(e.message||'Could not save the outcome');}
+}
 async function plCall(c, btn){
   const tag='call:'+c.key;
   if(_plBusy.has(tag)) return;
@@ -11548,6 +11651,7 @@ async function plCall(c, btn){
     const r=await api('call_start',{ method:'POST', body:{ source:'pipeline', phone:c.phone, business:(c.business&&c.business.slug)||plBizSlug(c), card_key:c.key }});
     toast('Ringing your phone…');
     if(r && r.attempt_id) _plAsk[c.key]={ mode:'bridge', attempt_id:r.attempt_id };
+    if(plIsReviewCall(c)) _plReview[c.key]={outcome:null,note:''};
   }catch(e){ toast(e.message||'Could not place the call'); }
   finally{ _plBusy.delete(tag); }
   if(onScreen('pipeline')) paintPipeline();
@@ -11586,7 +11690,7 @@ function plClick(e){
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
   if(!c) return;
   // View-only card: reads only; the server refuses the rest (owner 2026-10-03).
-  if(c.view_only && !['toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
+  if(c.view_only && !['note-add','notlead','toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
   switch(act){
     case 'toggle':
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
@@ -11596,6 +11700,12 @@ function plClick(e){
         api('pipeline',{ params:{ why_for:key } }).then(a=>{ if(a&&a.holding_back&&_plOpen===key&&!(_plWhy&&_plWhy.key===key)){ _plWhy={ key, ans:a }; paintPipeline(); } }).catch(()=>{}); }
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
+    case 'review-open': _plReview[c.key]={outcome:null,note:''}; paintPipeline(); return;
+    case 'review-pick': {
+      const state=_plReview[c.key]||{};
+      _plReview[c.key]={...state,outcome:b.dataset.outcome}; paintPipeline(); return;
+    }
+    case 'review-save': plSaveReviewOutcome(c,b); return;
     case 'call': plCall(c,b); return;
     case 'manual': _plAsk[c.key]={ mode:'manual' }; paintPipeline(); return;
     case 'ask-yes': case 'ask-no': plAnswer(c, act==='ask-yes', b); return;
@@ -11702,7 +11812,7 @@ async function renderNotes(){
   // whoever is actually looking at it, not assume they're the owner.
   const forCopy = role==='owner'
     ? 'Anything the secretaries need to know. It shows on their dashboard until they tick it off, and they can write back.'
-    : 'Leave Andrew or the other secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
+    : 'Leave Andrew or another secretary a note. It shows on their dashboard until they tick it off, and they can write back.';
   // Two big tab cards instead of small seg-btn pills -- owner feedback
   // 2026-09-23: "they may miss them". This is the whole reason to be on this
   // page (who a note goes to), so it gets first billing above the sub-copy,
@@ -11712,11 +11822,11 @@ async function renderNotes(){
       <span><span class="notes-tabbtn-t">${label}</span><span class="notes-tabbtn-s">${sub}</span></span>
     </button>`;
   view.innerHTML=`<div class="wrap">
-    ${role==='owner'?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
+    ${role==='owner'||(role==='secretary'&&userName==='Joey')?'<button class="btn ghost" id="notesBack" style="width:auto;margin-bottom:12px;">← Other</button>':''}
     <h2 style="margin:0 0 4px;">Notes</h2>
     <div class="sub" style="color:var(--mute);margin-bottom:14px;">Who is this note for?</div>
     <div class="notes-tabrow">
-      ${notesTabBtn('staff','🏢','For the office',role==='owner'?'Heather, Joey, or both':'Andrew, the other secretary, or both',_notesTab==='staff')}
+      ${notesTabBtn('staff','🏢','For the office',role==='owner'?'Heather, Joey, Alex, Joe, or all':'Andrew, a secretary, or all secretaries',_notesTab==='staff')}
       ${notesTabBtn('tech','🔧','For the techs','One tech, a city, or everyone',_notesTab==='tech')}
     </div>
     <div class="sub" style="color:var(--mute);margin:14px 0;">${_notesTab==='tech'
@@ -11745,6 +11855,7 @@ function renderStaffNotesPane(){
             <option value="handy-andy">Handy Andy (Heather) only</option>
             <option value="doms">Dom's only (Joey, Alex, Joe)</option>
             ${role==='owner'?'<option value="person:Heather">Heather only</option><option value="person:Joey">Joey only</option><option value="person:Alex">Alex only</option><option value="person:Joe">Joe only</option>':''}
+            ${role==='secretary'&&userName==='Joey'?'<option value="person:Heather">Heather only</option><option value="person:Alex">Alex only</option><option value="person:Joe">Joe only</option>':''}
             ${role!=='owner'?'<option value="owner">Andrew only</option>':''}
           </select>
         </div>
@@ -11768,7 +11879,7 @@ function renderStaffNotesPane(){
   const editCtl=noteEditMode(document.getElementById('notePost'), clearForm);
   _staffNoteEdit=(n)=>{
     document.getElementById('noteBody').value=n.body||'';
-    document.getElementById('noteTarget').value=n.to_owner?'owner':(n.target_slug||'');
+    document.getElementById('noteTarget').value=n.to_owner?'owner':(n.target_name?'person:'+n.target_name:(n.target_slug||''));
     document.getElementById('noteMode').value=n.mode||'today';
     picker.set(n.photo_urls); sendCtl.set(n.send_at, n.scheduled);
     editCtl.start(n.id);
@@ -11808,7 +11919,7 @@ async function loadNotesRecent(){
     if(!notes.length){ wrap.className='empty'; wrap.textContent='No notes yet.'; return; }
     wrap.className='';
     wrap.innerHTML=notes.map(n=>{
-      const who=n.to_owner ? 'Andrew' : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'All';
+      const who=n.to_owner ? 'Andrew' : n.target_name ? n.target_name : n.target_slug ? (n.target_slug==='doms' ? "Dom's" : 'Handy Andy') : 'All secretaries';
       const reads=n.reads||[];
       const pill=reads.length
         ? `<span class="note-pill read">Read${reads.length>1?` ×${reads.length}`:''} · ${esc(noteWhen(reads[0].read_at))}</span>`
@@ -12107,7 +12218,8 @@ async function renderOther(){
       ${tile('gallery','📷','Photos','Job photos from the techs.')}
       ${tile('brackets','📦','Bracket Inventory','Brackets on hand with each tech.')}
       ${tile('myavailability','🗓️','My Availability','Your work and off days.')}
-      ${tile('notes','📌','Notes','Notes from the owner, with photos.')}
+      ${userName==='Joey'?tile('secretaries','🗂️','Secretaries','See everyone’s work and off days; send a note.'):''}
+      ${userName==='Joey'?tile('estimates','🧾','Estimates','View and send estimates.')+tile('schedule','📅','Schedule','View all jobs on the schedule.'):tile('notes','📌','Notes','Read notes from the owner and send notes to the team.')}
     </div></div>`;
     view.querySelectorAll('[data-othernav]').forEach(el=>el.onclick=()=>{ const n=el.dataset.othernav; if(n==='notes') renderNotes(); else navTo(n); });
     return;
@@ -12129,7 +12241,7 @@ async function renderOther(){
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDispCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
       <div id="otherSecretaries" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Heather's and Joey's weekly work/off schedule, plus every schedule change they make.</div></div>
+        <div><div style="font-weight:700;">🗂️ Secretaries</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">The secretaries’ weekly work/off days and schedule updates.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherSecCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>
       <div id="otherCoupons" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
@@ -13649,10 +13761,11 @@ async function renderCallAudit(){
 // purpose (unlike Audit/Performance, which follow the sidebar's current
 // business): a routing directory is only useful seen whole, not one row at a
 // time. api/admin.js callNumbers() enforces owner-only server-side.
-const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17207223653':'Heather', '+13374997817':'Owner' }; // Heather's number updated 2026-09-18
-function friendlyForward(e164){
+const NUMBER_FRIENDLY_FORWARD={ '+13032190118':'Joey', '+17207223653':'Heather', '+13374997817':'Andrew' }; // Heather's number updated 2026-09-18
+function friendlyForward(e164,name){
+  if(name) return name;
   if(!e164) return 'Voicemail only';
-  return NUMBER_FRIENDLY_FORWARD[e164] || fmtPhone(e164.replace(/^\+1/,''));
+  return NUMBER_FRIENDLY_FORWARD[e164] || 'Unknown contact';
 }
 // Three states, not two -- Andrew, 2026-09-22: red = not connected, yellow =
 // connected but no one to answer (e.g. the LA number that's live with no
@@ -13700,7 +13813,7 @@ async function renderCallNumbers(){
 function matchingNumbers(numbers,query,status){
   const term=query.trim().toLowerCase(), digits=term.replace(/\D/g,'');
   return numbers.filter(n=>(status==='all'||(status==='active'?n.active:!n.active)) &&
-    (!term || [n.phone,fmtPhone(n.phone),n.business_name,n.line_name,n.market,friendlyForward(n.forward_to),friendlyForward(n.after_hours_forward_to)].join(' ').toLowerCase().includes(term) ||
+    (!term || [n.phone,fmtPhone(n.phone),n.business_name,n.line_name,n.market,friendlyForward(n.forward_to,n.forward_name),friendlyForward(n.after_hours_forward_to,n.after_hours_forward_name)].join(' ').toLowerCase().includes(term) ||
       (digits.length>=3 && !/[a-z]/i.test(term) && String(n.phone).replace(/\D/g,'').includes(digits))))
     .sort((a,b)=>(a.business_name||'').localeCompare(b.business_name||'') || String(a.phone).localeCompare(String(b.phone)));
 }
@@ -13734,11 +13847,11 @@ function paintNumberDirectory(){
     ${rows.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
       <span class="num-dot" style="background:${numberStatusColor(n)}" aria-hidden="true"></span>
       <span class="num-id"><strong>${esc(n.line_name||n.business_name)}</strong><span>${esc(prettyNum(n.phone))}</span></span>
-      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to))}</span>
+      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to,n.forward_name))}</span>
     </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
       <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.line_name||selected.business_name)}${selected.line_name&&selected.line_name!==selected.business_name?' &middot; '+esc(selected.business_name):''}</p>
       ${numberVolumeHtml(selected.volume)}
-      <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to))}${detail('After hours',friendlyForward(selected.after_hours_forward_to))}${detail('Hours',hours)}</dl>
+      <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to,selected.forward_name))}${detail('After hours',friendlyForward(selected.after_hours_forward_to,selected.after_hours_forward_name))}${detail('Hours',hours)}</dl>
       <div class="ch-section-label">Connection status</div><div class="ch-connections">
         <div><span>AI voice</span>${aiVoiceBadge(selected.ai_voice_status)}</div><div><span>Texting</span>${textingBadge(selected.texting_status)}</div>
       </div>
@@ -14947,10 +15060,10 @@ async function openCallTexts(our,customer,opts){
   try{
     const t=await api('messages_thread',{ params:{ our, customer }});
     if(t.customer_name) pop.querySelector('.ctp-who').textContent=t.customer_name+' · '+fmtPhone(customer);
-    const ms=t.messages||[];
+    const ms=smsWithLikes(t.messages||[]);
     body.innerHTML=ms.length ? ms.map(m=>{ const mine=m.direction==='out', bad=m.status==='failed'||m.status==='undelivered';
       const meta=[msgWhen(m.created_at,t.business_timezone), mine&&m.sent_by?(m.sent_by==='automated'?'Automated':m.sent_by):null, bad?'NOT DELIVERED':null].filter(Boolean).join(' · ');
-      return `<div class="ctp-m${mine?' us':''}${bad?' bad':''}"><div class="ctp-b">${esc(m.body||'')}${smsMediaHtml(m)}</div><div class="ctp-t">${esc(meta)}</div></div>`; }).join('') : '<div class="empty">No texts with this customer.</div>';
+      return `<div class="ctp-m${mine?' us':''}${bad?' bad':''}"><div class="ctp-b" style="position:relative;${m._likedAt?'margin-bottom:9px;':''}">${esc(m.body||'')}${smsMediaHtml(m)}${smsLikeHtml(m)}</div><div class="ctp-t">${esc(meta)}</div></div>`; }).join('') : '<div class="empty">No texts with this customer.</div>';
     body.scrollTop=body.scrollHeight;
   }catch(e){ body.innerHTML=`<div class="empty">${esc(e.message||'Could not load the texts')}</div>`; }
   // Booking card Text button (owner, 2026-09-26): send right here.
@@ -15192,6 +15305,25 @@ function loadVip(){ api('vip_phones').then(d=>{ const was=JSON.stringify(_vipN);
   if(was!==JSON.stringify(_vipN)&&section==='messages'&&_msgThreads){ try{ paintMessages(); }catch(_){} }
 }).catch(()=>{}); }
 // A photo a customer texted (MMS): an inline thumbnail, tap to open full size.
+// SMS tapbacks arrive as quoted text. Attach only exact, earlier-message matches;
+// keep unmatched replies visible so a real customer message is never lost.
+function smsWithLikes(messages){
+  const out=[];
+  const normalize=text=>String(text||'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/\s+/g,' ').trim();
+  for(const original of messages||[]){
+    const m={...original};
+    const reaction=m.direction==='in' && !m.media && !(Number(m.media_count)>0) && String(m.body||'').match(/^(Liked|Removed a like from)\s+[“"]([\s\S]*)[”"]\s*$/i);
+    if(reaction){
+      const target=out.findLast(x=>x.direction==='out' && !['failed','undelivered'].includes(x.status) && normalize(x.body)===normalize(reaction[2]));
+      if(target){target._likedAt=/^Liked$/i.test(reaction[1])?(m.created_at||true):null;continue;}
+    }
+    out.push(m);
+  }
+  return out;
+}
+function smsLikeHtml(m){
+  return m._likedAt?'<span role="img" aria-label="Customer liked this message" title="Customer liked this message" style="position:absolute;left:8px;bottom:-9px;background:#f0f2f5;border:2px solid #fff;border-radius:14px;padding:2px 6px;font-size:16px;line-height:20px;white-space:normal;">👍</span>':'';
+}
 function smsMediaHtml(m, max){
   if(!m || !m.id || !(Number(m.media_count)>0 || (m.direction==='in' && !m.body) || m.media)) return '';
   const src=`${API}?action=sms_media&id=${encodeURIComponent(m.id)}&i=0&token=${encodeURIComponent(token)}`;
@@ -19056,13 +19188,14 @@ async function renderGreeting(){
       // Joey's 4 home cards (owner 2026-10-03).
       isJoeyHome() ? api('joey_metrics').catch(()=>null) : Promise.resolve(null),
     ];
-    // Owner: also check for pending brackets + current per-tech stock levels
-    // (the stock feeds the low-stock warning in the Predicted-income box).
-    if(role==='owner'){
-      reqs.push(api('bracket_pending',{ params:{ business:current.slug }}).catch(()=>({pending:[]})));
-      reqs.push(api('bracket_inventory',{ params:{ business:current.slug }}).catch(()=>({inventory:[]})));
-      reqs.push(api('bracket_purchases',{ params:{ business:current.slug, limit:'20' }}).catch(()=>({purchases:[]})));
-      reqs.push(api('wire_plate_orders',{ params:{ business:current.slug }}).catch(()=>({orders:[]})));
+    // Shared stock warning for the owner and Joey's assistant dashboard.
+    const wantsStock=role==='owner'||isJoeyHome();
+    const stockBusiness=isJoeyHome()?scope:current.slug;
+    if(wantsStock){
+      reqs.push(api('bracket_pending',{ params:{ business:stockBusiness }}).catch(()=>({pending:[]})));
+      reqs.push(api('bracket_inventory',{ params:{ business:stockBusiness }}).catch(()=>({inventory:[]})));
+      reqs.push(api('bracket_purchases',{ params:{ business:stockBusiness, limit:'20' }}).catch(()=>({purchases:[]})));
+      reqs.push(api('wire_plate_orders',{ params:{ business:stockBusiness }}).catch(()=>({orders:[]})));
     }
     // Secretary conversion card (Handy Andy / Doms only -- my_call_performance
     // 403s any other scope, see api/admin.js). Two non-overlapping trailing
@@ -19078,8 +19211,8 @@ async function renderGreeting(){
     }
     const [s,newEst,rc,jm,...rest]=await Promise.all(reqs);
     const bracketPending=role==='owner' && rest[0] ? (rest[0].pending||[]) : [];
-    const bracketInv=role==='owner' && rest[1] ? (rest[1].inventory||[]) : [];
-    if(role==='owner') attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
+    const bracketInv=wantsStock && rest[1] ? (rest[1].inventory||[]) : [];
+    if(wantsStock) attachIncomingStock(bracketInv, (rest[2]&&rest[2].purchases)||[], (rest[3]&&rest[3].orders)||[]);
     const callPerf = wantsCallPerf ? { thisWeek: rest[0]||null, lastWeek: rest[1]||null } : null;
 
     if(s.business && s.business.timezone) current.timezone=s.business.timezone;
@@ -19102,7 +19235,7 @@ async function renderGreeting(){
     paintGreeting();
     /* Calls badge = missed calls only (owner 2026-10-02); see refreshCallsBadge. */
     // One brand's numbers: hidden on the merged Lead Gen calendar. Joey's 4 cards are cross-business and stay (owner 2026-10-03).
-    el.classList.toggle('hidden', section!=='schedule' || (leadGenAllOn() && !isJoeyHome()));
+    el.classList.toggle('hidden', !(section==='schedule'||(isJoeyHome()&&section==='pipeline')) || (leadGenAllOn() && !isJoeyHome()));
     startGreetingClock();
   }catch{ /* non-fatal: leave whatever is shown */ }
 }
@@ -19424,14 +19557,15 @@ const AVG_SCALE_MAX=500;      // bars are full at $500 (fixed scale, not relativ
 // background, refreshed at most every 2 minutes; tap a count to open that stage.
 let _dashPl=null, _dashPlAt=0, _dashPlBusy=false;
 function dashPipelineHtml(){
-  if(role!=='owner') return '';
+  const joey=isJoeyHome();
+  if(role!=='owner' && !joey) return '';
   if(!_dashPlBusy && Date.now()-_dashPlAt>120000){
     _dashPlBusy=true;
-    api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule') paintGreeting(); });
+    api('pipeline',{ params:{ range:'3' }, timeoutMs:30000 }).then(d=>{ _dashPl=d.stages||{}; _dashPlAt=Date.now(); }).catch(()=>{ _dashPlAt=Date.now(); }).finally(()=>{ _dashPlBusy=false; if(section==='schedule'||(isJoeyHome()&&section==='pipeline')) paintGreeting(); });
   }
   const st=_dashPl;
   const cell=([k,l])=>`<button type="button" class="dpl-cell st-${k}" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
-  return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline · last 3 days</div><div class="dpl-row">${PL_STAGES.map(cell).join('')}</div></div>`;
+  return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline${joey?'':' · last 3 days'}</div><div class="dpl-row">${PL_STAGES.filter(([k])=>!joey||k!=='booked').map(cell).join('')}</div></div>`;
 }
 function avgTicketBoxHtml(pf, r){
   const useCache = avgTicketRange!=='7d' && avgTicketCache[avgTicketRange];
@@ -19557,23 +19691,17 @@ function incomePeriodLabel(h, view){
 function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   if(!history || history.length<2) return `<div class="gstat-s" style="margin-top:8px;">Not enough ${unitWord||'weeks'} yet to chart.</div>`;
   const vals=history.map(h=>Number(h.total_made)||0);
-  // Fixed scale, sized to the bucket: floor $0, ceiling passed in by the
-  // caller (bigger for Monthly/3-month sums than for a single week), so a
-  // point over the ceiling still plots (clamped to the top edge) rather than
-  // rescaling the whole chart and squashing every other point flat.
-  const min=0, max=maxScale||10000, range=max-min;
+  // Fit the actual range while retaining zero and any negative profit days.
+  const min=Math.min(0,...vals)*1.1, max=Math.max(100,...vals)*1.1, range=max-min;
   const maxIdx=vals.indexOf(Math.max(...vals));
   // Extra top padding (padY) leaves room for a value label above every dot,
   // not just the peak; alternating label height (near/far) keeps closely
   // spaced weeks from overlapping each other's text. padBottom now also
   // leaves room for the small period row under the baseline.
-  // pointWidth (px per point, opt-in) is for series with too many points to
-  // fit every label at a fixed 380px -- e.g. Net Daily Profit's 30-day tab --
-  // it makes the SVG genuinely wider than its container instead of squishing
-  // labels together, and the caller wraps it in a horizontal-scroll div. The
-  // Income box never passes this, so its behavior is byte-for-byte unchanged.
-  const w = pointWidth ? (20 + pointWidth*(history.length-1)) : 380;
-  const h=height||172, padX=10, padTop=34, padBottom=28;
+  // Plot coordinates stretch across the card. Text uses percentage x positions
+  // and pixel font sizes, so filling the card never shrinks the labels.
+  const w=600;
+  const h=height||236, padX=12, padTop=38, padBottom=30;
   const innerW=w-2*padX, innerH=h-padTop-padBottom;
   const n=history.length, stepX= n>1 ? innerW/(n-1) : 0;
   const xy=vals.map((v,i)=>{
@@ -19581,8 +19709,12 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
     return [padX+i*stepX, padTop+(1-(clamped-min)/range)*innerH];
   });
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
-  const dots=xy.map(([x,y],i)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="${i===maxIdx?'#86efac':'#4ade80'}"/>`).join('');
+  const dots=xy.map(([x,y],i)=>`<circle cx="${(x/w*100).toFixed(2)}%" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="#16a34a"><title>${esc(incomePeriodLabel(history[i],view||'week'))}: ${money(vals[i])}</title></circle>`).join('');
+  // Keep every plotted point; label up to seven evenly spaced dates.
+  const labelCount=n<=7?n:6;
+  const labelIds=new Set(Array.from({length:labelCount},(_,i)=>Math.round(i*(n-1)/(labelCount-1))));
   const labels=xy.map(([x,y],i)=>{
+    if(!labelIds.has(i)) return '';
     const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
     const ly=Math.max(9, y-far);
     // The first/last point's label used to center on the dot (text-anchor
@@ -19593,20 +19725,19 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
     // the label grows inward and always stays on-canvas, regardless of width.
     const anchor = i===0 ? 'start' : i===n-1 ? 'end' : 'middle';
     const lx = i===0 ? x+3 : i===n-1 ? x-3 : x;
-    return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" font-size="8.5" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
+    return `<text x="${(lx/w*100).toFixed(2)}%" y="${ly.toFixed(1)}" text-anchor="${anchor}" font-size="12" font-weight="${i===maxIdx?'700':'500'}" fill="${i===maxIdx?'#86efac':'#c8f7d8'}">${money(vals[i])}</text>`;
   }).join('');
   const periodY=h-padBottom+12;
   const periods = view ? xy.map(([x],i)=>{
+    if(!labelIds.has(i)) return '';
     const anchor = i===0 ? 'start' : i===n-1 ? 'end' : 'middle';
     const lx = i===0 ? padX : i===n-1 ? w-padX : x;
-    return `<text x="${lx.toFixed(1)}" y="${periodY}" text-anchor="${anchor}" font-size="6.5" fill="rgba(255,255,255,.32)">${esc(incomePeriodLabel(history[i], view))}</text>`;
+    return `<text x="${(lx/w*100).toFixed(2)}%" y="${periodY}" text-anchor="${anchor}" font-size="11" fill="rgba(255,255,255,.32)">${esc(incomePeriodLabel(history[i], view))}</text>`;
   }).join('') : '';
-  const widthStyle = pointWidth ? `width:${w}px;flex:none;` : 'width:100%;';
-  return `<svg viewBox="0 0 ${w} ${h}" style="${widthStyle}height:${h}px;margin-top:4px;">`+
-      `<line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`+
-      `<polyline points="${pts}" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`+
-      dots+labels+periods+
-    `</svg>`;
+  return `<svg role="img" aria-label="${esc(unitWord||view||'Income')} trend" style="display:block;width:100%;height:${h}px;margin-top:8px;overflow:visible;">`+
+      `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="${padX}" y1="${h-padBottom}" x2="${w-padX}" y2="${h-padBottom}" stroke="#d1d5db" stroke-width="1"/><polyline points="${pts}" fill="none" stroke="#16a34a" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>`+
+      dots+labels+periods+`</svg>`;
+
 }
 // Net Daily Profit's chart. `cached` is undefined until the first fetch lands
 // (net_daily_range), so this doubles as the loading state. Reuses
@@ -19616,17 +19747,13 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
 // formatting (incomePeriodLabel's 'week' case), not because this is weekly
 // data. $1,500/day ceiling: net PROFIT, not revenue, so a day that clips
 // against it is a genuinely exceptional day, not a normal one squashed flat.
-// pointWidth=44 gives every day's label real horizontal room to avoid the
-// illegible pile-up a fixed 380px produces once there are 30 points -- the
-// chart becomes wider than the card and scrolls horizontally (wrapped below)
-// rather than cramming every number into a fixed width no 30-point series
-// could ever fit cleanly.
+// Longer ranges retain all points and use a sparse, readable label set.
 function ndpChartHtml(cached){
   if(!cached) return `<div class="gstat-s" style="margin-top:8px;">Loading…</div>`;
   const history=(cached.days||[]).map(d=>({ pay_date:d.date, total_made:Number(d.total)||0 }));
-  // Shorter box (owner 2026-10-03): scale to the real numbers, 120px tall.
+  // Scale to the real numbers, with room for larger labels.
   const top=Math.max(100, ...history.map(h=>h.total_made))*1.1;
-  const svg=incomeChartSvg(history, top, 'week', 'days', 44, 120);
+  const svg=incomeChartSvg(history, top, 'week', 'days', null, 220);
   return `<div class="ndp-scroll">${svg}</div>`;
 }
 // Secretary conversion card -- one merged dark-hero card: the 7-day rate is
@@ -19643,14 +19770,24 @@ function convHue(p){
   if (p <= 50) return 52 + (p - 40) / 10 * 100;    // amber -> green
   return 152;                                      // green, flat from here up
 }
+function conversionColors(p){
+  const h=convHue(Number(p)||0);
+  return {color:`hsl(${h} 70% 56%)`,glow:`hsl(${h} 70% 56% / .45)`};
+}
+function bookingRateBarHtml(p){
+  const value=Number(p.conversion)||0, {color,glow}=conversionColors(value);
+  const width=p.calls?Math.max(0,Math.min(100,value)):0;
+  const pct=p.calls?`${Math.round(value*10)/10}%`:'–';
+  return `<div class="booking-rate-row"><div class="booking-rate-label"><b>${esc(p.person)}</b><span>${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>
+    <div class="booking-rate-meter"><div class="booking-rate-track"><div style="height:100%;width:${width}%;background:${color};border-radius:7px;box-shadow:0 0 9px 1px ${glow},0 0 22px 3px ${glow};"></div></div><b>${pct}</b></div></div>`;
+}
 function secretaryConversionHtml(){
   const cp=greetingData && greetingData.callPerf;
   if(!cp || !cp.thisWeek) return '';
   const tw=cp.thisWeek, lw=cp.lastWeek;
   const p=Number(tw.conversion)||0;
   const prev=(lw && lw.calls) ? (Number(lw.conversion)||0) : null;
-  const h=convHue(p);
-  const color=`hsl(${h} 70% 56%)`, glow=`hsl(${h} 70% 56% / .45)`;
+  const {color,glow}=conversionColors(p);
   const fillW=Math.max(0,Math.min(100,p));
   const deltaHtml = prev==null ? '' : (()=>{
     const delta=Math.round((p-prev)*10)/10, up=delta>=0;
@@ -19681,17 +19818,15 @@ function joeyCardsHtml(){
   const card=(l,v)=>`<div class="gstat"><span class="gstat-l">${l}</span>${v}</div>`;
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
-  const covHtml=`<div style="font-size:13px;line-height:1.5;"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
+  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
   const u=Number(j.urgent_tasks)||0;
-  const secs=(j.secretaries||[]).map(p=>{ const c=Number(p.conversion)||0;
-    // Bars like the owner's booking-rate box (owner 2026-10-03).
-    const pct=p.calls?String(Math.round(c*10)/10).replace(/[.]0$/,'')+'%':'–', hue=`hsl(${convHue(c)} 70% 50%)`, w=p.calls?Math.min(Math.max(c,6),100):0;
-    return `<div style="margin-top:7px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><b>${esc(p.person)}</b><span style="color:#6b7280;">${p.calls?`${p.booked} of ${p.calls}`:'No calls'}</span></div>`+
-      `<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;height:18px;background:#fff;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${hue};border-radius:6px;"></div></div><b style="font-size:12px;color:${p.calls?hue:'#6b7280'};min-width:34px;text-align:right;">${pct}</b></div></div>`; }).join('');
+  const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
+  const low=Number(greetingData.lowStockTechs)||0;
+  const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
   return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
     card('Covering today',covHtml)+
-    card('Jobs today',big(Number(j.jobs_today)||0))+
-    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>`)+
+    card('Jobs today',big(Number(j.jobs_today)||0)+dashPipelineHtml())+
+    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>`+stockNotice)+
     card('Booking rate · 7 days',secs)+
   `</div>`;
 }
@@ -19717,8 +19852,8 @@ function greetStatsHtml(){
     // card's longer tabs, which need a fresh economics pass from the server.
     `<div class="gstat" style="align-items:center;text-align:center;justify-content:center;">`+
       `<span class="gstat-l">🔒 Income</span>`+
-      `<div class="ndp-seg" style="margin-top:6px;"><button data-iv="week" class="${incomeView==='week'?'on':''}">Weekly</button><button data-iv="month" class="${incomeView==='month'?'on':''}">Monthly</button><button data-iv="quarter" class="${incomeView==='quarter'?'on':''}">3 Months</button></div>`+
-      `<div id="incomeChart">${incomeChartSvg(incomeAggregate(pf.income_history, incomeView), incomeView==='week'?10000:incomeView==='month'?40000:120000, incomeView)}</div>`+
+      `<div class="dashboard-chart-layout"><div class="ndp-seg"><button data-iv="week" class="${incomeView==='week'?'on':''}">Weekly</button><button data-iv="month" class="${incomeView==='month'?'on':''}">Monthly</button><button data-iv="quarter" class="${incomeView==='quarter'?'on':''}">3 Months</button></div>`+
+      `<div id="incomeChart">${incomeChartSvg(incomeAggregate(pf.income_history, incomeView), incomeView==='week'?10000:incomeView==='month'?40000:120000, incomeView)}</div></div>`+
     `</div>`+
     // Combined Profit box (tabbed): one number + split, swapped between
     // This week / Today / Yesterday by the tab row — replaces the old
@@ -19734,8 +19869,8 @@ function greetStatsHtml(){
       // Chart-only box now -- no single-day $ figure or Today/Yesterday
       // toggle, just the trend (see incomeChartSvg reuse notes on ndpChartHtml
       // above). {pay_date,total_made} adaptation happens inside ndpChartHtml.
-      `<div class="ndp-seg" style="margin-top:6px;"><button data-ndv="7d" class="${netDailyChartView==='7d'?'on':''}">Last 7 days</button><button data-ndv="30d" class="${netDailyChartView==='30d'?'on':''}">Last 30 days</button></div>`+
-      `<div id="ndpChart" style="width:100%;">${ndpChartHtml(netDailyChartCache[netDailyChartView])}</div>`+
+      `<div class="dashboard-chart-layout"><div class="ndp-seg"><button data-ndv="7d" class="${netDailyChartView==='7d'?'on':''}">Last 7 days</button><button data-ndv="30d" class="${netDailyChartView==='30d'?'on':''}">Last 30 days</button></div>`+
+      `<div id="ndpChart" style="width:100%;">${ndpChartHtml(netDailyChartCache[netDailyChartView])}</div></div>`+
     `</div>` : '';
   // Revenue this week = every non-canceled job's price over the Sun–Sat work week,
   // both companies combined, with the per-business split below. Job-revenue based
@@ -19750,15 +19885,7 @@ function greetStatsHtml(){
   const secHtml=secs.length?(
     `<div class="rev-sec"><div class="rev-sec-h">Booking rate · last 7 days</div>`+
     // Same bar style as the Avg ticket box (owner 2026-10-02).
-    secs.map(p=>{ const pctTxt=p.calls?(Math.round(p.conversion*10)/10).toString().replace(/\.0$/,'')+'%':'–';
-      const w=p.calls?Math.min(Math.max(Number(p.conversion)||0,6),100):0, inside=w>=26;
-      const hue=`hsl(${convHue(Number(p.conversion)||0)} 70% 50%)`;   // same red→amber→green as the secretaries' card
-      return `<div style="margin-top:9px;">`+
-        `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;"><span style="font-weight:800;font-size:12px;">${esc(p.person)}</span>`+
-        `<span style="opacity:.75;font-size:11px;font-variant-numeric:tabular-nums;">${p.calls?`${p.booked} booked of ${p.calls} call${p.calls===1?'':'s'}`:'No calls'}</span></div>`+
-        `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:22px;background:#eef0f5;border-radius:7px;overflow:hidden;">`+
-          `<div style="height:100%;width:${w.toFixed(1)}%;background:${hue};border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:12px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;">${inside?pctTxt:''}</div></div>`+
-        (inside?'':`<span style="font-weight:800;font-size:13px;min-width:40px;text-align:right;color:${hue};">${pctTxt}</span>`)+`</div></div>`; }).join('')+
+    secs.map(bookingRateBarHtml).join('')+
     `</div>`):'';
   return `<div class="greet-stats">`+
     `<div class="gstat gstat-rev"><div class="rev-split${secs.length?' has-sec':''}"><div class="rev-left"><span class="gstat-l">Revenue this week${r.week_range_label?` · ${esc(r.week_range_label)}`:''}</span><span class="gstat-v">${money(revTotal)}</span>`+
@@ -19787,7 +19914,7 @@ function greetStatsHtml(){
 function startGreetingClock(){
   if(greetingClock) clearInterval(greetingClock);
   // Local clock re-paint only (no API call) — but skip when the tab is hidden.
-  greetingClock=setInterval(()=>{ if(document.hidden) return; if(section==='schedule') paintGreeting(); }, 30000);
+  greetingClock=setInterval(()=>{ if(document.hidden) return; if(section==='schedule'||(isJoeyHome()&&section==='pipeline')) paintGreeting(); }, 30000);
 }
 // Polling is paused while the tab is in the background (see the document.hidden
 // guards on each interval) — that's the single biggest cut to Vercel function
@@ -20171,6 +20298,7 @@ function closeCallWiz(opts, draft=callWiz){
   if(draft._ending && !(opts&&opts.resolved)) return;
   cwCaptureQuote(draft);
   draft._visible=false; draft._view++;
+  draft._calendarRequest?.controller.abort(); draft._slotRequestController?.abort();
   document.getElementById('callWizModal').classList.add('hidden');
   // A RESOLVED call must be marked resolved on the local object, not just on the
   // server row. `resolution` was read in two places and assigned in none, so it
@@ -21234,13 +21362,16 @@ let cwStripe=null, cwStripeCard=null, cwStripePk=null, cwStripeLibraryPromise=nu
 function cwLoadStripeLibrary(){
   if(window.Stripe) return Promise.resolve();
   if(!cwStripeLibraryPromise){
+    let script;
     const loader=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src='https://js.stripe.com/v3/';
+      script=document.createElement('script');script.src='https://js.stripe.com/v3/';script.async=true;
       script.onload=()=>window.Stripe?resolve():reject(new Error('Card processor did not load.'));
       script.onerror=()=>reject(new Error('Could not load the card processor.'));
       document.head.appendChild(script);
     });
-    cwStripeLibraryPromise=nbWithTimeout(loader,20000,'Card processor did not answer. Check the connection and retry.').catch(error=>{cwStripeLibraryPromise=null;throw error;});
+    cwStripeLibraryPromise=nbWithTimeout(loader,20000,'Card processor did not answer. Check the connection and retry.')
+      .catch(error=>{script.remove();cwStripeLibraryPromise=null;throw error;})
+      .finally(()=>{script.onload=null;script.onerror=null;});
   }
   return cwStripeLibraryPromise;
 }
@@ -21331,6 +21462,7 @@ async function cwSubmitBooking(){
     failure=error;
     if(error.status>=400 && error.status<500 && error.status!==401) draft._bookingAttempt=null;
     if(error.code==='slot_unavailable'){
+      draft._calendarRequest?.controller.abort(); draft._calendarRequest=null; draft._calendarSnapshot=null;
       draft._slotVerifiedKey=null;draft.selectedSlot=null;draft.step='schedule';cwInvalidatePrice(draft);
     }
   }finally{
@@ -21432,7 +21564,7 @@ function cwScheduleParams(draft=callWiz){
   // technicianId: null unless the secretary picked one on the calendar screen
   // (owner rule 2026-09-23) -- 'any' keeps the exact autofill behavior this
   // already had, a real id narrows the calendar/slots to just that person.
-  const params={business:draft.business,technician_id:draft.technicianId||'any',pool:'own'};
+  const params={business:draft.business,technician_id:draft.technicianId||'any',pool:'own',strict_roster:'1'};
   if(draft.zip) params.postal_code=draft.zip;
   const mode=nbSecondTechMode(), lifting=nbSelectedLiftingKind();
   if(draft.service==='TV Mounting' && (mode==='mandatory' || (mode==='optional' && (lifting==='cannot'||lifting==='big')))){
@@ -21443,6 +21575,43 @@ function cwScheduleParams(draft=callWiz){
 function cwScheduleKey(draft=callWiz){ return JSON.stringify(cwScheduleParams(draft)); }
 function cwSlotIsVerified(draft=callWiz){
   return !!(draft && draft.prefDate && draft.selectedSlot && draft._slotVerifiedKey===cwScheduleKey(draft)+'|'+draft.prefDate+'|'+draft.selectedSlot.key);
+}
+// Only these read-only scheduling requests may retry. A booking/payment is
+// never replayed here. Short deadlines cover the response body as well.
+async function cwAvailabilityRead(action,params,{signal,valid=()=>true}={}){
+  if(!['available_dates','available_slots'].includes(action)) throw new Error('Invalid availability request');
+  for(let attempt=0;attempt<2;attempt++){
+    if(signal?.aborted || !valid()) { const e=new Error('Request cancelled'); e.name='AbortError'; throw e; }
+    try{ return await api(action,{params,timeoutMs:8000,signal}); }
+    catch(e){
+      const transient=e.name==='TypeError' || e.code==='request_timeout' || [408,429,500,502,503,504].includes(e.status);
+      if(attempt || !transient || signal?.aborted || !valid()) throw e;
+    }
+  }
+}
+function cwMonthAvailability(draft,month){
+  const scope=cwScheduleKey(draft), params={...cwScheduleParams(draft),month,include_slots:'1'}, key=JSON.stringify(params);
+  const cached=draft._calendarRequest;
+  if(cached?.key===key && !cached.controller.signal.aborted && (cached.pending || Date.now()-cached.at<15000)) return cached.promise;
+  cached?.controller.abort();
+  const entry={key,at:Date.now(),controller:new AbortController(),pending:true};
+  draft._calendarRequest=entry;
+  entry.promise=cwAvailabilityRead('available_dates',params,{signal:entry.controller.signal,
+    valid:()=>cwIsActive(draft) && cwScheduleKey(draft)===scope})
+    .then(data=>{
+      if(!Array.isArray(data.dates)) throw new Error('The calendar returned an incomplete response. Please retry.');
+      entry.pending=false;
+      return {...data,_checkedAt:entry.at,_scope:scope,_month:month};
+    }).catch(error=>{if(draft._calendarRequest===entry)draft._calendarRequest=null;throw error;});
+  return entry.promise;
+}
+function cwFreshMonthSlots(draft,date){
+  const snapshot=draft._calendarSnapshot;
+  if(!snapshot || snapshot._scope!==cwScheduleKey(draft) || snapshot._month!==date.slice(0,7) || Date.now()-snapshot._checkedAt>=15000) return null;
+  const slots=snapshot.slots_by_date?.[date];
+  if(!Array.isArray(slots) || slots.some(s=>!s || typeof s.slot_key!=='string' || typeof s.label!=='string' || !/^\d{2}:\d{2}$/.test(s.start))) return null;
+  const today=cwScheduleToday(draft), now=new Intl.DateTimeFormat('en-GB',{timeZone:cwScheduleTimezone(draft),hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+  return {...snapshot,slots:slots.filter(s=>date>today || (date===today && s.start>now))};
 }
 // The Frame/Gallery stepper, asked after size and before brackets. Capped at the
 // number of TVs on the job — a frame TV is one of those TVs, not an extra one.
@@ -21500,6 +21669,8 @@ async function renderCallWiz(){
   document.getElementById('callWizEndBtn').disabled=!!draft._ending;
   if(draft._ending) return;
   const view=++draft._view;
+  draft._slotRequestController?.abort();
+  if(!['tvopts','schedule'].includes(draft.step)) draft._calendarRequest?.controller.abort();
   const isHere=()=>cwIsActive(draft,view);
   const body=document.getElementById('callWizBody');
   body.setAttribute('aria-busy','false');
@@ -21561,7 +21732,12 @@ async function renderCallWiz(){
       busy(true);
       // The catalog can load while the call record is saved and the caller
       // gives their ZIP. This warms caches only; the active card owns the UI.
-      if(service==='TV Mounting') cwWarmTvCatalog(draft.business).catch(()=>{});
+      if(service==='TV Mounting'){
+        cwWarmTvCatalog(draft.business).catch(()=>{});
+        // Download only the library while the caller answers questions. The
+        // card Element and business-specific Stripe account are set at checkout.
+        cwLoadStripeLibrary().catch(()=>{});
+      }
       try{
         await cwStartRecord(draft);
         cwCallUpdate({service},draft).catch(()=>{});
@@ -21707,6 +21883,9 @@ async function renderCallWiz(){
     }
     const card=cards[callWiz.optStep];
     const tvCount=nbTotalTvs();
+    // Warm the calendar while the final question is being answered. Its scope
+    // includes the ZIP, selected technician and lifting requirement.
+    if(callWiz.optStep===cards.length-1) cwMonthAvailability(draft,cwScheduleToday(draft).slice(0,7)).catch(()=>{});
 
     let optsHtml, blocked=null;
     if(card.kind==='wire-overlap'){
@@ -21864,8 +22043,8 @@ async function renderCallWiz(){
     body.innerHTML=`${callWizScript("What's a good day for you?")}
       <div style="display:flex;align-items:center;gap:6px;margin:-2px 0 8px;font-size:11.5px;color:var(--mute);">
         <label for="cwTechPick" style="white-space:nowrap;">Select the technician</label>
-        <select id="cwTechPick" style="flex:none;max-width:180px;font-size:11.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2);background:#fff;">
-          <option value="">Auto-assign</option>
+        <select id="cwTechPick" disabled style="flex:none;max-width:180px;font-size:11.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2);background:#fff;">
+          <option value="">Auto-assign</option>${draft.technicianId?`<option value="${esc(draft.technicianId)}" selected>${esc((draft._scheduleTechnicians||[]).find(t=>t.id===draft.technicianId)?.name||'Selected technician')}</option>`:''}
         </select>
       </div>
       <div id="cwCalWrap" style="width:100%;min-width:0;background:#0b1f3a;border-radius:13px;padding:14px 14px 12px;color:#fff;">
@@ -21878,6 +22057,7 @@ async function renderCallWiz(){
         <div class="nb-cal-grid" id="cwCalGrid"><div style="grid-column:1/8;text-align:center;color:#9fb0c3;font-size:12px;padding:10px;">Loading…</div></div>
       </div>
       <div id="cwTimeZone" style="margin-top:7px;font-size:12px;color:var(--mute);">All times are in ${esc(cwScheduleZoneLabel(draft))}.</div>
+      <div id="cwAvailabilityScope" style="margin-top:3px;font-size:12px;color:var(--mute);"></div>
       <div id="cwCalNote" style="display:none;background:#fff7ed;border:1px solid #fdba74;border-radius:9px;padding:11px 13px;margin-top:9px;font-size:12.5px;line-height:1.55;color:#9a3412;"></div>
       <div id="cwSlotsWrap" style="margin-top:10px;display:none;">
         <div id="cwSlotAsk" style="margin-bottom:8px;">${callWizScript('Would you prefer morning or afternoon?').replace('margin-bottom:12px','margin-bottom:0')}</div>
@@ -21899,6 +22079,20 @@ async function renderCallWiz(){
       document.getElementById('cwTimeZone').textContent=`All times are in ${cwScheduleZoneLabel(draft)}.`;
     };
     let cwCalSeq=0;
+    function showTechnicians(techs){
+      if(!Array.isArray(techs)) return;
+      draft._scheduleTechnicians=techs;
+      draft._scheduleRosterKey=JSON.stringify([draft.business,draft.zip]);
+      const sel=document.getElementById('cwTechPick');
+      sel.innerHTML='<option value="">Auto-assign</option>'+techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')+
+        (draft.technicianId && !techs.some(t=>t.id===draft.technicianId)?`<option value="${esc(draft.technicianId)}">Selected technician unavailable</option>`:'');
+      sel.value=draft.technicianId||''; sel.disabled=false;
+      const selected=techs.find(t=>t.id===draft.technicianId);
+      document.getElementById('cwAvailabilityScope').textContent=draft.technicianId
+        ? `Availability for ${selected?.name||'the selected technician'} only.`
+        : 'Availability across eligible technicians in this service area.';
+    }
+    if(draft._scheduleRosterKey===JSON.stringify([draft.business,draft.zip])) showTechnicians(draft._scheduleTechnicians);
     async function loadCwCalendar(){
       if(!scheduleHere()) return;
       const mySeq=++cwCalSeq;
@@ -21908,10 +22102,12 @@ async function renderCallWiz(){
       document.getElementById('cwCalNote').style.display='none';
       const params={...cwScheduleParams(draft),month:cwMonthKey(draft.calMonth)};
       try{
-        const r=await api('available_dates',{ params });
+        const r=await cwMonthAvailability(draft,params.month);
         if(!scheduleHere() || mySeq!==cwCalSeq) return;
         if(!Array.isArray(r.dates)) throw new Error('The calendar returned an incomplete response. Please retry.');
         readTimezone(r);
+        draft._calendarSnapshot=r;
+        showTechnicians(r.technicians);
         const today=cwScheduleToday(draft);
         callWiz.availDates=new Set(r.dates.filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d) && d.startsWith(params.month+'-') && d>=today));
         // A blank month has several very different causes and they all used to
@@ -21920,8 +22116,10 @@ async function renderCallWiz(){
         callWiz.calArea=r.area||callWiz.areaName||null;
       }catch(e){
         if(!scheduleHere() || mySeq!==cwCalSeq) return;
+        draft._calendarSnapshot=null; clearSlot(); ++cwSlotSeq; cwSlotController?.abort();
+        document.getElementById('cwSlotsWrap').style.display='none';
         callWiz.availDates=new Set();
-        callWiz.calReason='error'; callWiz.calError=e.message||'';
+        callWiz.calReason='error'; callWiz.calError=e.name==='TypeError'?'The connection dropped. Retry to check availability.':e.message||'';
       }
       renderCwCalendarGrid();
     }
@@ -21940,7 +22138,7 @@ async function renderCallWiz(){
         const cls=avail?(ds===callWiz.prefDate?'avail sel':'avail'):'off';
         html+=`<button type="button" class="nb-cal-day ${cls}" ${avail?`data-date="${ds}"`:'disabled'} aria-label="${esc(ds)}" style="font-family:inherit;padding:0;${avail?'':'background:transparent;'}">${d}</button>`;
       }
-      grid.innerHTML=html;
+      grid.innerHTML=callWiz.calReason==='error'?'<div role="alert" style="grid-column:1/8;text-align:center;padding:16px;">Availability has not been checked.</div>':html;
       // Nothing open this month: say WHY, with the line to read out loud. A
       // silent grid of grey read as a broken screen and cost a whole call.
       const note=document.getElementById('cwCalNote');
@@ -21951,6 +22149,7 @@ async function renderCallWiz(){
           R==='zip_not_covered' ? `<b>We don't cover ${esc(callWiz.zip||'that zip')} yet.</b> Take their details and send an estimate — the office can follow up if we open the area.`
           : R==='area_unstaffed' ? `<b>No technician in ${esc(area)} yet.</b> This zip is on the map but unstaffed, so there's nothing to book. Send an estimate instead.`
           : R==='no_techs_in_area' ? `<b>No technician is assigned to ${esc(area)}.</b> Nothing can be booked here until someone covers it — send an estimate and tell the office.`
+          : R==='technician_unavailable' ? '<b>This technician is not available in this service area.</b> Choose Auto-assign or another technician.'
           : R==='error' ? `<b>Couldn't load the calendar.</b> ${esc(callWiz.calError||'')} <button type="button" class="btn ghost sm" id="cwCalRetry" style="margin-top:8px;">Retry calendar</button>`
           : `<b>Nothing open in ${esc(callWiz.calMonth.toLocaleDateString('en-US',{month:'long'}))}.</b> Try the next month with ›, or send an estimate.`;
         note.style.display=R?'':'none';
@@ -21971,6 +22170,7 @@ async function renderCallWiz(){
       }));
     }
     let cwSlotSeq=0;
+    let cwSlotController=null;
     async function loadCwSlots(date){
       // Same guard the calendar above already has: click date A then date B and
       // A's slower reply used to repaint B's list with A's times, so the
@@ -21978,6 +22178,7 @@ async function renderCallWiz(){
       // open on the date the booking is then submitted with.
       if(!scheduleHere() || date!==draft.prefDate) return;
       const mySeq=++cwSlotSeq, previousSlot=draft.selectedSlot;
+      cwSlotController?.abort(); cwSlotController=new AbortController(); draft._slotRequestController=cwSlotController;
       clearSlot();
       const wrap=document.getElementById('cwSlotsWrap'), list=document.getElementById('cwSlots');
       wrap.style.display='';
@@ -21986,7 +22187,7 @@ async function renderCallWiz(){
       const params={...cwScheduleParams(draft),date};
       const slotsHere=()=>scheduleHere() && mySeq===cwSlotSeq && date===draft.prefDate;
       try{
-        const r=await api('available_slots',{ params });
+        const r=cwFreshMonthSlots(draft,date) || await cwAvailabilityRead('available_slots',params,{signal:cwSlotController.signal,valid:slotsHere});
         if(!slotsHere()) return;
         if(!Array.isArray(r.slots) || r.slots.some(s=>!s || typeof s.slot_key!=='string' || typeof s.label!=='string')) throw new Error('The times returned an incomplete response. Please retry.');
         readTimezone(r);
@@ -22042,37 +22243,17 @@ async function renderCallWiz(){
       if(!scheduleHere() || (delta<0 && cwMonthKey(draft.calMonth)<=cwScheduleToday(draft).slice(0,7))) return;
       draft.calMonth.setDate(1); draft.calMonth.setMonth(draft.calMonth.getMonth()+delta);
       draft.prefDate=''; clearSlot(); ++cwSlotSeq;
+      cwSlotController?.abort();
       document.getElementById('cwSlotsWrap').style.display='none';
       loadCwCalendar();
     };
     document.getElementById('cwCalPrev').addEventListener('click', ()=>changeMonth(-1));
     document.getElementById('cwCalNext').addEventListener('click', ()=>changeMonth(1));
-    // "Select the technician" (owner rule 2026-09-23): really small, optional --
-    // left alone it stays "Auto-assign" and nothing about booking changes. Roster
-    // is the SAME zip-filtered list New Booking's own tech dropdown uses
-    // (service_area_id === nbZipAreaId, set by checkZip() earlier in this same
-    // wizard), so it follows the exact same city rule -- Houston only offers
-    // Juan, Austin only offers Zach, etc. Picking one re-renders this step,
-    // which (via cwScheduleKey depending on cwScheduleParams) naturally clears
-    // whatever date/time was picked under the OLD scope and re-fetches for the
-    // new one -- same mechanism the after-the-fact TV-option changes already use.
-    (async()=>{
-      const sel=document.getElementById('cwTechPick'); if(!sel) return;
-      let techs=[];
-      try{
-        const {tech}=await nbEnsureDataCached(draft.business);
-        // Same roster + same zip-metro filter New Booking's own tech dropdown
-        // uses (nbFilterOwn), including its fallback: if the zip match comes up
-        // empty, show everyone rather than an empty (and confusing) picker.
-        techs=nbFilterOwn((tech&&tech.technicians)||[]);
-      }catch(_){ return; }
-      if(!scheduleHere() || document.getElementById('cwTechPick')!==sel) return;
-      sel.innerHTML='<option value="">Auto-assign</option>'+
-        techs.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
-      sel.value=draft.technicianId||'';
-    })();
+    // The calendar response supplies the exact server-filtered ZIP roster.
+    // There is no separate services/technicians fetch or all-metros fallback.
     document.getElementById('cwTechPick').addEventListener('change',e=>{
       if(!scheduleHere()) return;
+      cwSlotController?.abort();
       draft.technicianId=e.target.value||null;
       cwTrack('technician_picked',{technician_id:draft.technicianId||'any'});
       renderCallWiz();
@@ -24764,7 +24945,9 @@ let nbStripe=null, nbStripeElements=null, nbStripeCard=null;
 // connection they can pend forever, which stranded the submit button on
 // "Processing…" (the 45s api() timeout only guards our own API calls).
 function nbWithTimeout(p,ms,msg){
-  return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
+  let timer;
+  return Promise.race([p,new Promise((_,rej)=>{timer=setTimeout(()=>rej(new Error(msg)),ms);})])
+    .finally(()=>clearTimeout(timer));
 }
 // Doms has its OWN Stripe account, separate from Handy Andy's — a card
 // tokenized with the wrong business's publishable key creates a real Stripe
