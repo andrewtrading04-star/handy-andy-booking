@@ -1717,6 +1717,10 @@ async function jobPhotoDelete(req, res, db, auth, body) {
   let bizId;
   try { bizId = await assertOwnedJob(db, auth, id); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   if (!photoId) return res.status(400).json({ error: 'photo_id required' });
+  // Once a job is complete its photos stay (owner 2026-10-04): a tech could
+  // otherwise close with 2 photos, then delete them. The office can still manage them.
+  const { data: jb } = await db.from('bookings').select('status').eq('id', id).maybeSingle();
+  if (jb && jb.status === 'completed') return res.status(403).json({ error: 'This job is complete, so its photos are locked. Ask the office.' });
 
   const { data: ph } = await db.from('booking_photos')
     .select('id, storage_path').eq('id', photoId).eq('booking_id', id).eq('business_id', bizId).single();
