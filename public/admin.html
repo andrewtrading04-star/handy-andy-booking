@@ -15703,7 +15703,23 @@ function msgDetailHtml(t){
   if(!t.messages.length){
     html+='<div class="empty">No messages in this conversation.</div>';
   } else {
-    for(const m of t.messages){
+    // Reactions (owner 2026-10-04): a customer's thumbs-up etc. arrives as a text
+    // (Android: emoji + to "..."; iPhone: Liked "..."). Show it as a small badge
+    // on the message of ours it reacts to, not as its own bubble.
+    const RX_VERB={liked:'\u{1F44D}',loved:'\u2764\uFE0F',disliked:'\u{1F44E}','laughed at':'\u{1F602}',emphasized:'\u203C\uFE0F',questioned:'\u2753'};
+    const rxParse=b=>{ const s=String(b||'').trim();
+      let m=s.match(/^(Liked|Loved|Disliked|Laughed at|Emphasized|Questioned)\s+[\u201C\u201D"]([\s\S]*?)[\u201C\u201D"]?$/i);
+      if(m) return { emoji:RX_VERB[m[1].toLowerCase()], quote:m[2] };
+      m=s.match(/^(?:Reacted\s+)?(\S{1,8})\s+to\s+[\u201C\u201D"]([\s\S]*?)[\u201C\u201D"]?$/i);
+      if(m && !/[a-z0-9]/i.test(m[1])) return { emoji:m[1], quote:m[2] };
+      return null; };
+    const norm=x=>String(x||'').replace(/\s+/g,' ').trim().toLowerCase();
+    const rxOn=new Map(), rxSkip=new Set();
+    t.messages.forEach((m,i)=>{ if(m.direction==='out') return; const r=rxParse(m.body); if(!r||!r.emoji) return;
+      const q=norm(r.quote).replace(/[\u2026.]+$/,'').slice(0,40);
+      for(let j=i-1;j>=0;j--){ const o=t.messages[j]; if(o.direction==='out' && q && norm(o.body).startsWith(q)){ rxOn.set(j,(rxOn.get(j)||'')+r.emoji); rxSkip.add(i); return; } } });
+    for(const [mi,m] of t.messages.entries()){
+      if(rxSkip.has(mi)) continue;
       const mine=m.direction==='out';
       const automated=mine && m.sent_by==='automated';
       const failed=(m.status==='failed'||m.status==='undelivered');
@@ -15724,7 +15740,9 @@ function msgDetailHtml(t){
         else if(m.status==='queued') meta+=' · sending…';
         if(m.sent_by && m.sent_by!=='automated') meta+=' · '+m.sent_by;
       }
-      const bubble='<div style="background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 13px;font-size:15px;line-height:1.35;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+smsMediaHtml(m)+'</div>';
+      const rx=rxOn.get(mi);
+      const bubble='<div style="position:relative;background:'+bg+';color:'+fg+';border:'+border+';border-radius:'+radius+';padding:8px 13px;font-size:15px;line-height:1.35;white-space:pre-wrap;word-break:break-word;">'+esc(m.body||'')+smsMediaHtml(m)
+        +(rx?'<span title="Customer reacted" style="position:absolute;left:-10px;top:-12px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:1px 6px;font-size:14px;line-height:1.4;box-shadow:0 1px 3px rgba(0,0,0,.15);">'+esc(rx)+'</span>':'')+'</div>';
       html+='<div style="max-width:75%;width:fit-content;'+align+'margin-bottom:10px;">'
         +(automated?'<div class="msg-auto-label" style="text-align:right;">Automated</div>':'')
         +(mine ? bubble
