@@ -16184,7 +16184,7 @@ function rcFolderCard(r){
   const biz = `<span class="rc-biz ${r.business_slug==='doms'?'doms':'ha'}">${esc(bizShort(r.business_slug))}</span>`;
   const badges=[];
   if(r.rating && r.rating<4) badges.push(`<span class="rc-badge red">⚠ left ${r.rating}★ private feedback — handle gently</span>`);
-  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}${r.call_by?` · ${esc(r.call_by)}`:''}${r.call_at?` · ${esc(rcRel(r.call_at, r.business_timezone))}`:''}</span>`);
+  if(r.call_status) badges.push(`<span class="rc-badge amber">☎️ ${esc(rcStatusLabel(r.call_status))}</span>`);
   if(r.reviewed) badges.push(`<span class="rc-badge green">✅ Left a review since</span>`);
   const tel=r.phone?String(r.phone).replace(/[^0-9+]/g,''):'';
   const callBtn = r.call_status==='do_not_contact'
@@ -16193,6 +16193,14 @@ function rcFolderCard(r){
   const resend=(r.has_email && r.has_review_link && !r.reviewed && r.call_status!=='do_not_contact')
     ? `<button class="rc-btn ghost" data-rc-act="resend" data-rc-id="${r.id}" data-rc-biz="${esc(r.business_slug)}">✉️ Re-send review email</button>` : '';
   const noteBox = r.call_notes ? `<div class="rc-note">“${esc(r.call_notes)}”</div>` : '';
+  // Owner 2026-10-04: who made the review call, when, the job's photos, and the job itself.
+  let callAt='';
+  try{ if(r.call_at) callAt=new Date(r.call_at).toLocaleString('en-US',{ timeZone:r.business_timezone||'America/Denver', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); }catch(_){}
+  const whoRow = r.call_status ? `<div class="rc-meta" style="margin-top:4px;color:#0f172a;">☎️ Called by <b>${esc(r.call_by||'Unknown')}</b>${callAt?` · ${esc(callAt)}`:''}</div>` : '';
+  const pics=Array.isArray(r.photos)?r.photos:[];
+  const photoRow = pics.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">${pics.map(u=>`<img src="${esc(u)}" data-rc-photo="${esc(u)}" loading="lazy" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:7px;cursor:zoom-in;border:1px solid #e2e8f0;">`).join('')}${r.photo_count>pics.length?`<span class="rc-meta">+${r.photo_count-pics.length}</span>`:''}</div>` : '';
+  const canOpen = (typeof businesses!=='undefined' && businesses.some(b=>b.slug===r.business_slug)) || (typeof viewBusinesses!=='undefined' && viewBusinesses.some(b=>b.slug===r.business_slug));
+  const jobBtn = canOpen ? `<button class="rc-btn ghost" data-rc-job="${esc(r.id)}" data-rc-biz="${esc(r.business_slug)}">📋 Open job</button>` : '';
   // No point telling her whether it's a good time to dial a number she is
   // already permanently blocked from dialing.
   const timeband = r.call_status!=='do_not_contact' ? rcTimeBandHtml(r) : '';
@@ -16202,15 +16210,24 @@ function rcFolderCard(r){
       <div class="rc-meta">${esc(r.service_name)} · ${esc(r.technician_name)} · ${esc(rcRel(r.when, r.business_timezone))}${r.zip?` · ${esc(r.zip)}`:''}</div>
       ${rcVoicemailRow(r)}
       <div class="rc-badges">${badges.join('')}</div>
+      ${whoRow}
       ${noteBox}
+      ${photoRow}
     </div>
     <div class="rc-actions">
       ${timeband}
       ${callBtn}
+      ${jobBtn}
       ${resend}
     </div>
   </div>`;
 }
+document.addEventListener('click',e=>{
+  const p=e.target&&e.target.closest&&e.target.closest('[data-rc-photo]');
+  if(p){ e.preventDefault(); openLightbox(p.getAttribute('data-rc-photo')); return; }
+  const j=e.target&&e.target.closest&&e.target.closest('[data-rc-job]');
+  if(j){ e.preventDefault(); e.stopPropagation(); openPayrollJob(j.getAttribute('data-rc-job'), j.getAttribute('data-rc-biz')); }
+},true);
 // What to show in a review-call card's 🛒 summary: the actual work Joey can
 // reference on the call — TV sizes, handyman, Assurion, and priced add-ons
 // (soundbar, wire concealment, LED, dismount…). Everything else is noise: tax
@@ -16245,6 +16262,7 @@ function rcVoicemailRow(r){
     ${convo ? txView(vm) : vm.transcript
       ? `<div style="font-size:12.5px;color:#7c2d12;line-height:1.55;margin-top:5px;">${esc(vm.transcript)}</div>`
       : '<div style="font-size:12.5px;color:#9a3412;opacity:.75;margin-top:5px;">No transcript for that message.</div>'}
+    ${vm.has_recording&&vm.id?`<button type="button" class="rec-btn" data-rec-src="${API}?action=call_recording&id=${encodeURIComponent(vm.id)}&token=${encodeURIComponent(token)}" data-rec-style="width:100%;max-width:380px;height:32px;display:block;margin-top:6px;">&#9654; Play recording</button>`:''}
   </div>`;
 }
 function rcCard(r){

@@ -10275,6 +10275,7 @@ async function reviewCalls(req, res, db, auth) {
     const fmtMD = (d) => new Intl.DateTimeFormat('en-US', { timeZone: RC_TZ, month: 'short', day: 'numeric' }).format(d);
     const weekLastDay = new Date(weekEnd.getTime() - 86400000);
     await attachInboundVoicemails(db, out);
+    await attachJobPhotos(db, out);
     return res.status(200).json({
       calls: out,
       warning: warnings.length ? warnings.join(' · ') : null,
@@ -10498,7 +10499,7 @@ async function attachInboundVoicemails(db, rows) {
     }
     if (!byPhone.size) return;
     const { data } = await db.from('calls')
-      .select('id, caller_phone, transcript, transcript_summary, occurred_at, market, status')
+      .select('id, caller_phone, transcript, transcript_summary, occurred_at, market, status, recording_url')
       .in('caller_phone', [...byPhone.keys()])
       // Real calls only: a customer's TEXT is not a voicemail (owner 2026-09-30,
       // Matt Seigler's "2 people" text showed as one).
@@ -10511,6 +10512,7 @@ async function attachInboundVoicemails(db, rows) {
         if (!r.inbound_voicemail) {
           r.inbound_voicemail = {
             id: c.id, transcript: c.transcript, transcript_summary: c.transcript_summary || null, occurred_at: c.occurred_at, market: c.market, status: c.status,
+            has_recording: !!c.recording_url,
           };
         }
       }
@@ -10520,6 +10522,27 @@ async function attachInboundVoicemails(db, rows) {
     // must keep working regardless.
     console.warn('[review_calls] voicemail attach skipped:', e.message);
   }
+}
+
+// Folder cards (owner 2026-10-04): the job's photos, one batched query for the
+// page. Up to 6 thumbs per job plus the full count.
+async function attachJobPhotos(db, rows) {
+  try {
+    const ids = rows.map(r => r.id).filter(Boolean);
+    if (!ids.length) return;
+    const { data } = await db.from('booking_photos').select('booking_id, url, created_at')
+      .in('booking_id', ids).not('url', 'is', null).order('created_at', { ascending: true }).limit(3000);
+    const by = new Map();
+    for (const p of (data || [])) {
+      if (!by.has(p.booking_id)) by.set(p.booking_id, []);
+      by.get(p.booking_id).push(p.url);
+    }
+    for (const r of rows) {
+      const list = by.get(r.id) || [];
+      r.photo_count = list.length;
+      r.photos = list.slice(0, 6);
+    }
+  } catch (e) { console.warn('[review_calls] photo attach skipped:', e.message); }
 }
 
 // Log the outcome of a review call (Joey). Cross-business: resolve by id.
