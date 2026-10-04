@@ -17696,7 +17696,8 @@ async function messagesNewLines(req, res, db, auth) {
   }
   // Can each line text yet? Its newest staff/auto text from the last 60 days
   // says: blocked by the carriers (30034, not registered) vs delivered.
-  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  // Failures from before the campaign was approved (9/15) don't count.
+  const since = new Date(Math.max(Date.now() - 60 * 86400000, Date.parse('2026-09-15T00:00:00Z'))).toISOString();
   const { data: sent } = await db.from('messages').select('our_phone, status, error, created_at')
     .eq('direction', 'out').in('our_phone', out.map((l) => l.phone)).gte('created_at', since)
     .order('created_at', { ascending: false }).limit(2000);
