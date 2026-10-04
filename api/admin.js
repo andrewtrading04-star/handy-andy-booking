@@ -709,6 +709,8 @@ export default async function handler(req, res) {
       case 'messages_send':   return await messagesSend(req, res, db, auth, body);
       case 'messages_read':   return await messagesRead(req, res, db, auth, body);
       case 'messages_block':  return await messagesBlock(req, res, db, auth, body);
+      case 'messages_new_lines':  return await messagesNewLines(req, res, db, auth);
+      case 'messages_new_search': return await messagesNewSearch(req, res, db, auth);
       default:                  return res.status(400).json({ error: `Unknown action "${action}"` });
     }
   } catch (err) {
@@ -17514,6 +17516,115 @@ async function messagesThread(req, res, db, auth) {
 }
 
 // POST ?action=messages_send — reply in a conversation.
+// ── New text (owner, 2026-10-04) ─────────────────────────────────────────────
+// Office staff start a text: pick the company + location to text FROM (never
+// the 888 notification number), pick one of that company's customers, write.
+// Only people who are already that company's customers (booked, asked for an
+// estimate, or texted one of its lines) and have not replied STOP can be
+// texted — the owner's consent rule (2026-09-19, see textConsentFor).
+
+// "This call is from Handy Andy Houston." -> "Handy Andy Houston"
+function lineLabel(row, bizName) {
+  const fromLabel = String(row.label || '').replace(/^This call is from\s+/i, '').replace(/\.\s*$/, '').trim();
+  return fromLabel || row.display_name || bizName || prettyPhone(row.phone);
+}
+
+// "%281%905%3496%" matches the free-form ways phones are stored.
+function phoneIlike(d10) {
+  return '%' + d10.slice(0, 3) + '%' + d10.slice(3, 6) + '%' + d10.slice(6) + '%';
+}
+
+// GET ?action=messages_new_lines — the numbers this login may text from.
+async function messagesNewLines(req, res, db, auth) {
+  const allowed = allowedSlugsFor(auth);
+  const { data: lines, error } = await db.from('tracking_numbers')
+    .select('phone, business_slug, label, display_name, active').eq('active', true);
+  if (error) return res.status(500).json({ error: error.message });
+  const byId = await businessesById(db);
+  const bySlug = new Map([...byId.values()].map((b) => [b.slug, b]));
+  const out = [];
+  for (const l of lines || []) {
+    if (!l.business_slug) continue;
+    if (allowed !== null && !allowed.includes(l.business_slug)) continue;
+    const b = bySlug.get(l.business_slug);
+    out.push({ phone: digitsOf(l.phone), slug: l.business_slug, company: b ? b.name : l.business_slug, label: lineLabel(l, b && b.name) });
+  }
+  // Two lines with the same name (e.g. two Houston numbers) get "line 2".
+  const seen = new Map();
+  out.sort((a, b) => a.label.localeCompare(b.label) || a.phone.localeCompare(b.phone));
+  for (const l of out) { const n = (seen.get(l.label) || 0) + 1; seen.set(l.label, n); if (n > 1) l.label += ' (line ' + n + ')'; }
+  return res.status(200).json({ lines: out });
+}
+
+// Is this phone one of the business's customers (booking, estimate, or a text
+// to one of its lines)? Returns the name we know them by, or null.
+async function customerOfBusiness(db, biz, d10) {
+  const like = phoneIlike(d10);
+  const [cust, est, lines] = await Promise.all([
+    db.from('customers').select('name, first_name, last_name').eq('business_id', biz.id).ilike('phone', like).limit(1),
+    db.from('estimates').select('customer_name').eq('business_id', biz.id).ilike('customer_phone', like).limit(1),
+    db.from('tracking_numbers').select('phone').eq('business_slug', biz.slug),
+  ]);
+  if (cust.error || est.error || lines.error) { const e = new Error("Couldn't check this customer. Try again in a moment."); e.status = 503; throw e; }
+  const c = (cust.data || [])[0];
+  if (c) return c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || prettyPhone(d10);
+  const e1 = (est.data || [])[0];
+  if (e1) return e1.customer_name || prettyPhone(d10);
+  const ours = (lines.data || []).map((l) => digitsOf(l.phone)).filter(Boolean);
+  if (ours.length) {
+    const { data: m, error: mErr } = await db.from('messages').select('id')
+      .eq('customer_phone', d10).eq('direction', 'in').in('our_phone', ours).limit(1);
+    if (mErr) { const e = new Error("Couldn't check this customer. Try again in a moment."); e.status = 503; throw e; }
+    if ((m || []).length) return prettyPhone(d10);
+  }
+  return null;
+}
+
+// GET ?action=messages_new_search&our=<line>&q=<name or phone> — that
+// company's customers who can be texted.
+async function messagesNewSearch(req, res, db, auth) {
+  let ctx; try { ctx = await businessForOurPhone(db, auth, req.query.our); } catch (e) { return bail(res, e); }
+  if (!ctx.biz) return res.status(400).json({ error: 'Pick a company first' });
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.status(200).json({ results: [] });
+  const d = digitsOf(q);
+  const found = new Map(); // phone10 -> name
+  const add = (phone, name) => {
+    const p = digitsOf(phone); const p10 = p && p.length === 11 && p.startsWith('1') ? p.slice(1) : p;
+    if (!p10 || p10.length !== 10 || found.has(p10)) return;
+    found.set(p10, (name || '').trim() || prettyPhone(p10));
+  };
+  if (d && d.length >= 4) {
+    const like = '%' + d.split('').join('%') + '%';
+    const [c, e] = await Promise.all([
+      db.from('customers').select('name, first_name, last_name, phone').eq('business_id', ctx.biz.id).ilike('phone', like).limit(15),
+      db.from('estimates').select('customer_name, customer_phone').eq('business_id', ctx.biz.id).ilike('customer_phone', like).limit(15),
+    ]);
+    for (const r of c.data || []) add(r.phone, r.name || [r.first_name, r.last_name].filter(Boolean).join(' '));
+    for (const r of e.data || []) add(r.customer_phone, r.customer_name);
+    if (d.length === 10 && !found.has(d)) {
+      const name = await customerOfBusiness(db, ctx.biz, d).catch(() => null);
+      if (name) add(d, name);
+    }
+  } else {
+    const like = '%' + q.replace(/[%_,()]/g, ' ').trim() + '%';
+    const [c, e] = await Promise.all([
+      db.from('customers').select('name, first_name, last_name, phone').eq('business_id', ctx.biz.id)
+        .or(`name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`).limit(15),
+      db.from('estimates').select('customer_name, customer_phone').eq('business_id', ctx.biz.id).ilike('customer_name', like).limit(15),
+    ]);
+    for (const r of c.data || []) add(r.phone, r.name || [r.first_name, r.last_name].filter(Boolean).join(' '));
+    for (const r of e.data || []) add(r.customer_phone, r.customer_name);
+  }
+  const results = [];
+  for (const [phone, name] of found) {
+    if (results.length >= 12) break;
+    const optedOut = await smsOptOutState(db, phone);
+    results.push({ phone, name, pretty: prettyPhone(phone), opted_out: optedOut === true });
+  }
+  return res.status(200).json({ results });
+}
+
 async function messagesSend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const customer = digitsOf(body.customer);
@@ -17537,7 +17648,13 @@ async function messagesSend(req, res, db, auth, body) {
   const { data: inbound, error: inErr } = await db.from('messages').select('id')
     .eq('our_phone', ctx.ourPhone).eq('customer_phone', customer).eq('direction', 'in').limit(1);
   if (inErr) return res.status(503).json({ error: "Couldn't check this conversation. Try again in a moment." });
-  if (!(inbound || []).length) return res.status(409).json({ error: 'You can only reply to a customer who has texted this number. Call them instead.' });
+  if (!(inbound || []).length) {
+    // A NEW text (Messages > New text) may go to any of this company's own
+    // customers, not only someone who texted this exact line.
+    let known = null;
+    if (body.start === true && ctx.biz) { try { known = await customerOfBusiness(db, ctx.biz, customer); } catch (e) { return bail(res, e); } }
+    if (!known) return res.status(409).json({ error: body.start === true ? 'Only customers of this company can be texted. Call them instead.' : 'You can only reply to a customer who has texted this number. Call them instead.' });
+  }
 
   // Replies go out exactly as typed — no business-name prefix on any customer
   // text (owner rule, 2026-09-18).

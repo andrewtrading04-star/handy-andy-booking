@@ -15425,6 +15425,95 @@ function msgWhen(iso){
     : d.toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
 }
 
+// ── New text (owner, 2026-10-04) ─────────────────────────────────────────────
+// Pick the company + location to text from (never the 888 notification
+// number), pick one of that company's customers, write, send. The server only
+// allows that company's own customers who have not texted STOP.
+let _ntLines=null;
+async function openNewText(){
+  document.getElementById('ntModal')?.remove();
+  const m=document.createElement('div');
+  m.id='ntModal';
+  m.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto;';
+  m.innerHTML='<div style="background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 20px 50px rgba(0,0,0,.25);padding:18px 18px 16px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><strong style="font-size:17px;">New text</strong>'
+    +'<button type="button" data-ntclose="1" aria-label="Close" style="border:0;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--mute);">×</button></div>'
+    +'<div data-ntbody="1"><div class="empty">Loading…</div></div></div>';
+  document.body.appendChild(m);
+  const close=()=>m.remove();
+  m.addEventListener('click',e=>{ if(e.target===m||e.target.closest('[data-ntclose]')) close(); });
+  const body=m.querySelector('[data-ntbody]');
+  try{
+    if(!_ntLines) _ntLines=(await api('messages_new_lines')).lines||[];
+  }catch(e){ body.innerHTML='<div class="empty">'+esc(e.message||'Could not load your numbers')+'</div>'; return; }
+  ntStepFrom(body, close);
+}
+
+function ntLabel(t){ return '<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:2px 0 6px;">'+t+'</div>'; }
+
+function ntStepFrom(body, close){
+  if(!_ntLines.length){ body.innerHTML='<div class="empty">No numbers to text from.</div>'; return; }
+  body.innerHTML=ntLabel('Text from')
+    +'<div style="display:grid;gap:6px;max-height:55vh;overflow:auto;">'
+    +_ntLines.map((l,i)=>'<button type="button" class="btn ghost" data-ntline="'+i+'" style="width:100%;text-align:left;padding:10px 12px;font-size:14px;">'+esc(l.label)+'</button>').join('')
+    +'</div>';
+  body.querySelectorAll('[data-ntline]').forEach(b=>b.addEventListener('click',()=>ntStepTo(body, close, _ntLines[+b.dataset.ntline])));
+}
+
+function ntStepTo(body, close, line){
+  body.innerHTML=ntLabel('From')+'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><strong>'+esc(line.label)+'</strong><button type="button" class="btn ghost" data-ntback="1" style="width:auto;padding:4px 10px;font-size:12px;">Change</button></div>'
+    +ntLabel('To')
+    +'<input type="search" data-ntq="1" placeholder="Name or phone" autocomplete="off" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;">'
+    +'<div data-ntres="1" style="margin-top:8px;display:grid;gap:6px;max-height:45vh;overflow:auto;"></div>';
+  body.querySelector('[data-ntback]').addEventListener('click',()=>ntStepFrom(body, close));
+  const q=body.querySelector('[data-ntq]'), out=body.querySelector('[data-ntres]');
+  let timer=null, seq=0;
+  q.addEventListener('input',()=>{
+    clearTimeout(timer);
+    const v=q.value.trim();
+    if(v.length<2){ out.innerHTML=''; return; }
+    timer=setTimeout(async()=>{
+      const my=++seq;
+      out.innerHTML='<div class="rc-meta">Searching…</div>';
+      try{
+        const r=await api('messages_new_search',{ params:{ our:line.phone, q:v }});
+        if(my!==seq) return;
+        const res=r.results||[];
+        if(!res.length){ out.innerHTML='<div class="rc-meta">No customers of '+esc(line.company)+' match.</div>'; return; }
+        out.innerHTML=res.map((c,i)=>'<button type="button" class="btn ghost" data-ntcust="'+i+'"'+(c.opted_out?' disabled':'')+' style="width:100%;text-align:left;padding:9px 12px;display:flex;justify-content:space-between;gap:8px;'+(c.opted_out?'opacity:.5;':'')+'">'
+          +'<span>'+esc(c.name)+'</span><span class="rc-meta">'+(c.opted_out?'Texted STOP':esc(c.pretty))+'</span></button>').join('');
+        out.querySelectorAll('[data-ntcust]').forEach(b=>b.addEventListener('click',()=>ntStepWrite(body, close, line, res[+b.dataset.ntcust])));
+      }catch(e){ if(my===seq) out.innerHTML='<div class="rc-meta">'+esc(e.message||'Search failed')+'</div>'; }
+    },250);
+  });
+  q.focus();
+}
+
+function ntStepWrite(body, close, line, cust){
+  body.innerHTML=ntLabel('From')+'<div style="margin-bottom:10px;"><strong>'+esc(line.label)+'</strong></div>'
+    +ntLabel('To')+'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><strong>'+esc(cust.name)+' <span class="rc-meta">'+esc(cust.pretty)+'</span></strong><button type="button" class="btn ghost" data-ntback="1" style="width:auto;padding:4px 10px;font-size:12px;">Change</button></div>'
+    +'<textarea data-nttext="1" rows="4" maxlength="1200" placeholder="Text Message" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;font-family:inherit;resize:vertical;"></textarea>'
+    +'<div data-nterr="1" class="rc-meta" style="color:var(--red);margin-top:6px;"></div>'
+    +'<button type="button" class="btn" data-ntsend="1" style="margin-top:8px;width:100%;">Send</button>';
+  body.querySelector('[data-ntback]').addEventListener('click',()=>ntStepTo(body, close, line));
+  const ta=body.querySelector('[data-nttext]'), btn=body.querySelector('[data-ntsend]'), err=body.querySelector('[data-nterr]');
+  ta.focus();
+  btn.addEventListener('click',async()=>{
+    const text=ta.value.trim();
+    if(!text){ err.textContent='Write a message first.'; return; }
+    btn.disabled=true; btn.textContent='Sending…'; err.textContent='';
+    try{
+      await api('messages_send',{ method:'POST', body:{ our:line.phone, customer:cust.phone, text, start:true }});
+      close();
+      toast('Text sent');
+      if(typeof onScreen==='function' && onScreen('messages')){ _msgOpen={our:line.phone, customer:cust.phone}; _msgThreads=null; renderMessages(); }
+    }catch(e){
+      err.textContent=e.message||'Not sent';
+      btn.disabled=false; btn.textContent='Send';
+    }
+  });
+}
+
 async function renderMessages(){
   const view=document.getElementById('view');
   const firstLoad=!_msgThreads;
@@ -15549,10 +15638,12 @@ function paintMessages(){
     +'</div>'
     // Phone-width brand filter: replaces the sideways-scrolling brand strip
     // (owner: "theres no left and right scroll" on the iPhone look).
+    +'<div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">'
+    +'<button type="button" class="btn" data-msgnew="1" style="width:auto;padding:8px 14px;white-space:nowrap;">New text</button>'
     +'<select class="msg-filter-sel" data-msgfiltersel="1" aria-label="Filter by brand">'
       +'<option value="all"'+(_msgFilter==='all'?' selected':'')+'>All'+(totalUnread?' ('+totalUnread+' new)':'')+'</option>'
       +brands.map(g=>'<option value="'+esc(g.key)+'"'+(_msgFilter===g.key?' selected':'')+'>'+esc(g.name)+(g.unread?' ('+g.unread+' new)':'')+'</option>').join('')
-    +'</select></div>';
+    +'</select></div></div>';
   if(totalUnread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+totalUnread+' unread</span></div>';
   html+='<div class="msg-shell'+(_msgOpen?' detail-open':'')+'">'+railHtml+listHtml+'<div class="msg-detail">'+detailInner+'</div></div>';
   html+='</div>';
@@ -15561,6 +15652,7 @@ function paintMessages(){
   view.querySelectorAll('[data-msgfilter]').forEach(el=>el.addEventListener('click',()=>{
     _msgFilter=el.dataset.msgfilter; paintMessages();
   }));
+  view.querySelectorAll('[data-msgnew]').forEach(el=>el.addEventListener('click',openNewText));
   view.querySelectorAll('[data-msgfiltersel]').forEach(el=>el.addEventListener('change',()=>{
     _msgFilter=el.value; paintMessages();
   }));
