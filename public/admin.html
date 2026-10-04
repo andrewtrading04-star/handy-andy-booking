@@ -11098,7 +11098,7 @@ function paintPipeline(){
   const winRatio=(bookedPlus+lostN)?Math.round(100*bookedPlus/(bookedPlus+lostN)):0;
   const avg=wonN?Math.round(wonVal/wonN):0;
   const usd=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
-  const chev=`<div class="plv-total">${usd(liveVal)} <span>· ${liveCards.length} open deal${liveCards.length===1?'':'s'}</span></div>
+  const chev=`${isJoeyHome()?'':`<div class="plv-total">${usd(liveVal)} <span>· ${liveCards.length} open deal${liveCards.length===1?'':'s'}</span></div>`}
     <div class="plv-chev" role="group" aria-label="Stages">${PL_STAGES.map(([k,l])=>
       `<button type="button" class="plv-chev-i st-${k}${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}"><b>${esc(l)}</b><span class="plv-chev-v">${usd(val(k))}</span><span class="plv-chev-n">${count(k)} deal${count(k)===1?'':'s'}${leaks[k]?` · <em>${leaks[k]} leak${leaks[k]===1?'':'s'}</em>`:''}</span></button>`).join('')}</div>`;
   const kpi=(l,v,sub,cls)=>`<div class="plv-kpi${cls?' '+cls:''}"><span>${l}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
@@ -15874,16 +15874,17 @@ async function rcTimePop(){
   const who=role==='secretary'&&['Joe','Alex'].includes(userName);
   const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',hourCycle:'h23',hour:'2-digit',minute:'2-digit'}).formatToParts(new Date());
   const hh=Number(p.find(x=>x.type==='hour').value), mm=Number(p.find(x=>x.type==='minute').value);
-  let snooze=0; try{ snooze=Number(localStorage.getItem('rc_pop_snooze')||0); }catch(_){}
-  if(!who||hh<11||hh>=16||Date.now()<snooze){ if(el) el.remove(); return; }
-  if(Date.now()-_rcPopCountAt>10*60000){ _rcPopCountAt=Date.now(); try{ const d=await api('review_calls',{ params:{ days:7 } }); _rcPopCount=(d.counts&&d.counts.to_call)??null; }catch(_){} }
+  // Owner 2026-10-04: with cards in Needs review the badge is always on and can't be hidden.
+  if(!who||hh<11||hh>=16){ if(el) el.remove(); return; }
+  if(Date.now()-_rcPopCountAt>3*60000){ _rcPopCountAt=Date.now(); try{ const d=await api('review_calls',{ params:{ days:7 } }); _rcPopCount=(d.counts&&d.counts.to_call)??null; }catch(_){} }
+  if(!(_rcPopCount>0)){ if(el) el.remove(); return; }
+  el=document.getElementById('rcTimePop');
   const best=hh===14;
   const t=`${hh%12||12}:${String(mm).padStart(2,'0')} ${hh<12?'AM':'PM'}`;
   if(!el){ el=document.createElement('div'); el.id='rcTimePop'; document.body.appendChild(el);
-    el.addEventListener('click',e=>{ if(e.target.closest('[data-rcx]')){ try{ localStorage.setItem('rc_pop_snooze',String(Date.now()+36e5)); }catch(_){} el.remove(); return; }
-      callHubTab='reviewcalls'; navTo('callhub'); }); }
+    el.addEventListener('click',()=>{ callHubTab='reviewcalls'; navTo('callhub'); }); }
   el.style.cssText=`position:fixed;right:16px;bottom:16px;z-index:8999;width:200px;border-radius:12px;padding:${best?'11px 13px':'9px 11px'};font-size:12.5px;line-height:1.4;cursor:pointer;box-shadow:0 8px 24px rgba(20,30,50,.18);`+(best?'background:#16a34a;color:#fff;border:none;':'background:#fff;color:#374151;border:1px solid var(--line);');
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:${best?'15px':'13px'};">${best?'BEST TIME TO CALL':'Review calls'}</b><span data-rcx title="Hide for an hour" style="padding:0 2px;opacity:.7;">✕</span></div>
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:${best?'15px':'13px'};">${best?'BEST TIME TO CALL':'Review calls'}</b></div>
     <div>${best?'Review calls · ':'Good time to call · '}${t} CT</div>${_rcPopCount!=null?`<div>${_rcPopCount} customer${_rcPopCount===1?'':'s'} to call ›</div>`:''}`;
 }
 setTimeout(rcTimePop,4000);
