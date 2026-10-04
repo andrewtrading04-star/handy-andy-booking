@@ -2101,6 +2101,8 @@ const TAPBACK_RE = /^(Liked|Loved|Disliked|Laughed at|Emphasized|Questioned|Reac
 async function shouldAutoAck(from, to, body) {
   if (!from || !to) return false;
   if (TAPBACK_RE.test(String(body || '').trim())) return false;
+  // Android reactions: an emoji + to "..." (owner 2026-10-04).
+  if (/^\S{1,8}\s+to\s+[“”"]/u.test(String(body || '').trim()) && !/^[a-z0-9]/i.test(String(body || '').trim())) return false;
   try {
     const db = serviceClient();
     const last10 = String(from).replace(/\D/g, '').slice(-10);
