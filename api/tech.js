@@ -269,7 +269,7 @@ async function login(req, res, body) {
 }
 
 // The customer-facing trading name for a business slug, e.g. 'austin' ->
-// "TV Mounting & Handyman Austin". EMAIL_BRANDS is the single source of truth
+// "Astraea TV Mounting Austin". EMAIL_BRANDS is the single source of truth
 // for these (it already drives confirmation-email branding), so the tech app
 // can never show a different name than the customer just received. Falls back
 // to the raw businesses.name only for a slug not in the map -- that column

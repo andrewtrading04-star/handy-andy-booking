@@ -204,7 +204,7 @@ export const EMAIL_BRANDS = {
   'handy-andy': { slug: 'handy-andy', name: 'Handy Andy',            accent: '#FF6B35', website: 'ihandyandy.com', heightCalc: 'https://www.ihandyandy.com/tv-height-calculator' },
   'doms':       { slug: 'doms',       name: "Dom's TV Mounting",     accent: '#2563EB', website: 'domstvmounting.com' },
   'mile-high':  { slug: 'mile-high',  name: 'Mile High TV Mounting', accent: '#1D9E75', website: 'milehightvmounting.com' },
-  'austin':     { slug: 'austin',     name: 'TV Mounting & Handyman Austin', accent: '#1E56E0', website: 'austinmounting.com' },
+  'austin':     { slug: 'austin',     name: 'Astraea TV Mounting Austin', accent: '#1E56E0', website: 'austinmounting.com' },
   'precision':  { slug: 'precision',  name: 'Precision TV Installation',     accent: '#0288D1', website: 'precisiontvinstallation.com' },
   'tvmountingdenver': { slug: 'tvmountingdenver', name: 'TV Mounting Denver', accent: '#2F6BFF', website: 'tvmountingdenver.com' },
   'houstonmounting':       { slug: 'houstonmounting',       name: 'Houston Mounting',         accent: '#0288D1', website: 'houstonmounting.com' },

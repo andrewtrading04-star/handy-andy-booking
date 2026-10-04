@@ -18,7 +18,7 @@ export const NATIVE_BUSINESS = {
   // Austin-only micro-brand (austinmounting.com), same shape as Mile High: no
   // techs of its own, borrows Handy Andy's Austin roster (see PARTNER_SLUG in
   // availability.js), fully separate customer-facing identity.
-  'austin':     { name: 'TV Mounting & Handyman Austin', legalName: 'TV Mounting & Handyman Austin' },
+  'austin':     { name: 'Astraea TV Mounting Austin', legalName: 'Astraea TV Mounting Austin' },
   // Houston-only micro-brand (precisiontvinstallation.com), same shape again:
   // no techs of its own, borrows Handy Andy's Houston roster (Juan).
   'precision':  { name: 'Precision TV Installation',     legalName: 'Precision TV Installation' },
