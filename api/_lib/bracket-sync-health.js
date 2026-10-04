@@ -261,7 +261,10 @@ export function evaluateBracketSyncHealth({ state, dispatch }, now = new Date())
   }
 
   // Secret pairs.
+  // Inbox 8 (HA Los Angeles) is not needed right now (owner 2026-10-04): a blank slot is fine.
+  const NOT_NEEDED_INBOXES = new Set([8]);
   for (const x of state.misconfigured || []) {
+    if (x.missing === 'both' && NOT_NEEDED_INBOXES.has(Number(x.idx))) continue;
     if (x.missing === 'both') push({
       key: `config:${x.idx}`, level: 'amber', title: `Inbox ${x.idx} is not configured`,
       detail: 'The scan expects 7 inboxes and this slot is blank',
