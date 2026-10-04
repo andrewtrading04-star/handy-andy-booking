@@ -1317,7 +1317,7 @@ async function showDetail(id){
         <button class="btn ghost" id="addNote" style="margin-top:8px;">Add note</button>
       </div>
 
-      ${j.notes?`<div class="card"><h3>Office Notes</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
+      ${j.notes?`<div class="card"><h3>Office Notes${j.booked_by?` <span style="font-weight:500;opacity:.7;font-size:12px;">· Added by ${esc(j.booked_by)}</span>`:''}</h3><div class="kv">${esc(j.notes)}</div></div>`:''}
       ${j.price?`<div class="card"><h3>Payment</h3>
         ${(j.line_items&&j.line_items.length)?`<div style="margin-bottom:12px;">${j.line_items.filter(li=>li.line_total>0).map(li=>{const q=liDisplayQty(li);return `<div class="kv" style="display:flex;justify-content:space-between;"><span>• ${esc(liName(li.name))}${q>1?` <strong style="color:var(--ink);">×${q}</strong>`:''}</span><span>$${li.line_total}</span></div>`;}).join('')}</div>`:''}
         ${(j.fees&&j.fees.length)?`<div style="margin-bottom:12px;">${j.fees.filter(f=>Number(f.amount)).map(f=>`<div class="kv" style="display:flex;justify-content:space-between;"><span style="color:var(--mute);">${esc(liName(f.name))}</span><span>$${f.amount}</span></div>`).join('')}</div>`:''}

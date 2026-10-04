@@ -518,6 +518,8 @@ async function job(req, res, db, auth) {
   // questions before closing it; the answers show on the staff ticket.
   shaped.estimate_visit = Number(data.price) === 50;
   shaped.estimate_notes = (data.metadata && data.metadata.estimate_visit_notes) || null;
+  // Who typed the booking's office notes (stamped at create).
+  shaped.booked_by = (data.metadata && data.metadata.booked_by) || null;
   shaped.cross_company = !!(data.business_id && data.business_id !== auth.business_id);
   shaped.company_name = brandName(data.business?.slug, data.business?.name);
   shaped.company_slug = data.business?.slug || null;

@@ -4216,7 +4216,7 @@ function ghostEvtCard(g){
   const canOpen=!!(g.booking_id&&g.open_slug&&businesses.concat(viewBusinesses).some(x=>x.slug===g.open_slug));
   // Owner, 2026-10-03: Joey sees every business's jobs as normal full jobs
   // (server sets full). Read-only open via the view gate; no pay/profit.
-  if(canOpen&&g.full) return `<div class="evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}">${evtCard({id:g.booking_id,status:g.status,price:g.price,tip:g.tip,payment_status:g.payment_status,scheduled_at:g.scheduled_at,customer:{name:g.customer_name},technician:t||(g.technician_id?{id:g.technician_id,name:techName}:null),secondary_technician:g.second_technician_id?(techCache.find(x=>x.id===g.second_technician_id)||{id:g.second_technician_id,name:'Tech'}):null})}</div>`;
+  if(canOpen&&g.full) return `<div class="evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}">${evtCard({id:g.booking_id,status:g.status,price:g.price,tip:g.tip,payment_status:g.payment_status,scheduled_at:g.scheduled_at,econ:g.econ||null,customer:{name:g.customer_name},technician:t||(g.technician_id?{id:g.technician_id,name:techName}:null),secondary_technician:g.second_technician_id?(techCache.find(x=>x.id===g.second_technician_id)||{id:g.second_technician_id,name:'Tech'}):null})}</div>`;
   if(canOpen) return `<div class="evt evt-ghost evt-ghost-open" data-ghost-id="${esc(g.booking_id)}" data-ghost-slug="${esc(g.open_slug)}" title="Open this ${esc(g.partner_company||'partner')} job${who}">
     <div class="ghost-t">${esc(start)} – ${esc(end)}</div>
     <div class="ghost-n">${esc(techName)} busy${who} <span class="ghost-tag">${esc((g.partner_company||'PARTNER').toUpperCase())}</span></div>
@@ -5168,7 +5168,7 @@ function openBooking(b){
   const ccx=document.getElementById('bkCardCancel'); if(ccx) ccx.onclick=()=>{ const box=document.getElementById('bkCardBox'); if(box) box.classList.add('hidden'); if(cc) cc.style.display=''; };
   // Photos + notes (loaded async; they don't refresh the whole list on change).
   loadBookingPhotos(b.id);
-  loadBookingNotes(b.id);
+  loadBookingNotes(b.id, b);
   loadBookingAuthorization(b.id);
   document.getElementById('bkAddPhoto').onclick=()=>document.getElementById('bkPhotoInput').click();
   document.getElementById('bkPhotoInput').onchange=e=>uploadBookingPhotos(b.id, e.target.files);
@@ -5715,13 +5715,20 @@ function compressImage(file,maxDim=1600,quality=0.8){
 }
 
 // ── Booking notes (in the detail modal) ─────────────────────────────────────
-async function loadBookingNotes(id){
+// The booking's own office notes (typed at booking time) show as the oldest
+// line, credited to whoever booked it. Kept per id so a reload after add/delete
+// still has it.
+const bkOrigNotes={};
+async function loadBookingNotes(id, bk){
   const el=document.getElementById('bkNotes'); if(!el) return;
+  if(bk&&bk.id===id) bkOrigNotes[id]=bk.notes?{body:bk.notes,author:bk.source==='widget'?'Booking widget':(bk.booked_by||'Admin'),at:bk.created_at||null}:null;
+  const orig=bkOrigNotes[id];
   try{
     const d=await api('booking_notes',{ params:{ business:current.slug, id }});
     const notes=(d.notes||[]).filter(n=>n.body!=='SMS consent recorded as YES when this booking was created (customer agreed to texts).');
-    el.innerHTML = notes.length
-      ? notes.map(n=>`<div class="note"><div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')}</span><span class="note-t">${esc(fmtDateTime(n.created_at))}</span></div><div class="note-b">${esc(n.body)}</div><button class="note-del" data-nid="${n.id}">Delete</button></div>`).join('')
+    const origHtml = orig ? `<div class="note"><div class="note-h"><span class="note-a">${esc(orig.author)}${orig.at?' · '+esc(fmtDateTime(orig.at)):''} <span class="note-t">· booking notes</span></span></div><div class="note-b" style="white-space:pre-wrap;">${esc(orig.body)}</div></div>` : '';
+    el.innerHTML = (notes.length||orig)
+      ? notes.map(n=>`<div class="note"><div class="note-h"><span class="note-a">${esc(n.author_name||'Staff')} · ${esc(fmtDateTime(n.created_at))}</span></div><div class="note-b">${esc(n.body)}</div><button class="note-del" data-nid="${n.id}">Delete</button></div>`).join('')+origHtml
       : '<div class="sub" style="font-size:13px;">No notes yet.</div>';
     el.querySelectorAll('.note-del').forEach(btn=>btn.onclick=async()=>{
       if(!confirm('Permanently delete this note?')) return; btn.disabled=true;

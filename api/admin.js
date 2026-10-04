@@ -345,7 +345,13 @@ async function travelPayoutMap(db, businessId) {
 // ── SMS Helper ──────────────────────────────────────────────────────────────
 // Normalize US/CA numbers to E.164 (+1XXXXXXXXXX), which Twilio requires.
 // Display label for an internal note/photo authored from the dashboard.
-function adminAuthorName(auth) { return auth.role === 'owner' ? 'Owner' : 'Office'; }
+// The real person when the session knows it (Heather, Joey, the owner's own
+// name, 'AI Voice Bot'...); the generic role label only as a last resort, so
+// a note never reads just "Office" when we know who wrote it.
+function adminAuthorName(auth) {
+  const n = auth && auth.name ? String(auth.name).trim() : '';
+  return n || (auth && auth.role === 'owner' ? 'Owner' : 'Office');
+}
 
 // notifyTechAssigned now lives in api/_lib/tech-notify.js (imported at the top
 // of this file). It used to be private to admin.js, which is exactly why the
@@ -1545,6 +1551,29 @@ async function calendar(req, res, db, auth) {
       }
     }
   } catch (e) { console.warn('[admin] calendar ghost bookings failed:', e.message); ghostBookings = []; }
+  // Owner only (2026-10-04): full ghosts (other businesses' jobs) carry the SAME
+  // econ as own jobs -- tech pay + profit -- computed with each job's OWN business
+  // context. One batched read + one computeJobEconomics pass per business. Never
+  // for Joey/Heather. Fail-soft: any error leaves the ghosts price-only.
+  if (auth && auth.role === 'owner') {
+    try {
+      const fullIds = [...new Set(ghostBookings.filter(g => g.full && g.booking_id).map(g => g.booking_id))];
+      if (fullIds.length) {
+        const { data: gRows, error: gErr } = await fetchBookingRows(sel => db.from('bookings').select(sel).in('id', fullIds).limit(2000));
+        if (gErr) throw gErr;
+        const { data: gBiz } = await db.from('businesses').select('id, slug, name, timezone')
+          .in('id', [...new Set((gRows || []).map(r => r.business_id))]);
+        const byBiz = {};
+        for (const r of (gRows || [])) (byBiz[r.business_id] = byBiz[r.business_id] || []).push(r);
+        const econByGhost = {};
+        await Promise.all((gBiz || []).map(async (gb) => {
+          try { Object.assign(econByGhost, await computeJobEconomics(db, gb, byBiz[gb.id] || [], true)); }
+          catch (e) { console.warn('[admin] ghost economics failed for', gb.slug, e.message); }
+        }));
+        for (const g of ghostBookings) if (g.full && econByGhost[g.booking_id]) g.econ = econByGhost[g.booking_id];
+      }
+    } catch (e) { console.warn('[admin] calendar ghost economics failed:', e.message); }
+  }
   // Metro tz per area, so each job's slot renders in its own timezone (Central
   // for Houston/Austin) instead of the single business (Mountain) clock.
   const areaTzById = {};
@@ -8152,7 +8181,7 @@ function bookingSelect() {
   // technicians once migration 0019 is applied; without the hint PostgREST
   // can't tell which relationship to follow and the read errors.
   const base = `id, status, source, metadata, scheduled_at, scheduled_end, duration_minutes, price, subtotal, tip, payment_status, paid_at, sms_consent,
-          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at, zenbooker_job_number${esCol()}${arCol()},
+          notes, customer_notes, review_rating, review_text, technician_id, service_area_id, business_id, updated_at, created_at, zenbooker_job_number${esCol()}${arCol()},
           on_the_way_sms_status, on_the_way_sms_sent_at, on_the_way_sms_delivered_at,
           review_sms_status, review_sms_sent_at, review_sms_delivered_at,
           review_email_sent_at, review_email_delivered_at, review_email_clicked_at${confirmationEmailCol ? ', confirmation_email_status, confirmation_email_sent_at' : ''},
@@ -8246,6 +8275,7 @@ function shapeBooking(b) {
     // Who booked it: 'Admin' / 'Heather' / 'Joey' (stored at create), or null on
     // older/widget bookings (the client falls back to source for "Booking widget").
     booked_by: b.metadata?.booked_by || null,
+    created_at: b.created_at || null,
     // Optimistic-lock revision for the line-items editor — the editor sends it
     // back on save so two people can never blindly overwrite each other's
     // ticket edits (see bookingLineItemsSave).
