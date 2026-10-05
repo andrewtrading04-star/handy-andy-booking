@@ -2655,7 +2655,7 @@ async function launchHealth(req, res, db, auth) {
   const [businesses, markets, numbers, areas, calls, msgs, attempts, bookings, reviews] = await Promise.all([
     soft(db.from('businesses').select('id, slug')),
     soft(db.from('markets').select('slug, name, parent_business_slug, url, settings')),
-    soft(db.from('tracking_numbers').select('phone, label, business_slug, market, active').eq('active', true)),
+    soft(db.from('tracking_numbers').select('phone, label, business_slug, market, active')),
     soft(db.from('service_areas').select('id, name, business_id')),
     soft(db.from('calls').select('grasshopper_number, kind, answered, caller_phone, occurred_at, called_back_at')
       .gte('occurred_at', since(30)).limit(20000)),
@@ -2683,18 +2683,30 @@ async function launchHealth(req, res, db, auth) {
       // google_reviews.location_key: ha-golden, doms-okc, ...
       reviewKey: m.parent_business_slug === 'handy-andy' ? 'ha-' + String(m.slug).replace(/-ha$/, '')
         : (m.parent_business_slug === 'doms' ? 'doms-' + String(m.slug).replace(/-doms$/, '') : null),
-      name: m.name, parent: m.parent_business_slug, numbers: [],
+      name: m.name, city, parent: m.parent_business_slug, numbers: [],
     };
   }
   // Tracking numbers: a market owns the parent's numbers whose label names it
   // ("Handy Andy Golden"); a business owns all of its own.
+  // `tags` = every number shown on the card (inactive ones too, as "not live").
+  // Dom's markets are matched by tracking_numbers.market (OKC's label is just
+  // "Dom's TV Mounting"); those numbers then leave the Dom's (Denver) card.
+  for (const c of Object.values(cards)) c.tags = [];
   for (const n of (numbers || [])) {
-    const ph = last10(n.phone);
-    if (cards[n.business_slug]) cards[n.business_slug].numbers.push(ph);
+    const ph = last10(n.phone), on = n.active !== false;
+    let claimed = false;
     for (const c of Object.values(cards)) {
       if (c.kind !== 'market' || c.parent !== n.business_slug) continue;
       const label = ' ' + String(n.label || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ') + ' ';
-      if (label.includes(' ' + String(c.name).toLowerCase() + ' ')) c.numbers.push(ph);
+      const hit = label.includes(' ' + String(c.name).toLowerCase() + ' ')
+        || (c.parent === 'doms' && String(n.market || '').toLowerCase() === String(c.city || '').toLowerCase());
+      if (hit) { if (on) c.numbers.push(ph); c.tags.push({ phone: ph, active: on }); claimed = true; }
+    }
+    const b = cards[n.business_slug];
+    if (b) {
+      if (on) b.numbers.push(ph);
+      if (!(claimed && n.business_slug === 'doms')) b.tags.push({ phone: ph, active: on });
+      else if (on) b.numbers.pop();
     }
   }
 
@@ -2729,7 +2741,7 @@ async function launchHealth(req, res, db, auth) {
 
   const out = {};
   for (const [key, c] of Object.entries(cards)) {
-    const h = { numbers: c.numbers.length };
+    const h = { numbers: c.numbers.length, tags: c.tags };
     // Phone line
     if (calls !== null || msgs !== null) {
       if (!c.numbers.length) h.phone = null;

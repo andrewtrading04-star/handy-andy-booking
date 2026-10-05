@@ -2015,6 +2015,15 @@
   .dashboard-chart-layout .ndp-seg{display:flex;flex-direction:column;align-self:center;gap:4px;margin:0;}
   .dashboard-chart-layout .ndp-seg button{width:100%;padding:9px 5px;white-space:normal;}
   #incomeChart,#ndpChart{width:100%;min-width:0;}
+  .launch-city-select{display:none;}
+  @media (max-width:600px){
+    .dashboard-chart-layout{grid-template-columns:minmax(0,1fr);width:100%;margin-left:0;}
+    .dashboard-chart-layout .ndp-seg{flex-direction:row;justify-content:center;align-self:center;}
+    .dashboard-chart-layout .ndp-seg button{width:auto;padding:6px 10px;}
+    .dpl .dpl-row{grid-template-columns:repeat(3,minmax(0,1fr));}
+    .launch-chips{display:none !important;}
+    .launch-city-select{display:block;width:100%;margin:0 0 12px;padding:10px 12px;font:inherit;font-size:15px;font-weight:700;border:1px solid var(--line);border-radius:10px;background:#fff;color:inherit;}
+  }
   .greeting.gl .ndp-scroll{width:100%;overflow:visible;}
   .greeting.gl .ndp-seg button{font-size:12px;padding:5px 10px;}
   .greeting.gl .gstat svg line{stroke:#e5e7eb;}
@@ -8997,7 +9006,7 @@ function launchSparkHtml(key){
   const isMarket=key.startsWith('m:');
   const d=isMarket ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key];
   if(!d) return '';   // no website / no tracked traffic: no graph (owner 2026-10-04)
-  const pts=d.s, views=d.v, days=_launchTraffic.days||[], n=pts.length;
+  const pts=d.v||d.s, days=_launchTraffic.days||[], n=pts.length;   // page views, US only (owner 2026-10-05)
   const W=320,H=72,L=20,R=4,T=6,B=14, max=Math.max(1,...pts);
   const x=i=>L+(n>1?i*(W-L-R)/(n-1):0), y=v=>T+(1-v/max)*(H-T-B);
   const sum=a=>a.reduce((p,c)=>p+c,0);
@@ -9009,13 +9018,13 @@ function launchSparkHtml(key){
   const mid=Math.round(max/2);
   const grid=[0,...(max>=2?[mid]:[]),max].map(v=>`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/><text x="${L-4}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" font-size="8" fill="#6b7280">${v}</text>`).join('');
   const week=`<rect x="${x(n-7).toFixed(1)}" y="${T}" width="${(x(n-1)-x(n-7)).toFixed(1)}" height="${H-T-B}" fill="rgba(37,99,235,0.06)"/>`;
-  const dots=pts.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${v?2.2:1.2}" fill="${v?'#2563eb':'#cbd5e1'}"><title>${esc(fmt(days[i]||''))}: ${v} session${v===1?'':'s'}, ${views[i]||0} page view${views[i]===1?'':'s'}</title></circle>`).join('');
+  const dots=pts.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${v?2.2:1.2}" fill="${v?'#2563eb':'#cbd5e1'}"><title>${esc(fmt(days[i]||''))}: ${v} page view${v===1?'':'s'}</title></circle>`).join('');
   const ticks=[0,Math.floor((n-1)/2),n-1].map(i=>`<text x="${x(i).toFixed(1)}" y="${H-3}" text-anchor="${i===0?'start':i===n-1?'end':'middle'}" font-size="8" fill="#6b7280">${esc(fmt(days[i]||''))}</text>`).join('');
   return `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--mute);margin-bottom:3px;">
-      <span>Last 7 days: <b style="color:var(--ink-2);">${last7}</b> ${trend} <span>vs prior 7 (${prev7})</span></span>
-      <span>30 days: <b style="color:var(--ink-2);">${total}</b> sessions · ${sum(views)} views</span>
+      <span>Page views, 7 days: <b style="color:var(--ink-2);">${last7}</b> ${trend}</span>
+      <span>30 days: <b style="color:var(--ink-2);">${total}</b></span>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="Daily sessions for the last 30 days: ${total} total, ${last7} in the last 7 days, ${prev7} in the 7 before">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="Daily US page views for the last 30 days: ${total} total, ${last7} in the last 7 days, ${prev7} in the 7 before">
       ${week}${grid}
       <path d="${area}" fill="rgba(37,99,235,0.10)"/>
       <path d="${line}" fill="none" stroke="#2563eb" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
@@ -9080,11 +9089,11 @@ function launchHealthRows(key, site, stripe){
   else rows.push({k:'Website',l:'red',t:'Down',p:'Website down'});
   if(stripe && stripe.ready===false) rows.push({k:'Payments',l:'red',t:'Off',p:'Card payments off'});
   const tr=_launchTraffic ? (key.startsWith('m:') ? (_launchTraffic.marketSeries||{})[key.slice(2)] : (_launchTraffic.series||{})[key]) : null;
-  if(!tr) rows.push({k:'Visitors',l:'grey',t:'—'});
+  if(!tr) rows.push({k:'Page views',l:'grey',t:'—'});
   else{
-    const sum=a=>a.reduce((p,c)=>p+c,0), w=sum(tr.s.slice(-7)), pw=sum(tr.s.slice(-14,-7));
+    const pv=tr.v||tr.s, sum=a=>a.reduce((p,c)=>p+c,0), w=sum(pv.slice(-7)), pw=sum(pv.slice(-14,-7));
     const down=pw>=5 && w<pw*0.7;
-    rows.push({k:'Visitors',l:down?'amber':(w>0?'green':'grey'),t:`${w} <span style="color:var(--mute);">vs ${pw}</span>${lhTiny(tr.s.slice(-14))}`,p:down?'Traffic down':null});
+    rows.push({k:'Page views',l:down?'amber':(w>0?'green':'grey'),t:`${w} <span style="color:var(--mute);">vs ${pw}</span>${lhTiny(pv.slice(-14))}`,p:down?'Traffic down':null});
   }
   if(!_launchHealth){ rows.push({k:'Bookings',l:'grey',t:'…'},{k:'Phone',l:'grey',t:'…'}); return rows; }
   if(!h||!h.bookings) rows.push({k:'Bookings',l:'grey',t:'—'});
@@ -9130,11 +9139,18 @@ function launchHealthHtml(rows, key){
 // The card's to-do list, straight from its notes (owner 2026-10-05): every
 // line under TO DO / NEXT / WAITING / MISSING, until a DONE or IN PROGRESS line.
 // Each one is a checkbox; checking it deletes that line from the notes.
+// The card's tracking numbers (app.tracking_numbers via launch_health).
+function launchPhoneTagsHtml(key){
+  const h=_launchHealth&&_launchHealth[key]; const tags=(h&&h.tags)||[];
+  if(!tags.length) return '';
+  const fmt=p=>p.length===10?`${p.slice(0,3)}-${p.slice(3,6)}-${p.slice(6)}`:p;
+  return `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">${tags.map(t=>`<span style="font-size:11px;font-weight:700;color:#334155;background:#f1f5f9;border-radius:999px;padding:2px 9px;">${esc(fmt(t.phone))}${t.active?'':' <span style="color:var(--mute);font-weight:600;">not live</span>'}</span>`).join('')}</div>`;
+}
 function launchTodoHtml(notes, kind, id){
   const out=[]; let on=false; const phones=[];
   for(const raw of String(notes||'').split(/\r?\n/)){
     const l=raw.trim(); if(!l) continue;
-    const ph=l.match(/^PHONE:\s*(.+)$/i); if(ph){ phones.push(ph[1]); continue; }   // a label, not a to-do
+    if(/^PHONE:/i.test(l)) continue;   // old label lines; numbers now come from tracking_numbers
     const head=l.match(/^(TO DO|NEXT|WAITING[^:]*|MISSING|IN PROGRESS|DONE[^:]*)\b[^:]*:?\s*(.*)$/i);
     if(head){
       const k=head[1].toUpperCase();
@@ -9146,9 +9162,8 @@ function launchTodoHtml(notes, kind, id){
     if(on){ const t=l.replace(/^([-•*]|\d+[.)]|[A-Z][.)])\s*/,''); if(t) out.push({ raw:l, t }); }
   }
   const todo=out.filter(x=>!/\bDONE\b/.test(x.t));
-  const phoneHtml=phones.map(p=>`<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#334155;background:#f1f5f9;border-radius:999px;padding:3px 10px;">\u{1F4DE} ${esc(p)}</div>`).join(' ');
-  if(!todo.length) return phoneHtml;
-  return phoneHtml+`<div class="launch-todo" style="margin:10px 0 0;display:flex;flex-direction:column;gap:2px;" onclick="event.stopPropagation()">${todo.slice(0,12).map(x=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:1.4;color:var(--ink-2);cursor:pointer;padding:2px 0;"><input type="checkbox" data-launch-todo data-kind="${esc(kind)}" data-id="${esc(id)}" data-raw="${esc(x.raw)}" style="width:15px;height:15px;flex:none;margin-top:1px;">${esc(x.t)}</label>`).join('')}</div>`;
+  if(!todo.length) return '';
+  return `<div class="launch-todo" style="margin:10px 0 0;display:flex;flex-direction:column;gap:2px;" onclick="event.stopPropagation()">${todo.slice(0,12).map(x=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:1.4;color:var(--ink-2);cursor:pointer;padding:2px 0;"><input type="checkbox" data-launch-todo data-kind="${esc(kind)}" data-id="${esc(id)}" data-raw="${esc(x.raw)}" style="width:15px;height:15px;flex:none;margin-top:1px;">${esc(x.t)}</label>`).join('')}</div>`;
 }
 document.addEventListener('change', async e=>{
   const cb=e.target.closest && e.target.closest('[data-launch-todo]'); if(!cb||!cb.checked) return;
@@ -9159,9 +9174,17 @@ document.addEventListener('change', async e=>{
   if(i<0){ toast('Could not find that item'); cb.checked=false; return; }
   lines.splice(i,1);
   const notes=lines.join(String.fromCharCode(10));
-  cb.closest('label').style.opacity='.4';
-  try{ const r=await api('launch_notes_set',{ method:'POST', body:{ kind, id, notes } }); if(obj) obj.notes=r.notes!=null?r.notes:notes; cb.closest('label').remove(); }
-  catch(err){ toast(err.message||'Could not save'); cb.checked=false; cb.closest('label').style.opacity=''; }
+  // Gone at once; put back only if the save fails.
+  const lab=cb.closest('label'), box=lab.parentNode, next=lab.nextSibling, before=obj?obj.notes:null;
+  lab.remove();
+  if(obj) obj.notes=notes;
+  try{
+    const r=await api('launch_notes_set',{ method:'POST', body:{ kind, id, notes } });
+    if(obj && r && r.notes!=null) obj.notes=r.notes;
+    // The page paints from this cache on reload; keep it in step.
+    try{ if(_launchLastData) localStorage.setItem('launch_status_cache', JSON.stringify(_launchLastData)); }catch(_){}
+  }
+  catch(err){ toast(err.message||'Could not save'); if(obj) obj.notes=before; cb.checked=false; if(box) box.insertBefore(lab,next); }
 });
 function launchCardHtml(b, items){
   const live=launchIsLive(b, items), s=launchScoreOf(b, items);
@@ -9171,7 +9194,7 @@ function launchCardHtml(b, items){
         <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(b.name)} ${launchNotesFlagHtml(b.notes)}</div>
         ${launchContactHtml(b)}
       </div>
-    </div>${launchTodoHtml(b.notes,'business',b.id)}`;
+    </div>${launchPhoneTagsHtml(b.slug)}${launchTodoHtml(b.notes,'business',b.id)}`;
   if(live){
     return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
       ${head}
@@ -9246,7 +9269,7 @@ function launchMarketCardHtml(m, items){
         <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(launchMarketTitle(m))} ${launchNotesFlagHtml(m.notes)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
       </div>
-    </div>${launchTodoHtml(m.notes,'market',m.id)}`;
+    </div>${launchPhoneTagsHtml('m:'+m.slug)}${launchTodoHtml(m.notes,'market',m.id)}`;
   if(live){
     return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
       ${head}
@@ -9360,7 +9383,9 @@ async function renderLaunch(){
   // city isn't in LAUNCH_CITY_ORDER still gets a hub, after the known ones.
   const byCity={};
   for(const x of entries) (byCity[x.city]=byCity[x.city]||[]).push(x);
-  const cities=[...LAUNCH_CITY_ORDER.filter(c=>byCity[c]), ...Object.keys(byCity).filter(c=>!LAUNCH_CITY_ORDER.includes(c))];
+  let cities=[...LAUNCH_CITY_ORDER.filter(c=>byCity[c]), ...Object.keys(byCity).filter(c=>!LAUNCH_CITY_ORDER.includes(c))];
+  // Phone only (owner 2026-10-05): these cities go last.
+  if(window.matchMedia('(max-width:600px)').matches){ const late=['Denver','Houston','Dallas','Fort Worth','Phoenix']; cities=[...cities.filter(c=>!late.includes(c)), ...cities.filter(c=>late.includes(c))]; }
   if(!cities.includes(_launchCity)) _launchCity='All';
 
   const hubHtml=(city)=>{
@@ -9379,6 +9404,7 @@ async function renderLaunch(){
   view.innerHTML=`<div class="wrap">
     <div class="rc-head"><div><h2 class="rc-title">Launch</h2><p class="rc-sub">Live cards show health. Launching cards show what's missing.</p></div><button type="button" class="rc-btn ghost" id="launchRefresh">Refresh checks</button></div>
     <div class="launch-stats"></div>
+    <select class="launch-city-select" aria-label="City"><option value="All">All cities</option>${cities.map(c=>`<option value="${esc(c)}">${esc(c)} · ${byCity[c].length}</option>`).join('')}</select>
     <div class="launch-chips">
       <button type="button" class="launch-chip" data-launch-filter="All">All cities</button>
       ${cities.map(c=>`<button type="button" class="launch-chip" data-launch-filter="${esc(c)}"><span class="launch-dot"></span>${esc(c)} &middot; ${byCity[c].length}</button>`).join('')}
@@ -9414,9 +9440,11 @@ async function renderLaunch(){
   const applyFilter=()=>{
     view.querySelectorAll('[data-launch-city]').forEach(s=>{ s.style.display = (_launchCity==='All'||s.dataset.launchCity===_launchCity) ? '' : 'none'; });
     view.querySelectorAll('[data-launch-filter]').forEach(c=>c.classList.toggle('on', c.dataset.launchFilter===_launchCity));
+    const sel=view.querySelector('.launch-city-select'); if(sel) sel.value=_launchCity;
     launchDrawWires(view);
   };
   view.querySelectorAll('[data-launch-filter]').forEach(c=>c.addEventListener('click',()=>{ _launchCity=c.dataset.launchFilter; applyFilter(); }));
+  view.querySelector('.launch-city-select').addEventListener('change',e=>{ _launchCity=e.target.value; applyFilter(); });
   // Clicking a hub isolates its city; clicking it again goes back to all.
   view.querySelectorAll('[data-launch-hub]').forEach(h=>h.addEventListener('click',()=>{ _launchCity = _launchCity===h.dataset.launchHub ? 'All' : h.dataset.launchHub; applyFilter(); }));
   sync();
@@ -19924,11 +19952,14 @@ function incomeChartSvg(history, maxScale, view, unitWord, pointWidth, height){
   const pts=xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
   const dots=xy.map(([x,y],i)=>`<circle cx="${(x/w*100).toFixed(2)}%" cy="${y.toFixed(1)}" r="${i===maxIdx?4.5:3}" fill="#16a34a"><title>${esc(incomePeriodLabel(history[i],view||'week'))}: ${money(vals[i])}</title></circle>`).join('');
   // Keep every plotted point; label up to seven evenly spaced dates.
-  const labelCount=n<=7?n:6;
+  // Phone (owner 2026-10-05): values only on max / min / last; 3 dates.
+  const phone=window.matchMedia&&window.matchMedia('(max-width:600px)').matches;
+  const labelCount=phone?Math.min(n,3):(n<=7?n:6);
   const labelIds=new Set(Array.from({length:labelCount},(_,i)=>Math.round(i*(n-1)/(labelCount-1))));
+  const valueIds=phone?new Set([maxIdx, vals.indexOf(Math.min(...vals)), n-1]):labelIds;
   const labels=xy.map(([x,y],i)=>{
-    if(!labelIds.has(i)) return '';
-    const far = i%2===0 ? 22 : 10;   // stagger so adjacent labels don't collide
+    if(!valueIds.has(i)) return '';
+    const far = phone ? 10 : (i%2===0 ? 22 : 10);   // stagger so adjacent labels don't collide
     const ly=Math.max(9, y-far);
     // The first/last point's label used to center on the dot (text-anchor
     // "middle"), which for a 5-6 digit Monthly/3-month sum runs the text
