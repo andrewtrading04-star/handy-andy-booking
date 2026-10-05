@@ -9109,6 +9109,25 @@ function launchHealthHtml(rows, key){
       ${rows.map(r=>`<span style="display:inline-flex;align-items:center;gap:6px;color:var(--mute);">${dot(r.l)}${esc(r.k)}</span><span style="color:var(--ink-2);">${r.t}</span>`).join('')}
     </div></details>`;
 }
+// The card's to-do list, straight from its notes (owner 2026-10-05): every
+// line under TO DO / NEXT / WAITING / MISSING, until a DONE or IN PROGRESS line.
+function launchTodoHtml(notes){
+  const out=[]; let on=false;
+  for(const raw of String(notes||'').split(/\r?\n/)){
+    const l=raw.trim(); if(!l) continue;
+    const head=l.match(/^(TO DO|NEXT|WAITING[^:]*|MISSING|IN PROGRESS|DONE[^:]*)\b[^:]*:?\s*(.*)$/i);
+    if(head){
+      const k=head[1].toUpperCase();
+      on=!/^(DONE|IN PROGRESS)/.test(k);
+      const rest=head[2].replace(/^[—–-]\s*owner priorities:?\s*/i,'').trim();
+      if(on && rest && !/^\(?\d+\/\d+\)?:?$/.test(rest)) out.push((/^(WAITING|MISSING)/.test(k)?k.charAt(0)+k.slice(1).toLowerCase().replace(/ on .*/,'')+': ':'')+rest);
+      continue;
+    }
+    if(on){ const t=l.replace(/^([-•*]|\d+[.)]|[A-Z][.)])\s*/,''); if(t) out.push(t); }
+  }
+  if(!out.length) return '';
+  return `<ul class="launch-todo" style="margin:10px 0 0;padding-left:18px;font-size:12px;line-height:1.45;color:var(--ink-2);">${out.slice(0,10).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`;
+}
 function launchCardHtml(b, items){
   const live=launchIsLive(b, items), s=launchScoreOf(b, items);
   const head=`<div style="display:flex;align-items:center;gap:10px;">
@@ -9117,7 +9136,7 @@ function launchCardHtml(b, items){
         <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(b.name)} ${launchNotesFlagHtml(b.notes)}</div>
         ${launchContactHtml(b)}
       </div>
-    </div>`;
+    </div>${launchTodoHtml(b.notes)}`;
   if(live){
     return `<div class="launch-card" data-launch-card="${b.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
       ${head}
@@ -9192,7 +9211,7 @@ function launchMarketCardHtml(m, items){
         <div data-launch-name style="font-weight:800;font-size:14px;display:flex;align-items:center;gap:6px;">${esc(launchMarketTitle(m))} ${launchNotesFlagHtml(m.notes)}</div>
         <div style="font-size:11px;color:var(--mute);">part of ${esc(m.parentSlug)}</div>
       </div>
-    </div>`;
+    </div>${launchTodoHtml(m.notes)}`;
   if(live){
     return `<div class="launch-card" data-launch-market-card="${m.id}" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;">
       ${head}
