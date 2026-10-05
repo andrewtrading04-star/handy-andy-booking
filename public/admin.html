@@ -9024,7 +9024,7 @@ function launchSparkHtml(key){
   return `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--mute);margin-bottom:3px;">
       <span>Page views, 7 days: <b style="color:var(--ink-2);">${last7}</b> ${trend}</span>
       <span>30 days: <b style="color:var(--ink-2);">${total}</b></span>
-    </div>
+    </div>${(()=>{ const bk=((_launchHealth||{})[key]||{}).booked; return bk ? `<div style="font-size:11px;color:var(--mute);margin-bottom:3px;">Booked 7 days: <b style="color:var(--ink-2);">${bk.d7}</b> &middot; 30 days: <b style="color:var(--ink-2);">${bk.d30}</b></div>` : ''; })()}
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="Daily US page views for the last 30 days: ${total} total, ${last7} in the last 7 days, ${prev7} in the 7 before">
       ${week}${grid}
       <path d="${area}" fill="rgba(37,99,235,0.10)"/>
@@ -9066,6 +9066,7 @@ async function loadLaunchHealth(){
     const r=await api('launch_health',{timeoutMs:30000});
     _launchHealth=r.health||{}; _launchHealthAt=Date.now();
     if(_launchLastData && onScreen('launch') && !document.querySelector('.launch-open[aria-expanded="true"]')){ _launchFresh=_launchLastData; renderLaunch(); }
+    else document.querySelectorAll('[data-launch-spark]').forEach(el=>{ el.innerHTML=launchSparkHtml(el.dataset.launchSpark); });
   }catch(e){ if(!_launchHealth){ _launchHealth={}; _launchHealthAt=Date.now(); } }
 }
 function lhAgo(iso){

@@ -2640,6 +2640,45 @@ async function launchTraffic(req, res, db, auth) {
   return res.status(200).json({ days, series, marketSeries });
 }
 
+// Booking -> analytics_config.markets index ({ idx, basis }). Shared by the
+// Overview market rows and the Launch cards so a booking is credited to
+// exactly one page. Booking shape: { source_page, landing_page, city, state }.
+function bookingMarketCreditor(markets) {
+  const normPath = p => { const s = String(p || '').trim(); return s ? (s.replace(/\/+$/, '') || '/') : null; };
+  // City keys are city+state first (e.g. "pasadena|tx") so two markets that
+  // both list a same-named city in different states (Houston and LA both
+  // have a Pasadena) don't collide; city-only stays as a fallback for
+  // bookings with no state on file.
+  const marketByPath = new Map(), marketByCityState = new Map(), marketByCity = new Map();
+  (markets || []).forEach((m, i) => {
+    for (const p of (m.paths || [])) { const k = normPath(p); if (k && !marketByPath.has(k)) marketByPath.set(k, i); }
+    for (const c of (m.cities || [])) {
+      const city = String(c).toLowerCase().trim();
+      if (!city) continue;
+      if (!marketByCity.has(city)) marketByCity.set(city, i);
+      if (m.state) { const k = `${city}|${String(m.state).toLowerCase().trim()}`; if (!marketByCityState.has(k)) marketByCityState.set(k, i); }
+    }
+  });
+  // The metro row a leftover booking lands on when neither its page nor its
+  // city match anything configured -- the FIRST market in config order
+  // (metro before sub-page), matching how an unattributed booking has
+  // always been credited. Never left unmatched: a booking that matches
+  // nothing would silently vanish from both this row and the portfolio
+  // total instead of just being imprecisely placed.
+  const catchAllIdx = 0;
+  return (bk) => {
+    for (const cand of [bk.source_page, bk.landing_page]) {
+      const k = normPath(cand);
+      if (k && k !== '/book' && marketByPath.has(k)) return { idx: marketByPath.get(k), basis: 'page' };
+    }
+    const city = String(bk.city || '').toLowerCase().trim();
+    const state = String(bk.state || '').toLowerCase().trim();
+    if (city && state && marketByCityState.has(`${city}|${state}`)) return { idx: marketByCityState.get(`${city}|${state}`), basis: 'city' };
+    if (city && marketByCity.has(city)) return { idx: marketByCity.get(city), basis: 'city' };
+    return { idx: catchAllIdx, basis: 'unattributed' };
+  };
+}
+
 // GET ?action=launch_health — "how is it going" numbers for every LIVE Launch
 // card, business and market alike, keyed like the traffic chart ('slug' for a
 // business, 'm:slug' for a market). A handful of batched reads over the last
@@ -2656,7 +2695,7 @@ async function launchHealth(req, res, db, auth) {
   const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 
   const [businesses, markets, numbers, areas, calls, msgs, attempts, bookings, reviews] = await Promise.all([
-    soft(db.from('businesses').select('id, slug')),
+    soft(db.from('businesses').select('id, slug, analytics_config')),
     soft(db.from('markets').select('slug, name, parent_business_slug, url, settings')),
     soft(db.from('tracking_numbers').select('phone, label, business_slug, market, active')),
     soft(db.from('service_areas').select('id, name, business_id')),
@@ -2664,7 +2703,7 @@ async function launchHealth(req, res, db, auth) {
       .gte('occurred_at', since(30)).limit(20000)),
     soft(db.from('messages').select('our_phone, direction, status, created_at').gte('created_at', since(30)).limit(20000)),
     soft(db.from('call_attempts').select('phone, started_at').gte('started_at', since(8)).limit(10000)),
-    soft(db.from('bookings').select('business_id, service_area_id, status, metadata, created_at').gte('created_at', since(35)).limit(10000)),
+    soft(db.from('bookings').select('business_id, service_area_id, status, source, city, state, metadata, created_at, customer:customers ( email, phone )').gte('created_at', since(35)).limit(10000)),
     soft(db.from('google_reviews').select('business_id, location_key, rating, review_date').is('dismissed_at', null).limit(10000)),
   ]);
   const bizById = new Map((businesses || []).map(b => [b.id, b.slug]));
@@ -2742,9 +2781,49 @@ async function launchHealth(req, res, db, auth) {
     return (answeredBy[p] || []).some(x => x > t) || (attemptBy[p] || []).some(x => x > t);
   };
 
+  // Booked from the card's own page (website widget bookings only; cancelled
+  // and internal/test contacts left out). One card per booking: a business
+  // with analytics_config.markets (Handy Andy) is split by the Overview's
+  // page-then-city attribution, so Houston and Greenway (Denver and Golden)
+  // never pool; its business card is the main-site market ("/"). Dom's
+  // OKC/Tulsa by service area, the rest of Dom's on the Dom's card.
+  const booked = {};
+  if (bookings !== null) {
+    const keyByBizMarket = new Map();   // bizId -> [cardKey per config market]
+    for (const b of (businesses || [])) {
+      const ms = b.analytics_config && Array.isArray(b.analytics_config.markets) ? b.analytics_config.markets : null;
+      if (!ms || !ms.length) continue;
+      keyByBizMarket.set(b.id, { credit: bookingMarketCreditor(ms), keys: ms.map(m => {
+        const p = ((m.paths || [])[0] || '').replace(/\/+$/, '') || '/';
+        if (p === '/') return b.slug;
+        const hit = Object.entries(cards).find(([, c]) => c.kind === 'market' && c.bizId === b.id && c.path === p);
+        return hit ? hit[0] : null;
+      }) });
+    }
+    for (const bk of bookings) {
+      if (bk.source !== 'widget' || bk.status === 'cancelled' || isInternalContact(bk.customer)) continue;
+      const t = Date.parse(bk.created_at);
+      if (!(t >= now - 30 * DAY)) continue;
+      let key = null;
+      const split = keyByBizMarket.get(bk.business_id);
+      if (split) {
+        const md = bk.metadata || {};
+        key = split.keys[split.credit({ source_page: md.source_page, landing_page: md.landing_page, city: bk.city, state: bk.state }).idx] || null;
+      } else {
+        const area = Object.entries(cards).find(([, c]) => c.kind === 'market' && c.areaId && c.areaId === bk.service_area_id);
+        key = area ? area[0] : bizById.get(bk.business_id);
+      }
+      if (!key) continue;
+      const e = booked[key] || (booked[key] = { d7: 0, d30: 0 });
+      e.d30++;
+      if (t >= now - 7 * DAY) e.d7++;
+    }
+  }
+
   const out = {};
   for (const [key, c] of Object.entries(cards)) {
     const h = { numbers: c.numbers.length, tags: c.tags };
+    if (bookings !== null) h.booked = booked[key] || { d7: 0, d30: 0 };
     // Phone line
     if (calls !== null || msgs !== null) {
       if (!c.numbers.length) h.phone = null;
@@ -2775,7 +2854,9 @@ async function launchHealth(req, res, db, auth) {
           return false;
         }
         // A business card leaves out bookings credited to its own market cards.
-        return !Object.values(cards).some(m => m.kind === 'market' && m.bizId === c.bizId && m.areaId && m.areaId === b.service_area_id);
+        const sp = ((b.metadata && b.metadata.source_page) || '').replace(/\/+$/, '');
+        return !Object.values(cards).some(m => m.kind === 'market' && m.bizId === c.bizId
+          && ((m.areaId && m.areaId === b.service_area_id) || (m.path && sp && m.path === sp)));
       }).map(b => Date.parse(b.created_at));
       h.bookings = {
         week: mine.filter(t => t >= now - 7 * DAY).length,
@@ -6652,39 +6733,7 @@ async function analyticsOverview(req, res, db, auth) {
       //      metro page before its sub-page (Houston before Greenway, Denver
       //      before Golden), so unattributed bookings go to the metro row the
       //      way they always did, and a sub-page only gets what its page sent.
-      const normPath = p => { const s = String(p || '').trim(); return s ? (s.replace(/\/+$/, '') || '/') : null; };
-      // City keys are city+state first (e.g. "pasadena|tx") so two markets that
-      // both list a same-named city in different states (Houston and LA both
-      // have a Pasadena) don't collide; city-only stays as a fallback for
-      // bookings with no state on file.
-      const marketByPath = new Map(), marketByCityState = new Map(), marketByCity = new Map();
-      b.analytics_config.markets.forEach((m, i) => {
-        for (const p of (m.paths || [])) { const k = normPath(p); if (k && !marketByPath.has(k)) marketByPath.set(k, i); }
-        for (const c of (m.cities || [])) {
-          const city = String(c).toLowerCase().trim();
-          if (!city) continue;
-          if (!marketByCity.has(city)) marketByCity.set(city, i);
-          if (m.state) { const k = `${city}|${String(m.state).toLowerCase().trim()}`; if (!marketByCityState.has(k)) marketByCityState.set(k, i); }
-        }
-      });
-      // The metro row a leftover booking lands on when neither its page nor its
-      // city match anything configured -- the FIRST market in config order
-      // (metro before sub-page), matching how an unattributed booking has
-      // always been credited. Never left unmatched: a booking that matches
-      // nothing would silently vanish from both this row and the portfolio
-      // total instead of just being imprecisely placed.
-      const catchAllIdx = 0;
-      const bookingMarket = bkAll.map(bk => {
-        for (const cand of [bk.source_page, bk.landing_page]) {
-          const k = normPath(cand);
-          if (k && k !== '/book' && marketByPath.has(k)) return { idx: marketByPath.get(k), basis: 'page' };
-        }
-        const city = String(bk.city || '').toLowerCase().trim();
-        const state = String(bk.state || '').toLowerCase().trim();
-        if (city && state && marketByCityState.has(`${city}|${state}`)) return { idx: marketByCityState.get(`${city}|${state}`), basis: 'city' };
-        if (city && marketByCity.has(city)) return { idx: marketByCity.get(city), basis: 'city' };
-        return { idx: catchAllIdx, basis: 'unattributed' };
-      });
+      const bookingMarket = bkAll.map(bookingMarketCreditor(b.analytics_config.markets));
 
       for (const [mIdx, m] of b.analytics_config.markets.entries()) {
         const paths = (m.paths || []).map(p => p.replace(/\/+$/, '') || '/');
