@@ -402,6 +402,34 @@
   .call-more a.danger:hover{color:var(--bad);}
   .tkt-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line2);font-size:13.5px;}
   .tkt-row:first-of-type{border-top:none;}
+/* QA Dashboard (2026-10-05) */
+  .db-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .db-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px;}
+  @media (max-width:1100px){.db-kpis{grid-template-columns:repeat(3,minmax(0,1fr));}}
+  @media (max-width:560px){.db-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  .db-k{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+  .db-k .t-v{font-size:24px;font-weight:800;margin:4px 0 2px;}
+  .db-k.hero{border-color:var(--accent);}
+  .db-k.hero .t-v{color:var(--accent);font-size:28px;}
+  .db-k.crit .t-v{color:var(--bad);}
+  .db-chg{font-size:11.5px;color:var(--mute);}
+  .db-chg.up{color:var(--good);} .db-chg.down{color:var(--bad);}
+  .db-bar{height:6px;background:var(--line2);border-radius:4px;overflow:hidden;margin-top:6px;}
+  .db-bar i{display:block;height:100%;background:var(--accent);}
+  .db-grid{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px;}
+  .db-grid .card{margin-bottom:0;}
+  @media (max-width:860px){.db-grid{grid-template-columns:1fr;}}
+  .db-legend{display:flex;flex-direction:column;gap:6px;font-size:13px;}
+  .db-legend span i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;}
+  .db-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:700;font-size:12px;}
+  .db-qa a{display:block;padding:9px 0;border-top:1px solid var(--line2);color:var(--ink);text-decoration:none;font-size:14px;font-weight:600;cursor:pointer;}
+  .db-qa a:first-child{border-top:0;}
+  .db-qa a:hover{color:var(--accent);}
+  .db-prog{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--mute);margin-top:8px;}
+  .db-prog b{color:var(--ink);font-size:16px;}
+  .db-search{min-width:220px;flex:1;max-width:380px;}
+  .db-me{font-size:13px;color:var(--ink-2);font-weight:700;white-space:nowrap;}
+  .db-me span{color:var(--mute);font-weight:500;}
 .old-audit{display:none!important;} [data-edit]{display:none!important;}
 </style>
 </head>
@@ -426,14 +454,16 @@
       </div>
       <div class="row">
         <span class="dtp" data-dtp="date"><input type="hidden" id="date"></span>
+        <span class="db-me">Jiyah Monahan <span>&middot; QA Auditor</span></span>
         <button class="btn ghost" id="outBtn">Sign out</button>
       </div>
     </div>
 
     <div class="shell">
     <nav class="sidenav" id="sidenav" aria-label="Pages">
+      <button type="button" data-nav="dashboard"><span class="nav-ic">📊</span>Dashboard</button>
       <button type="button" data-nav="audit"><span class="nav-ic">📝</span>Audit</button>
-      <button type="button" data-nav="calls" class="on"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
+      <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
       <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
       <button type="button" data-nav="messages"><span class="nav-ic">💬</span>Messages</button>
       <button type="button" data-nav="notes"><span class="nav-ic">📌</span>Notes</button>
@@ -490,8 +520,50 @@
       <div id="notesSent" class="sub">Loading…</div>
     </section>
 
+    <!-- ══════════ Page: Dashboard (Jiyah's request, owner-approved 2026-10-05).
+         Every number is computed from app.calls + app.call_audits; QA score is
+         the portal's own yes/no score (scoreOf). ══════════ -->
+    <section class="page" data-page="dashboard" id="pageDashboard">
+      <div class="db-top">
+        <input id="dbQ" class="db-search" type="search" placeholder="Search by agent, caller, phone number, or call ID...">
+        <div class="seg" id="dbRange">
+          <button type="button" data-r="today" class="on">Today</button><button type="button" data-r="yesterday">Yesterday</button><button type="button" data-r="tw">This Week</button><button type="button" data-r="lw">Last Week</button><button type="button" data-r="tm">This Month</button><button type="button" data-r="custom">Custom</button>
+        </div>
+      </div>
+      <div class="row hidden" id="dbCustom" style="margin-bottom:12px;">
+        <input type="date" id="dbFrom"> <span class="sub">to</span> <input type="date" id="dbTo">
+        <button type="button" class="btn ghost" id="dbApply">Apply</button>
+      </div>
+      <div id="dbSearchOut" class="card hidden"></div>
+      <div class="err" id="dbErr"></div>
+      <div class="db-kpis" id="dbKpis"></div>
+      <div class="db-grid">
+        <div class="card"><h2>QA Performance Trend</h2><div class="sub">Avg QA score per day</div><div id="dbTrend"></div></div>
+        <div class="card"><h2>QA Score Distribution</h2><div id="dbDist"></div></div>
+      </div>
+      <div class="db-grid">
+        <div class="card">
+          <h2>Recent Call Audits</h2>
+          <div class="tblwrap"><table class="logs"><thead><tr><th>Date / time</th><th>Caller</th><th>Agent</th><th>Call type</th><th>QA score</th><th>Status</th><th>Flagged</th><th></th></tr></thead><tbody id="dbRecent"></tbody></table></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="card" style="margin:0;"><h2>Today's Audit Progress</h2><div id="dbToday"></div></div>
+          <div class="card" style="margin:0;"><h2>Quick Actions</h2><div class="db-qa" id="dbQuick">
+            <a data-qa="start">&#9654; Start auditing</a>
+            <a data-qa="flagged">&#9873; Flagged calls</a>
+            <a data-qa="calls">&#128222; All calls</a>
+            <a data-qa="notes">&#128204; Write a note</a>
+          </div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Agent QA Performance</h2>
+        <div class="tblwrap"><table class="logs"><thead><tr><th>Agent</th><th>Calls audited</th><th>Avg QA score</th><th>Flagged</th><th>Complaints</th></tr></thead><tbody id="dbAgents"></tbody></table></div>
+      </div>
+    </section>
+
     <!-- ══════════ Page: Calls (every call, every business, every line) ══════════ -->
-    <section class="page on" data-page="calls" id="pageCalls">
+    <section class="page" data-page="calls" id="pageCalls">
       <div class="card">
         <div class="cf-row">
           <div class="seg" id="cfRange">
@@ -1381,7 +1453,7 @@ function renderLogTable(){
 }
 
 function openView(id){
-  const a=((weekData&&weekData.audits)||[]).find(x=>x.id===id);
+  const a=((weekData&&weekData.audits)||[]).find(x=>x.id===id)||dbAuditById[id];
   if(!a) return;
   const s=scoreOf(a);
   const ansRows=Object.entries(a.answers||{}).map(([k,v])=>
@@ -1689,7 +1761,7 @@ async function enter(){
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
   const fromHash=(location.hash||'').replace('#','');
-  showPage(['calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'audit');   // owner, 2026-09-25: Audit is the landing page
+  showPage(['dashboard','calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'dashboard');   // 2026-10-05: Dashboard is the landing page   // owner, 2026-09-25: Audit is the landing page
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
@@ -1712,6 +1784,7 @@ function showPage(p){
   if(p==='calls') embedOwnerScreen('calls');
   if(p==='messages') embedOwnerScreen('messages');
   if(p==='notes') loadNotesSent();
+  if(p==='dashboard') loadDash();
 }
 $('sidenav').addEventListener('click',e=>{ const b=e.target.closest('[data-nav]'); if(b) showPage(b.dataset.nav); });
 
@@ -2516,6 +2589,154 @@ if(token){
     .then(enter)
     .catch(()=>{ localStorage.removeItem('ha_audit_token'); token=''; });
 }
+
+// ── QA Dashboard (Jiyah's request, owner-approved 2026-10-05) ───────────────
+// Real data only: call counts from app.calls, audits from app.call_audits.
+// QA score = the portal's own yes/no score (scoreOf). Critical = flagged AND a
+// complaint was logged. Completion = audited / total calls in the period.
+let dbRange='today', dbAuditById={}, dbReq=0, dbSearchT=null;
+const DB_HIDE=new Set(['joey','nobody','']);
+function dbAddDays(s,n){ const d=new Date(s+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+function dbStartISO(s){ const g=Date.UTC(+s.slice(0,4),+s.slice(5,7)-1,+s.slice(8,10)); return new Date(g-tzOffsetMs(new Date(g),CT)).toISOString(); }
+function dbDays(a,b){ return Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/864e5)+1; }
+function dbRangeDates(){
+  const t=ctDateStr(new Date());
+  const mon=dbAddDays(t,-((new Date(t+'T12:00:00Z').getUTCDay()+6)%7));
+  switch(dbRange){
+    case 'yesterday': { const y=dbAddDays(t,-1); return [y,y]; }
+    case 'tw': return [mon,t];
+    case 'lw': return [dbAddDays(mon,-7),dbAddDays(mon,-1)];
+    case 'tm': return [t.slice(0,8)+'01',t];
+    case 'custom': { const a=$('dbFrom').value, b=$('dbTo').value; if(a&&b) return a<=b?[a,b]:[b,a]; return [t,t]; }
+    default: return [t,t];
+  }
+}
+function dbFetch(d1,d2,auditFrom){
+  return crm('audit_dashboard',{from:dbStartISO(d1),to:dbStartISO(dbAddDays(d2,1)),d1:auditFrom||d1,d2});
+}
+function dbAvg(list){ const s=list.map(scoreOf).filter(x=>x!=null); return s.length?Math.round(10*s.reduce((a,b)=>a+b,0)/s.length)/10:null; }
+function dbChg(cur,prev,unit){
+  if(cur==null||prev==null) return '';
+  if(unit==='pt'){ const d=Math.round(10*(cur-prev))/10; if(!d) return '<div class="db-chg">no change vs prev.</div>'; return '<div class="db-chg '+(d>0?'up':'down')+'">'+(d>0?'&#8593; ':'&#8595; ')+Math.abs(d)+' pts vs prev.</div>'; }
+  if(!prev) return '';
+  const p=Math.round(100*(cur-prev)/prev);
+  return '<div class="db-chg">'+(p>0?'&#8593; ':p<0?'&#8595; ':'')+Math.abs(p)+'% vs prev.</div>';
+}
+function dbScoreCol(s){ return s==null?'var(--mute)':s>=90?'var(--good)':s>=80?'var(--accent)':s>=70?'var(--warn)':'var(--bad)'; }
+function dbBadge(a){ const s=scoreOf(a); if(s==null) return '<span class="sub">&mdash;</span>'; const c=dbScoreCol(s); return '<span class="db-badge" style="color:'+c+';border:1px solid '+c+';">'+s+'%</span>'; }
+function dbStatus(a){ return a.owner_note?'Reviewed':a.flagged?'Awaiting review':'Complete'; }
+async function loadDash(){
+  const req=++dbReq; $('dbErr').textContent='';
+  const [d1,d2]=dbRange==='custom'&&!($('dbFrom').value&&$('dbTo').value)?[ctDateStr(new Date()),ctDateStr(new Date())]:dbRangeDates();
+  const n=dbDays(d1,d2), p2=dbAddDays(d1,-1), p1=dbAddDays(d1,-n);
+  const trendFrom=n<7?dbAddDays(d2,-6):d1;
+  const t=ctDateStr(new Date());
+  try{
+    const [cur,prev,today]=await Promise.all([dbFetch(d1,d2,trendFrom), dbFetch(p1,p2), dbFetch(t,t)]);
+    if(req!==dbReq) return;
+    const all=cur.audits||[]; all.forEach(a=>{ dbAuditById[a.id]=a; });
+    (today.audits||[]).forEach(a=>{ dbAuditById[a.id]=a; });
+    const inR=all.filter(a=>a.audit_date>=d1&&a.audit_date<=d2), pa=prev.audits||[];
+    renderDash({d1,d2,trendFrom,all,inR,pa,calls:cur.calls,pcalls:prev.calls,today});
+  }catch(e){ if(req===dbReq) $('dbErr').textContent=e.message; }
+}
+function renderDash(x){
+  const audited=x.inR.length, paud=x.pa.length;
+  const avg=dbAvg(x.inR), pavg=dbAvg(x.pa);
+  const flag=x.inR.filter(a=>a.flagged).length, pflag=x.pa.filter(a=>a.flagged).length;
+  const crit=x.inR.filter(a=>a.flagged&&a.complaint).length;
+  const comp=x.calls?Math.min(100,Math.round(100*audited/x.calls)):null;
+  const k=(cls,l,v,extra)=>'<div class="db-k '+cls+'"><div class="t-l">'+l+'</div><div class="t-v">'+v+'</div>'+(extra||'')+'</div>';
+  $('dbKpis').innerHTML=
+    k('','Total calls',x.calls.toLocaleString(),dbChg(x.calls,x.pcalls))+
+    k('','Calls audited',audited,dbChg(audited,paud))+
+    k('hero','Avg QA score',avg==null?'&mdash;':avg+'%',dbChg(avg,pavg,'pt'))+
+    k(flag?'crit':'','Flagged calls',flag,dbChg(flag,pflag))+
+    k(crit?'crit':'','Critical issues',crit,'<div class="db-chg">flagged + complaint</div>')+
+    k('','Audit completion',comp==null?'&mdash;':comp+'%',comp==null?'':'<div class="db-bar"><i style="width:'+comp+'%"></i></div>');
+  // Trend: one point per day that has scored audits.
+  const days=[]; for(let d=x.trendFrom; d<=x.d2; d=dbAddDays(d,1)) days.push(d);
+  const pts=days.map(d=>dbAvg(x.all.filter(a=>a.audit_date===d)));
+  const W=600,H=200,L=34,R=10,T=10,B=26, n=days.length;
+  const xs=i=>L+(n<2?(W-L-R)/2:i*(W-L-R)/(n-1)), ys=v=>T+(100-v)*(H-T-B)/100;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block;" role="img" aria-label="QA score trend">';
+  [0,50,100].forEach(v=>{ svg+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+ys(v)+'" y2="'+ys(v)+'" stroke="#eef0f3"/><text x="'+(L-6)+'" y="'+(ys(v)+4)+'" font-size="11" fill="#7a8694" text-anchor="end">'+v+'%</text>'; });
+  let path='', seg=false;
+  pts.forEach((v,i)=>{ if(v==null){ seg=false; return; } path+=(seg?'L':'M')+xs(i).toFixed(1)+' '+ys(v).toFixed(1)+' '; seg=true; });
+  if(path) svg+='<path d="'+path+'" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linejoin="round"/>';
+  const step=Math.max(1,Math.ceil(n/10));
+  pts.forEach((v,i)=>{
+    if(v!=null) svg+='<circle cx="'+xs(i)+'" cy="'+ys(v)+'" r="3.5" fill="#2563eb"><title>'+days[i]+': '+v+'%</title></circle>';
+    if(i%step===0||i===n-1){ const dt=new Date(days[i]+'T12:00:00Z'); const lab=n<=7?DAY_ABBR[(dt.getUTCDay()+6)%7]:(dt.getUTCMonth()+1)+'/'+dt.getUTCDate(); svg+='<text x="'+xs(i)+'" y="'+(H-8)+'" font-size="11" fill="#7a8694" text-anchor="middle">'+lab+'</text>'; }
+  });
+  $('dbTrend').innerHTML=pts.some(v=>v!=null)?svg+'</svg>':'<p class="sub">No scored audits yet.</p>';
+  // Distribution donut.
+  const sc=x.inR.map(scoreOf).filter(v=>v!=null);
+  const B4=[['90-100',v=>v>=90,'#15803d'],['80-89',v=>v>=80&&v<90,'#2563eb'],['70-79',v=>v>=70&&v<80,'#d4a017'],['Below 70',v=>v<70,'#b91c1c']];
+  const cnt=B4.map(b=>sc.filter(b[1]).length);
+  if(!sc.length){ $('dbDist').innerHTML='<p class="sub">No scored audits yet.</p>'; }
+  else{
+    let a0=0, arcs=''; const r=52, c=2*Math.PI*r;
+    cnt.forEach((v,i)=>{ if(!v) return; const len=c*v/sc.length; arcs+='<circle r="'+r+'" cx="70" cy="70" fill="none" stroke="'+B4[i][2]+'" stroke-width="20" stroke-dasharray="'+len+' '+(c-len)+'" stroke-dashoffset="'+(-a0)+'" transform="rotate(-90 70 70)"/>'; a0+=len; });
+    $('dbDist').innerHTML='<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;"><svg viewBox="0 0 140 140" width="140" height="140">'+arcs+'<text x="70" y="75" text-anchor="middle" font-size="18" font-weight="800" fill="#222a35">'+sc.length+'</text></svg>'+
+      '<div class="db-legend">'+B4.map((b,i)=>'<span><i style="background:'+b[2]+'"></i>'+b[0]+': <b>'+cnt[i]+'</b> ('+Math.round(100*cnt[i]/sc.length)+'%)</span>').join('')+'</div></div>';
+  }
+  // Recent audits.
+  const rec=x.inR.slice(0,10);
+  $('dbRecent').innerHTML=rec.length?rec.map(a=>{
+    const d=new Date(a.audit_date+'T12:00:00Z');
+    const caller=[a.caller_name,a.caller_phone&&prettyPhone(a.caller_phone)].filter(Boolean).map(esc).join('<br>')||'<span class="sub">unknown</span>';
+    const type=[a.direction==='outgoing'?'Outbound':'Inbound', a.service==='unknown'?'Not reached':a.service].filter(Boolean).join(' &middot; ');
+    return '<tr><td class="num">'+(d.getUTCMonth()+1)+'/'+d.getUTCDate()+(a.time_local?' '+esc(centralTime(a)):'')+'</td><td>'+caller+'</td><td>'+esc(a.handled_by||'')+'</td><td>'+type+'</td><td>'+dbBadge(a)+'</td><td>'+dbStatus(a)+'</td><td>'+(a.flagged?'<span class="flagpill">&#9888; YES</span>':'<span class="sub">no</span>')+'</td><td><button type="button" class="actbtn" data-dbview="'+a.id+'">View</button></td></tr>';
+  }).join(''):'<tr><td colspan="8" class="sub" style="text-align:center;padding:16px;">No audits in this period.</td></tr>';
+  // Today's progress (always today, whatever the filter).
+  const ta=x.today.audits||[], tc=x.today.calls||0, tf=ta.filter(a=>a.flagged).length;
+  const tp=tc?Math.min(100,Math.round(100*ta.length/tc)):0;
+  $('dbToday').innerHTML='<div class="db-bar" style="height:10px;"><i style="width:'+tp+'%"></i></div>'+
+    '<div class="db-prog"><span><b>'+ta.length+'</b> / '+tc+' audited</span><span><b>'+Math.max(0,tc-ta.length)+'</b> remaining</span><span><b'+(tf?' style="color:var(--bad)"':'')+'>'+tf+'</b> flagged</span></div>';
+  // Agents (real names in the data; Joey/Nobody excluded; no ranking).
+  const by={};
+  x.inR.forEach(a=>{ const w=(a.handled_by||'').trim(); if(DB_HIDE.has(w.toLowerCase())) return; (by[w]=by[w]||[]).push(a); });
+  const names=Object.keys(by).sort();
+  $('dbAgents').innerHTML=names.length?names.map(nm=>{ const l=by[nm], av=dbAvg(l);
+    return '<tr><td><b>'+esc(nm)+'</b></td><td class="num">'+l.length+'</td><td>'+(av==null?'<span class="sub">&mdash;</span>':'<span style="color:'+dbScoreCol(av)+';font-weight:700;">'+av+'%</span>')+'</td><td class="num">'+l.filter(a=>a.flagged).length+'</td><td class="num">'+l.filter(a=>a.complaint).length+'</td></tr>'; }).join('')
+    :'<tr><td colspan="5" class="sub" style="text-align:center;padding:16px;">No audits in this period.</td></tr>';
+}
+$('dbRecent').addEventListener('click',e=>{ const b=e.target.closest('[data-dbview]'); if(b) openView(b.dataset.dbview); });
+$('dbRange').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  dbRange=b.dataset.r;
+  $('dbRange').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  $('dbCustom').classList.toggle('hidden',dbRange!=='custom');
+  if(dbRange!=='custom') loadDash();
+});
+$('dbApply').onclick=()=>{ if($('dbFrom').value&&$('dbTo').value) loadDash(); };
+$('dbQuick').addEventListener('click',e=>{
+  const a=e.target.closest('[data-qa]'); if(!a) return;
+  const k=a.dataset.qa;
+  if(k==='start'){ showPage('audit'); $('startQueue').click(); }
+  else if(k==='flagged'){ showPage('audit'); const f=$('filterSeg').querySelector('[data-f="flagged"]'); if(f) f.click(); }
+  else showPage(k);
+});
+async function dbSearch(){
+  const q=$('dbQ').value.trim(), out=$('dbSearchOut');
+  if(q.length<2){ out.classList.add('hidden'); out.innerHTML=''; return; }
+  try{
+    const r=await crm('audit_dashboard',{q});
+    if($('dbQ').value.trim()!==q) return;
+    (r.audits||[]).forEach(a=>{ dbAuditById[a.id]=a; });
+    const au=(r.audits||[]).slice(0,10).map(a=>'<tr><td class="num">'+esc(a.audit_date)+(a.time_local?' '+esc(centralTime(a)):'')+'</td><td>'+esc(a.caller_name||prettyPhone(a.caller_phone)||'unknown')+'</td><td>'+esc(a.handled_by||'')+'</td><td>'+dbBadge(a)+'</td><td><button type="button" class="actbtn" data-dbview="'+a.id+'">View</button></td></tr>').join('');
+    const ca=(r.calls||[]).slice(0,10).map(c=>'<tr><td class="num">'+esc(new Date(c.occurred_at).toLocaleString('en-US',{timeZone:CT,month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}))+'</td><td>'+esc(prettyPhone(c.caller_phone))+'</td><td>'+esc(c.handled_by||'')+'</td><td>'+esc(c.business||'')+'</td><td><button type="button" class="actbtn" data-dbcall="'+c.id+'">Open</button></td></tr>').join('');
+    out.innerHTML=(au?'<h2>Audits</h2><div class="tblwrap"><table class="logs"><tbody>'+au+'</tbody></table></div>':'')+
+      (ca?'<h2 style="margin-top:10px;">Calls</h2><div class="tblwrap"><table class="logs"><tbody>'+ca+'</tbody></table></div>':'')+
+      (!au&&!ca?'<p class="sub" style="margin:0;">Nothing found.</p>':'');
+    out.classList.remove('hidden');
+  }catch(e){ out.innerHTML='<p class="err">'+esc(e.message)+'</p>'; out.classList.remove('hidden'); }
+}
+$('dbQ').oninput=()=>{ clearTimeout(dbSearchT); dbSearchT=setTimeout(dbSearch,350); };
+$('dbSearchOut').addEventListener('click',e=>{
+  const v=e.target.closest('[data-dbview]'); if(v) return openView(v.dataset.dbview);
+  const c=e.target.closest('[data-dbcall]'); if(c){ showPage('calls'); embedOwnerScreen('calls', c.dataset.dbcall); }
+});
 </script>
 </body>
 </html>

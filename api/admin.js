@@ -628,6 +628,7 @@ export default async function handler(req, res) {
       case 'quote_coupon':      return await quoteCoupon(req, res, db, auth, body);
       case 'call_event':        return await callEvent(req, res, db, auth, body);
       case 'call_analytics':    return await callAnalytics(req, res, db, auth);
+      case 'audit_dashboard':   return await auditDashboard(req, res, db, auth);
       case 'audit_report':      return await auditReport(req, res, db, auth);
       case 'audit_heard':       return await auditHeard(req, res, db, auth);
       case 'audit_owner_note':  return await auditOwnerNote(req, res, db, auth);
@@ -9196,7 +9197,51 @@ const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary'
   // jiyahs portal"). Deliberately NOT messages_send/messages_block/
   // messages_read -- she reads what was said, the office still owns replying
   // to customers and clearing unread.
-  'messages_list', 'messages_thread', 'notes_active', 'vip_phones']);
+  'messages_list', 'messages_thread', 'notes_active', 'vip_phones',
+  // Jiyah's QA Dashboard (2026-10-05): call counts + audit rows, no money.
+  'audit_dashboard']);
+// QA Dashboard data for the auditor portal. Read-only. Returns the number of
+// calls in [from,to) (same kinds the Calls tab lists), the graded audits whose
+// audit_date is in [d1,d2], and -- with ?q= -- calls/audits matching a phone,
+// call id, caller name or agent. Never selects prices, pay or payment fields.
+const AUDIT_DASH_COLS = 'id, audit_date, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at';
+async function auditDashboard(req, res, db, auth) {
+  if (auth.role !== 'owner' && !auth.auditor) return res.status(403).json({ error: 'Not allowed' });
+  const isoOk = s => !isNaN(Date.parse(s));
+  const dOk = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const from = String(req.query.from || ''), to = String(req.query.to || '');
+  const d1 = String(req.query.d1 || ''), d2 = String(req.query.d2 || '');
+  const q = String(req.query.q || '').trim().slice(0, 60);
+  if (q) {
+    const digits = q.replace(/\D/g, '');
+    const isUuid = /^[0-9a-f-]{36}$/i.test(q);
+    let cq = db.from('calls').select('id, occurred_at, caller_phone, handled_by, kind, answered, duration_sec, business:businesses ( name )')
+      .not('kind', 'in', '(voicemail,missed,sms)').order('occurred_at', { ascending: false }).limit(25);
+    if (isUuid) cq = cq.eq('id', q);
+    else if (digits.length >= 4) cq = cq.ilike('caller_phone', '%' + digits.slice(-10) + '%');
+    else cq = cq.ilike('handled_by', '%' + q.replace(/[%_,()]/g, '') + '%');
+    const safeQ = q.replace(/[%_,()]/g, '');
+    let aq = db.from('call_audits').select(AUDIT_DASH_COLS).order('audit_date', { ascending: false }).limit(50);
+    if (isUuid) aq = aq.or('id.eq.' + q + ',call_id.eq.' + q);
+    else if (digits.length >= 4) aq = aq.ilike('caller_phone', '%' + digits.slice(-10) + '%');
+    else aq = aq.or('caller_name.ilike.%' + safeQ + '%,handled_by.ilike.%' + safeQ + '%');
+    const [c, a] = await Promise.all([cq, aq]);
+    return res.status(200).json({
+      calls: (c.data || []).map(r => ({ id: r.id, occurred_at: r.occurred_at, caller_phone: r.caller_phone, handled_by: r.handled_by, kind: r.kind, answered: r.answered, duration_sec: r.duration_sec, business: r.business && r.business.name })),
+      audits: a.data || [],
+    });
+  }
+  if (!isoOk(from) || !isoOk(to) || !dOk(d1) || !dOk(d2)) return res.status(400).json({ error: 'from, to, d1, d2 required' });
+  const [cnt, aud] = await Promise.all([
+    db.from('calls').select('id', { count: 'exact', head: true })
+      .not('kind', 'in', '(voicemail,missed,sms)').gte('occurred_at', from).lt('occurred_at', to),
+    db.from('call_audits').select(AUDIT_DASH_COLS).gte('audit_date', d1).lte('audit_date', d2)
+      .order('occurred_at', { ascending: false }).limit(2000),
+  ]);
+  if (cnt.error) throw cnt.error;
+  if (aud.error) throw aud.error;
+  return res.status(200).json({ calls: cnt.count || 0, audits: aud.data || [] });
+}
 // Owner rule 2026-09-23: "jiyah can block callers if she wants" -- one narrow,
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
