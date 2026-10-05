@@ -2686,6 +2686,7 @@ function dbFetch(d1,d2,auditFrom){
 }
 function dbAvg(list){ const s=list.map(scoreOf).filter(x=>x!=null); return s.length?Math.round(10*s.reduce((a,b)=>a+b,0)/s.length)/10:null; }
 function dbChg(cur,prev,unit){
+  return '';   // Jiyah 2026-10-05: cards show only the value, no vs-previous text
   if(cur==null||prev==null) return '';
   if(unit==='pt'){ const d=Math.round(10*(cur-prev))/10; if(!d) return '<div class="db-chg">no change vs prev.</div>'; return '<div class="db-chg '+(d>0?'up':'down')+'">'+(d>0?'&#8593; ':'&#8595; ')+Math.abs(d)+' pts vs prev.</div>'; }
   if(!prev) return '';
