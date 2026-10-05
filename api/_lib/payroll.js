@@ -512,6 +512,12 @@ function detectSpecial(job) {
 // ── Core: compute one job's tech pay ─────────────────────────────────────────
 // Returns { pay, breakdown:[{label,amount}], flags:[string], state }.
 // `state` is 'paid' | 'deferred' | 'partial' | 'excluded'.
+// "Behind wall concealment" / "Behind the wall concealment" (no "wire"/"cord"
+// in the name). Not "Inwall Concealment" — that is a separate custom-hours rule.
+function isBehindWallConcealment(name) {
+  return /\bbehind\s+(the\s+)?wall\b/i.test(name || '') && /conceal/i.test(name || '');
+}
+
 export function computeJobPay(job, techName) {
   const flags = [];
   const breakdown = [];
@@ -797,6 +803,21 @@ export function computeJobPay(job, techName) {
     // descriptor we couldn't price when the customer was actually CHARGED for it.
     if (/my tv is|under 70|70.?85|86\s*\+?/i.test(name) && !matchSize(name)) {
       if (lt > 0) flags.push(`Size descriptor "${name}" — verify rate bracket for pay calculation`);
+      continue;
+    }
+
+    // "Behind wall concealment" booked as the ONLY service (no TV size line):
+    // a stand-alone wire-concealment visit pays the flat $60 behind-wall rate,
+    // never the $85/hr custom-hours guess ($139 -> "2h" -> $130; Denys
+    // Sladkovskyi job, Oct 2026, owner correction). With a mount on the ticket
+    // it falls through to matchItem() and pays the normal behind-wall add-on.
+    // "Inwall Concealment" (Segal) is deliberately NOT matched — see self-test.
+    // Only from 2026-10-04 on (no scheduled_at = now), so jobs already paid keep their recorded pay.
+    if (isBehindWallConcealment(name) && lt > 0 && (!job.scheduled_at || String(job.scheduled_at) >= '2026-10-04') && !(job.line_items || []).some(x => matchSize(x.name))) {
+      const n = payQty(li);
+      breakdown.push({ label: `Behind-wall concealment (stand-alone)${n > 1 ? ` ×${n}` : ''}`, amount: 60 * n });
+      pay += 60 * n;
+      sawSize = true; // a known stand-alone service, not a missing TV base
       continue;
     }
 
@@ -1559,6 +1580,14 @@ function runSelfTests() {
     { name: '33"-59"', line_total: 109 },
     { name: 'Travel', line_total: 65, quantity: 1, unit_price: 65, kind: 'addon' },
   ] }), 'Gregory').pay, 60 + 52, 'base (60) + travel payout only (80% of 65 = 52) -- Travel line itself must not ALSO price as custom hours');
+
+  // Denys Sladkovskyi, Handy Andy, Oct 2026: stand-alone behind-wall visit.
+  // Was 2 custom hours ($130) + $40 travel = $170. Owner: $60 flat + travel = $100.
+  eq(computeJobPay(job({ business_slug: 'handy-andy', line_items: [
+    { name: 'Behind wall concealment', line_total: 139, quantity: 1, unit_price: 139, kind: 'option' },
+    { name: 'Travel', line_total: 50, quantity: 1, unit_price: 50, kind: 'addon' },
+    { name: 'Tax (8.25%)', line_total: 15.59, quantity: 1, unit_price: 15.59, kind: 'fee' },
+  ] }), 'Steve').pay, 100, 'stand-alone Behind wall concealment = $60 + travel payout ($40) = $100');
 
   console.log(fails ? `\n${fails} FAILED` : '\nAll payroll self-tests passed');
   return fails;
