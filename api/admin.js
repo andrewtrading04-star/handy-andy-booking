@@ -15966,7 +15966,6 @@ async function auditorNoteSend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const text = (body.body || '').toString().trim();
   if (!text) return res.status(400).json({ error: 'Write something first' });
-  if (text.length > 2000) return res.status(400).json({ error: 'Note is too long (2000 characters max)' });
   const recipient = (body.recipient || '').toString();
   const when = resolveSendAt({}); // always "now" -- Jiyah's composer has no scheduling UI
   const row = { body: text, mode: 'until_read', show_from: when.show_from, send_at: when.send_at, created_by: auth.name || 'Jiyah', photo_urls: cleanNotePhotos(body.photos) };
