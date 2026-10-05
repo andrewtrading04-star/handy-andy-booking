@@ -87,8 +87,16 @@ export default async function handler(req, res) {
       body.experience_details ? String(body.experience_details).slice(0, 600) : null,
     ].filter(Boolean);
     if (process.env.OWNER_PHONE_NUMBER) await sendSMS(process.env.OWNER_PHONE_NUMBER, lines.slice(0, 4).join('\n')).catch((e) => console.error('[doms-lead] careers sms failed:', e.message));
+    // Optional PDF resume (careers page, 2026-10-05): base64, PDF magic bytes, <= 3 MB.
+    let attachments = null;
+    const rs = body.resume;
+    if (rs && typeof rs.data === 'string' && rs.data.length && rs.data.length <= 4.2 * 1024 * 1024 && rs.data.startsWith('JVBER')) {
+      const fname = String(rs.name || 'resume.pdf').replace(/[^\w.\- ]+/g, '_').slice(0, 100);
+      attachments = [{ filename: /\.pdf$/i.test(fname) ? fname : fname + '.pdf', content: rs.data }];
+      lines.push('Resume attached (PDF).');
+    }
     const to = process.env.OWNER_NOTIFY_EMAIL || process.env.OWNER_EMAIL;
-    if (to) await sendEmail({ slug: 'doms', to, subject: `Dom's job applicant: ${name}`, html: lines.map((l) => `<p>${escHtml(l)}</p>`).join('') }).catch((e) => console.error('[doms-lead] careers email failed:', e.message));
+    if (to) await sendEmail({ slug: 'doms', to, subject: `Dom's job applicant: ${name}`, html: lines.map((l) => `<p>${escHtml(l)}</p>`).join(''), attachments }).catch((e) => console.error('[doms-lead] careers email failed:', e.message));
     return res.status(200).json({ ok: true });
   }
 

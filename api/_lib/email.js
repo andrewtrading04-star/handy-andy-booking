@@ -294,7 +294,7 @@ export function brandFor(slug) {
 // Returns { sent, skipped?, id?, error? } and never throws unless throwOnError.
 // `emailNotificationsOn()` is the email kill switch — while it is off, sends are
 // skipped (and logged) so nothing goes out before the accounts are approved.
-export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false, idempotencyKey = null }) {
+export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError = false, idempotencyKey = null, attachments = null }) {
   // Demo mode: pretend the email went out (no Resend call, nothing delivered).
   if (demoMode()) {
     console.log(`[email:demo] pretend-sent "${subject}" to ${to}`);
@@ -313,6 +313,8 @@ export async function sendEmail({ slug, to, subject, html, replyTo, throwOnError
 
   const payload = { from, to, subject, html };
   if (replyTo) payload.reply_to = replyTo;
+  // Resend attachments: [{ filename, content: <base64> }] (careers resumes).
+  if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
 
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   // Resend dedupes POSTs that carry the same Idempotency-Key for 24h — so a job
