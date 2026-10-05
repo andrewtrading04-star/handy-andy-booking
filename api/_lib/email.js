@@ -174,12 +174,12 @@ export function emailConfig(slug) {
   // shared-account fallback here on purpose. Until A1TVMOUNTING_RESEND_API_KEY
   // is set, sendEmail() skips with a logged reason instead of sending from
   // another company's account. A1TVMOUNTING_EMAIL_FROM must be an address on a
-  // domain verified in THAT Resend account (a1tvmountingpros.com once it has
-  // transferred in), e.g. "A1 TV Mounting <contact@a1tvmountingpros.com>".
+  // domain verified in THAT Resend account (a1tvmounting.com, bought 2026-10-05; it has
+  // transferred in), e.g. "A1 TV Mounting <contact@a1tvmounting.com>".
   if (slug === 'a1tvmounting') {
     return {
       apiKey: process.env.A1TVMOUNTING_RESEND_API_KEY || null,
-      from:   process.env.A1TVMOUNTING_EMAIL_FROM || 'contact@a1tvmountingpros.com',
+      from:   process.env.A1TVMOUNTING_EMAIL_FROM || 'contact@a1tvmounting.com',
     };
   }
   // The other two LA brands (latvpro / lainstall) are still unstaffed
@@ -224,7 +224,7 @@ export const EMAIL_BRANDS = {
   // Accent = the site's own blue (Tailwind blue-600, same as the site's buttons).
   'tvmountinglosangeles': { slug: 'tvmountinglosangeles', name: 'TV Mounting Los Angeles', accent: '#155DFC', website: 'tvmountinglosangeles.com' },
   // A1 TV Mounting (DFW): site cloned from the LA template, same blue-600 accent.
-  'a1tvmounting':         { slug: 'a1tvmounting',         name: 'A1 TV Mounting',          accent: '#155DFC', website: 'a1tvmountingpros.com' },
+  'a1tvmounting':         { slug: 'a1tvmounting',         name: 'A1 TV Mounting',          accent: '#155DFC', website: 'a1tvmounting.com' },
 };
 // ── Request received (unstaffed-area request flow) ──────────────────────────
 // Sent to the CUSTOMER right after they submit the booking widget's request

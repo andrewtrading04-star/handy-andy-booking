@@ -111,7 +111,7 @@
     // A1 TV Mounting (DFW): hosted brand-aware fallback until a1tvmountingpros.com
     // transfers in and is attached to its Vercel project — flip to
     // https://a1tvmountingpros.com/thank-you then.
-    'a1tvmounting': 'https://handy-andy-booking.vercel.app/thank-you.html?b=a1tvmounting',
+    'a1tvmounting': 'https://a1tvmounting.com/thank-you',
     // Houston lead-gen quad: hosted brand-aware fallback until each domain is
     // connected to its Vercel project — flip to https://<domain>/thank-you then.
     'houstonmounting':       'https://handy-andy-booking.vercel.app/thank-you.html?b=houstonmounting',

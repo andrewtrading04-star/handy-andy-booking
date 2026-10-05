@@ -50,7 +50,7 @@ export const NATIVE_BUSINESS = {
   // seed LA techs + zips and flip that area to staffed. Stripe/Resend keys are
   // its own (TVMOUNTINGLOSANGELES_*), never Handy Andy's.
   'tvmountinglosangeles': { name: 'TV Mounting Los Angeles', legalName: 'TV Mounting Los Angeles' },
-  // A1 TV Mounting (a1tvmountingpros.com), Dallas-Fort Worth — a REAL acquired
+  // A1 TV Mounting (a1tvmounting.com), Dallas-Fort Worth — a REAL acquired
   // business, not a lead-gen funnel: it gets its own technicians (invite them
   // from the Technicians tab; its DFW service area is seeded `unstaffed` until
   // the first one joins), its own Stripe account and its own Resend account
