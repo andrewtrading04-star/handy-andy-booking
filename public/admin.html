@@ -12372,7 +12372,7 @@ function renderGbpList(){
     <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">${esc(g.c)}</div>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:14px;">
       <span style="color:var(--mute);">Phone</span><a href="tel:+1${g.p.replace(/\D/g,'')}">${esc(g.p)}</a>
-      <span style="color:var(--mute);">Email</span><span style="word-break:break-all;">${esc(g.e)}</span>
+      <span style="color:var(--mute);">GBP account</span><span style="word-break:break-all;">${esc(g.e)}</span>
       <span style="color:var(--mute);">Site</span>${g.u?`<a href="${esc(g.u)}" target="_blank" rel="noopener" style="word-break:break-all;">${esc(g.u.replace(/^https:\/\/(www\.)?/,''))}</a>`:'<span>—</span>'}
       <span style="color:var(--mute);">Google</span>${g.m?`<a href="${esc(g.m)}" target="_blank" rel="noopener">Open listing</a>`:'<span>—</span>'}
     </div></div>`;
@@ -12414,7 +12414,7 @@ async function renderOther(){
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDomainCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
       </div>`:''}
       ${role==='owner'?`<div id="otherGbp" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div><div style="font-weight:700;">📍 Google listings</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every listing: phone, email, site, city.</div></div>
+        <div><div style="font-weight:700;">📍 Google listings</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every listing: phone, GBP account, site, city.</div></div>
         <span style="color:var(--mute);font-size:20px;">›</span>
       </div>`:''}
       <div id="otherDisputes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
