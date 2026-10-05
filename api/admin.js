@@ -18247,6 +18247,13 @@ async function assistantTasks(req, res, db, auth, body) {
     const texted = color === 'red' ? await textJoeyRedTask(db, title) : false;
     return res.status(200).json({ ok: true, task: data, texted });
   }
+  // Owner drags tasks into any order (owner 2026-10-06): ids in the new order.
+  if (op === 'order') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+    const ids = (Array.isArray(body.ids) ? body.ids : []).filter(x => /^[0-9a-f-]{36}$/i.test(String(x))).slice(0, 300);
+    await Promise.all(ids.map((tid, i) => db.from('assistant_tasks').update({ sort_order: i }).eq('id', tid)));
+    return res.status(200).json({ ok: true });
+  }
   const id = String(body.id || '');
   if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
   if (op === 'done') {

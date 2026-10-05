@@ -10991,10 +10991,54 @@ function tasksBadge(){
   const n=_tk.tasks.filter(t=>!t.done_at&&t.color!=='white').length;
   el.textContent=n; el.style.display=(n&&role!=='owner')?'':'none';
 }
+// Owner drags tasks (owner 2026-10-06): grab the ⠿ handle, drop anywhere on the
+// board. Same column = new order; another column = new color too.
+function tkDragInit(view){
+  if(role!=='owner') return;
+  view.querySelectorAll('.tk-board [data-tk-grip]').forEach(h=>{
+    h.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); });
+    h.addEventListener('pointerdown',e=>{
+      e.preventDefault(); e.stopPropagation();
+      const row=h.closest('[data-tk]'); if(!row) return;
+      const r=row.getBoundingClientRect();
+      const ghost=row.cloneNode(true); ghost.removeAttribute('open');
+      Object.assign(ghost.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',zIndex:9999,pointerEvents:'none',opacity:'.9',boxShadow:'0 8px 24px rgba(0,0,0,.18)',background:'#fff'});
+      document.body.appendChild(ghost);
+      const ph=document.createElement('div'); ph.className='tk-ph'; ph.style.cssText='height:'+r.height+'px;border:2px dashed #94a3b8;border-radius:10px;margin:4px 0;';
+      row.after(ph); row.style.display='none';
+      const dy=e.clientY-r.top;
+      const move=ev=>{
+        ghost.style.top=(ev.clientY-dy)+'px'; ghost.style.left=(r.left+ev.clientX-e.clientX)+'px';
+        const el=document.elementFromPoint(ev.clientX,ev.clientY); const col=el&&el.closest('.tk-board .plv-col'); if(!col) return;
+        const body=col.querySelector('.plv-col-b');
+        const rows=[...body.querySelectorAll(':scope > [data-tk]')].filter(x=>x!==row);
+        const before=rows.find(x=>{ const b=x.getBoundingClientRect(); return ev.clientY<b.top+b.height/2; });
+        if(before) body.insertBefore(ph,before); else body.appendChild(ph);
+      };
+      const up=async()=>{
+        document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up);
+        ghost.remove(); ph.replaceWith(row); row.style.display='';
+        const id=row.dataset.tk, col=row.closest('.plv-col'), newColor=col&&col.id.replace('tkcol-','');
+        const t=_tk.tasks.find(x=>x.id===id);
+        const ids=[...col.querySelectorAll('.plv-col-b > [data-tk]')].map(x=>x.dataset.tk);
+        try{
+          if(t&&newColor&&newColor!==t.color&&TASK_ORDER.includes(newColor)){
+            const r2=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:newColor } });
+            if(newColor==='red'&&!(r2&&r2.already)) toast(r2&&r2.texted?'Texted Joey':'Saved. The text to Joey did not send.');
+          }
+          await api('assistant_tasks',{ method:'POST', body:{ op:'order', ids } });
+        }catch(err){ toast(err.message); }
+        await renderTasks();
+      };
+      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up);
+    });
+  });
+}
 function paintTasks(){
   const view=document.getElementById('view'); if(!onScreen('tasks')) return;
   const rank={red:0,yellow:1,green:2,white:3,joey:4};
-  const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||(a.created_at<b.created_at?-1:1));
+  const so=t=>t.sort_order==null?1e9:t.sort_order;
+  const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||so(a)-so(b)||(a.created_at<b.created_at?-1:1));
   const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
   // Board like the Pipeline (owner 2026-10-03): one column per color; the bar on top jumps to a column.
   const cols=[...TASK_ORDER,...(open.some(t=>t.color==='joey')?['joey']:[])];
@@ -11002,7 +11046,7 @@ function paintTasks(){
   const card=t=>{ const c=TASK_COL[t.color]||TASK_COL.green, d=!!t.done_at;
     // List row; tap to open the details (owner 2026-10-02).
     return `<details class="tk-row${d?' done':''}" data-tk="${esc(t.id)}" ${_tk.open.has(t.id)?'open':''}>
-      <summary class="tk-sum"><input type="checkbox" data-tk-done ${d?'checked':''}><span class="tk-dot" style="background:${d?'#cbd5e1':c.bar};"></span><span class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</span>${t.booking_id?'<span class="tk-ico">🔗</span>':''}${t.notes?'<span class="tk-ico">📝</span>':''}<span class="tk-car">▸</span></summary>
+      <summary class="tk-sum">${role==='owner'&&!d?'<span data-tk-grip title="Drag" style="cursor:grab;touch-action:none;padding:0 6px 0 0;color:#94a3b8;font-size:18px;line-height:1;user-select:none;">⠿</span>':''}<input type="checkbox" data-tk-done ${d?'checked':''}><span class="tk-dot" style="background:${d?'#cbd5e1':c.bar};"></span><span class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</span>${t.booking_id?'<span class="tk-ico">🔗</span>':''}${t.notes?'<span class="tk-ico">📝</span>':''}<span class="tk-car">▸</span></summary>
       <div class="tk-body">
         ${role==='owner'?`<input class="tk-edit" data-tk-title maxlength="300" value="${esc(t.title)}">`:''}
         ${role==='owner'&&!d?`<div class="tk-colors sm">${TASK_ORDER.map(k=>`<button type="button" data-tk-recolor="${k}" class="${t.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`:''}
@@ -11033,6 +11077,7 @@ function paintTasks(){
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
+  tkDragInit(view);
   const tkPicker=notePhotoPicker(view.querySelector('#tkPhotoHost'), view.querySelector('#tkNotes'));
   view.querySelectorAll('[data-tk-filter]').forEach(b=>b.onclick=()=>{ const k=b.dataset.tkFilter; _tk.filter=_tk.filter===k?null:k;
     view.querySelectorAll('[data-tk-filter]').forEach(x=>x.classList.toggle('on',x.dataset.tkFilter===_tk.filter));
