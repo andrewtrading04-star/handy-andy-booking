@@ -14055,11 +14055,15 @@ function paintNumberDirectory(){
   const detail=(label,value)=>`<dt>${label}</dt><dd>${esc(value||'Not available')}</dd>`;
   const listScroll=directory.querySelector('.ci-list')?.scrollTop||0;
   directory.innerHTML=`<div class="ch-number-inbox"><div class="ci-list" role="group" aria-label="Select a tracking number">
-    ${rows.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
+    ${(()=>{ const calls=n=>(n.volume&&n.volume.total)||0, byCity=new Map();
+      rows.forEach(n=>{ const c=(n.market||'Other').trim()||'Other'; if(!byCity.has(c)) byCity.set(c,[]); byCity.get(c).push(n); });
+      return [...byCity.entries()].map(([c,ns])=>({c,ns:ns.sort((x,y)=>calls(y)-calls(x)),t:ns.reduce((s,n)=>s+calls(n),0)})).sort((x,y)=>y.t-x.t||x.c.localeCompare(y.c))
+        .map(g=>`<div class="num-city" style="display:flex;justify-content:space-between;padding:10px 12px 4px;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute,#64748b);"><span>${esc(g.c)}</span><span>${g.t} calls</span></div>`+
+        g.ns.map(n=>`<button type="button" class="ci-item num-row" data-number-select="${esc(n.phone)}" aria-pressed="${n.phone===selected.phone}">
       <span class="num-dot" style="background:${numberStatusColor(n)}" aria-hidden="true"></span>
       <span class="num-id"><strong>${esc(n.line_name||n.business_name)}</strong><span>${esc(prettyNum(n.phone))}</span></span>
-      <span class="num-rings">Rings ${esc(friendlyForward(n.forward_to,n.forward_name))}</span>
-    </button>`).join('')}</div><section class="ch-number-detail" aria-label="Selected tracking line">
+      <span class="num-rings"><b>${calls(n)}</b> calls · Rings ${esc(friendlyForward(n.forward_to,n.forward_name))}</span>
+    </button>`).join('')).join(''); })()}</div><section class="ch-number-detail" aria-label="Selected tracking line">
       <div class="ch-eyebrow">Tracking line</div><h3>${esc(prettyNum(selected.phone))}</h3><p class="ch-subtitle">${esc(selected.line_name||selected.business_name)}${selected.line_name&&selected.line_name!==selected.business_name?' &middot; '+esc(selected.business_name):''}</p>
       ${numberVolumeHtml(selected.volume)}
       <dl class="ci-facts">${detail('Market',selected.market)}${detail('Status',selected.active?'Active':'Retired')}${detail('Rings to',friendlyForward(selected.forward_to,selected.forward_name))}${detail('After hours',friendlyForward(selected.after_hours_forward_to,selected.after_hours_forward_name))}${detail('Hours',hours)}</dl>
