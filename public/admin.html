@@ -2043,6 +2043,7 @@
   .greeting.gl .gstat-warn{color:#991b1b;background:#fee2e2;border-color:#fecaca;}
   .greeting.gl .ndp-seg{background:#eef0f5;} .greeting.gl .ndp-seg button{color:#4b5563;} .greeting.gl .ndp-seg button.on{background:#534AB7;color:#fff;}
   @media(max-width:900px){ .greeting.gl .greet-stats{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"rev rev" "avg pred" "pf pf" "inc ndp";} }
+  @media(max-width:600px){ .greeting.gl .greet-stats{grid-template-columns:minmax(0,1fr);grid-template-areas:"rev" "avg" "pred" "pf" "inc" "ndp";} }
   .greeting::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
     background:radial-gradient(circle, var(--gaccent,#ff8a3d) 0%, transparent 70%);opacity:.18;pointer-events:none;}
   /* $100 review-program progress, on each tech's card */
