@@ -1815,6 +1815,26 @@ async function voicemailInfo(req, res) {
   });
 }
 
+// Public "Real customer bookings" counter for the Dom's sites. Returns how many
+// Dom's bookings (online widget AND phone/office entries, all cities) were made
+// since the counter went live; the site adds that to its own starting number.
+// Counts only; no customer data. Cancelled bookings do not count.
+const BOOKING_COUNT_SINCE = { doms: '2026-10-05T07:52:16.681Z' };
+async function bookingCountPublic(req, res) {
+  const business = ((req.query || {}).business || 'doms').toString().trim();
+  const since = BOOKING_COUNT_SINCE[business];
+  if (!since) return res.status(400).json({ error: `No booking counter for "${business}"` });
+  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+  const db = serviceClient();
+  const { data: biz } = await db.from('businesses').select('id').eq('slug', business).maybeSingle();
+  if (!biz) return res.status(404).json({ error: 'Unknown business' });
+  const { count, error } = await db.from('bookings')
+    .select('id', { count: 'exact', head: true })
+    .eq('business_id', biz.id).gte('created_at', since).neq('status', 'cancelled');
+  if (error) return res.status(500).json({ error: 'Count unavailable' });
+  return res.status(200).json({ business, since, count: count || 0 });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -1837,6 +1857,7 @@ export default async function handler(req, res) {
   // Live multi-TV discount numbers for the widget, see multiTvDiscountPublic() below.
   if (req.method === 'GET' && (req.query || {}).action === 'multi_tv_discount') return multiTvDiscountPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'stripe_config') return stripePublicConfig(req, res);
+  if (req.method === 'GET' && (req.query || {}).action === 'booking_count') return bookingCountPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'pay_status') return payStatusPublic(req, res);
   if (req.method === 'POST' && ((req.query || {}).action === 'card_setup' || (req.body || {}).action === 'card_setup')) return cardSetupPublic(req, res);
   if (req.method === 'GET' && (req.query || {}).action === 'email_config') return emailPublicConfig(req, res);
