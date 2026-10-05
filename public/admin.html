@@ -11375,7 +11375,7 @@ function paintPipeline(){
   const rangeName=({today:'today','2':'today and yesterday','3':'last 3 days',yesterday:'yesterday','7':'last 7 days'})[_plRange]||'';
   const upd=_plLoading?'Updating…':_plErr?'Could not refresh: '+_plErr:(d.generated_at?'Updated '+(plAgo(d.generated_at)==='0m'?'just now':plAgo(d.generated_at)+' ago'):'');
   const opt=(v,l,cur)=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`;
-  const rangeSel=`<select id="plRange" aria-label="Date range">${[['3','Last 3 days'],['2','Today + yesterday'],['today','Today'],['yesterday','Yesterday'],['7','Last 7 days']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
+  const rangeSel=`<select id="plRange" aria-label="Date range">${[['3','Last 3 days'],['2','Today + yesterday'],['today','Today'],['yesterday','Yesterday']].map(([v,l])=>opt(v,l,_plRange)).join('')}</select>`;
   // Brand filter: owner only (a secretary's board is already scoped to her
   // brands on the server). Families = Dom's + its lead-gen sites, and Handy
   // Andy + everything else, the same split the cards are grouped by.
