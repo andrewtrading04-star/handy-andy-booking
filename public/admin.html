@@ -12351,6 +12351,38 @@ async function renderDomainWatch(){
   load();
 }
 
+// ── Google listings (owner): every GBP with phone, login email, site, city ──
+const GBP_LIST=[
+  {n:'Handy Andy TV Mounting',c:'Houston, TX',p:'281-626-5853',e:'houstonmainbusiness@gmail.com',u:'https://www.ihandyandy.com/houston-tv-mounting',m:'https://g.page/r/CdizxHwpwcE0EBM'},
+  {n:'Handy Andy TV Mounting & Home Theater',c:'Houston (Greenway Plaza), TX',p:'281-638-8419',e:'houstonmainbusiness@gmail.com',u:'https://www.ihandyandy.com/houston-tv-mounting-greenwayplz',m:'https://g.page/r/CeA7fWzbLgO8EBM'},
+  {n:'Handy Andy TV Mounting',c:'Denver, CO',p:'720-541-8180',e:'denvermainbusiness@gmail.com',u:'https://www.ihandyandy.com/denvertvmounting',m:'https://g.page/r/Ccj-ZjdeLtzfEBM'},
+  {n:'Handy Andy TV Mounting',c:'Golden, CO',p:'720-637-3707',e:'denverinstallpros@gmail.com',u:'https://www.ihandyandy.com/tv-mounting-golden',m:'https://g.page/r/CWcIi45TvszbEBM'},
+  {n:'Handy Andy TV Mounting',c:'Austin, TX',p:'512-668-6643',e:'austinmainbusiness@gmail.com',u:'https://www.ihandyandy.com/austin-tv-mounting',m:'https://g.page/r/CYE7aX6tVMnkEBM'},
+  {n:'Handy Andy TV Mounting Los Angeles',c:'Los Angeles, CA',p:'213-579-3329',e:'tvmountinglaca@gmail.com',u:'https://www.ihandyandy.com/tv-mounting-los-angeles',m:'https://g.page/r/CfCMbSKempPwEBM'},
+  {n:'Doms TV Mounting Colorado',c:'Denver, CO',p:'720-800-6095',e:'domstvmounting@gmail.com',u:'https://www.domstvmounting.com/',m:'https://g.page/r/Cffr7Tp2DSNOEBM'},
+  {n:'Doms TV Mounting OKC',c:'Oklahoma City, OK',p:'405-657-6412',e:'domstvmounting@gmail.com',u:'https://www.domstvmounting.com/tv-mounting-oklahoma-city',m:'https://www.google.com/maps?cid=516566321774452060'},
+  {n:'Doms TV Mounting Tulsa',c:'Tulsa, OK',p:'918-237-3122',e:'domstvmounting@gmail.com',u:'https://www.domstvmounting.com/tv-mounting-tulsa',m:'https://www.google.com/maps?cid=14065283668418833000'},
+  {n:'A1 TV Mounting',c:'Euless / Arlington, TX',p:'469-260-2941',e:'?',u:'',m:''},
+];
+function renderGbpList(){
+  const view=document.getElementById('view');
+  const row=g=>`<div class="gbp-row" data-q="${esc((g.n+' '+g.c+' '+g.p+' '+g.p.replace(/\D/g,'')+' '+g.e+' '+g.u).toLowerCase())}" style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;">
+    <div style="font-weight:700;">${esc(g.n)}</div>
+    <div style="color:var(--mute);font-size:13px;margin-bottom:6px;">${esc(g.c)}</div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:14px;">
+      <span style="color:var(--mute);">Phone</span><a href="tel:+1${g.p.replace(/\D/g,'')}">${esc(g.p)}</a>
+      <span style="color:var(--mute);">Email</span><span style="word-break:break-all;">${esc(g.e)}</span>
+      <span style="color:var(--mute);">Site</span>${g.u?`<a href="${esc(g.u)}" target="_blank" rel="noopener" style="word-break:break-all;">${esc(g.u.replace(/^https:\/\/(www\.)?/,''))}</a>`:'<span>—</span>'}
+      <span style="color:var(--mute);">Google</span>${g.m?`<a href="${esc(g.m)}" target="_blank" rel="noopener">Open listing</a>`:'<span>—</span>'}
+    </div></div>`;
+  view.innerHTML=`<div class="wrap"><button class="btn ghost" id="gbpBack" style="margin-bottom:10px;">‹ Other</button>
+    <h2 style="margin:0 0 10px;">Google listings</h2>
+    <input id="gbpQ" type="search" placeholder="Search" style="width:100%;max-width:520px;margin-bottom:12px;">
+    <div id="gbpRows" style="display:flex;flex-direction:column;gap:10px;max-width:520px;">${GBP_LIST.map(row).join('')}</div></div>`;
+  document.getElementById('gbpBack').onclick=()=>renderOther();
+  document.getElementById('gbpQ').oninput=e=>{ const q=e.target.value.toLowerCase().trim(); view.querySelectorAll('.gbp-row').forEach(r=>{ r.style.display=!q||q.split(/\s+/).every(w=>r.dataset.q.includes(w))?'':'none'; }); };
+}
+
 // ── "Other" tab: a home for occasional tools (currently Disputes) ────────────
 async function renderOther(){
   const view=document.getElementById('view');
@@ -12379,6 +12411,10 @@ async function renderOther(){
       ${role==='owner'?`<div id="otherDomains" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🌐 Domain watch</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Paste domains you want. Checked once a day. You get a text, an email, and a banner here the moment one can be bought.</div></div>
         <div style="display:flex;align-items:center;gap:8px;"><span id="otherDomainCount" style="color:var(--amber);font-weight:700;font-size:13px;"></span><span style="color:var(--mute);font-size:20px;">›</span></div>
+      </div>`:''}
+      ${role==='owner'?`<div id="otherGbp" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div><div style="font-weight:700;">📍 Google listings</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Every listing: phone, email, site, city.</div></div>
+        <span style="color:var(--mute);font-size:20px;">›</span>
       </div>`:''}
       <div id="otherDisputes" style="cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
         <div><div style="font-weight:700;">🛡️ Disputes</div><div style="color:var(--mute);font-size:13px;margin-top:2px;">Respond to card chargebacks using the signed authorization on file.</div></div>
@@ -12417,6 +12453,7 @@ async function renderOther(){
   document.getElementById('otherWidgetPricing').onclick=()=>renderWidgetPricing();
   document.getElementById('otherTravelFees').onclick=()=>renderTravelFees();
   document.getElementById('otherCoupons').onclick=()=>renderCoupons();
+  const gbpEl=document.getElementById('otherGbp'); if(gbpEl) gbpEl.onclick=()=>renderGbpList();
   document.getElementById('otherMultiTvDiscount').onclick=()=>renderMultiTvDiscount();
   // Best-effort counts for the two cards that can need attention. The sidebar
   // "Other" badge shows the COMBINED total, so an unread schedule change is
