@@ -1080,6 +1080,14 @@
   .msg-row:hover{background:var(--bg);}
   .msg-row.sel{background:var(--accent-soft);}
   .msg-row-main{flex:1;min-width:0;}
+  /* Unread (owner 2026-10-04): raised blue card, bold text, number on the avatar. */
+  .msg-row.unr{background:#e8f2ff !important;box-shadow:inset 5px 0 0 #0B84FF,0 4px 10px rgba(11,132,255,.22);border-radius:10px;margin:3px 6px;position:relative;z-index:1;}
+  .msg-row.unr .msg-row-top strong{font-weight:900;color:#0b1220;}
+  .msg-row.unr .msg-prev{color:#111827;font-weight:700;}
+  .msg-row.unr .msg-row-time{color:#0B84FF;font-weight:800;}
+  .msg-row.unr::after{display:none !important;}
+  .msg-unread-n{position:absolute;left:48px;top:6px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#0B84FF;color:#fff;font-size:11.5px;font-weight:800;line-height:19px;text-align:center;border:2px solid #fff;box-sizing:content-box;z-index:2;}
+  .msg-rail-cnt.unread{color:#0B84FF !important;font-weight:800;}
   .msg-row-top{display:flex;align-items:baseline;gap:6px;}
   .msg-row-time{margin-left:auto;font-size:11px;color:var(--mute);white-space:nowrap;}
   /* iPhone Messages look (owner, 2026-09-23): round avatar on the left,
@@ -15847,11 +15855,11 @@ function paintMessages(){
       const preview=(t.last_body||'').slice(0,120);
       const dir='';  // iPhone-style: no "You:" prefix (owner, 2026-09-23)
       const isSel=!!(_msgOpen && _msgOpen.our===t.our_phone && _msgOpen.customer===t.customer_phone);
-      listHtml+='<div class="msg-row'+(isSel?' sel':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
+      listHtml+='<div class="msg-row'+(isSel?' sel':'')+(t.unread?' unr':'')+'" data-msgopen="1" data-msgour="'+esc(t.our_phone)+'" data-msgcust="'+esc(t.customer_phone)+'">'
         +msgAvatar(t)
+        +(t.unread?'<span class="msg-unread-n" title="'+t.unread+' unread">'+(t.unread>9?'9+':t.unread)+'</span>':'')
         +'<div class="msg-row-main">'
         +'<div class="msg-row-top"><strong style="font-size:13.5px;">'+vipPre(t.customer_phone)+esc(who)+vipStar(t.customer_phone)+'</strong>'
-        +(t.unread?'<span class="rc-badge red">'+t.unread+'</span>':'')
         +'<span class="msg-row-time">'+esc(msgWhen(t.last_at))+'</span>'
         +'</div>'
         +'<div class="rc-meta msg-prev" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(dir+preview)+'</div>'
@@ -15886,7 +15894,7 @@ function paintMessages(){
       +'<option value="all"'+(_msgFilter==='all'?' selected':'')+'>All'+(totalUnread?' ('+totalUnread+' new)':'')+'</option>'
       +brands.map(g=>'<option value="'+esc(g.key)+'"'+(_msgFilter===g.key?' selected':'')+'>'+esc(g.name)+(g.unread?' ('+g.unread+' new)':'')+'</option>').join('')
     +'</select></div></div>';
-  if(totalUnread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge red">'+totalUnread+' unread</span></div>';
+  if(totalUnread) html+='<div class="rc-sub" style="margin-bottom:10px;"><span class="rc-badge" style="background:#e8f2ff;color:#0B84FF;font-weight:800;">'+totalUnread+' unread</span></div>';
   html+='<div class="msg-shell'+(_msgOpen?' detail-open':'')+'">'+railHtml+listHtml+'<div class="msg-detail">'+detailInner+'</div></div>';
   html+='</div>';
   view.innerHTML=html;
