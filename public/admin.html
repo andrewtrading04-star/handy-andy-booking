@@ -11738,12 +11738,14 @@ function plReviewHtml(c){
   </div>`}`;
 }
 // Card notes (owner 2026-09-28): a small notes box on every card.
+// A typed note survives the board's auto-refresh until it's saved (owner 2026-10-06).
+const _plNoteDraft={};
 function plNotesHtml(c){
   const ns=Array.isArray(c.notes)?c.notes:[];
   return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
     ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
     <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
-      <textarea id="plNoteIn" rows="1" maxlength="1000" placeholder="Add a note…" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;"></textarea>
+      <textarea id="plNoteIn" data-plkey="${esc(c.key)}" rows="${_plNoteDraft[c.key]?3:1}" placeholder="Add a note…" oninput="_plNoteDraft[this.dataset.plkey]=this.value" style="flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;resize:vertical;">${esc(_plNoteDraft[c.key]||'')}</textarea>
       <button type="button" class="pl-btn" data-pl="note-add">Save</button>
     </div>`;
 }
@@ -11970,7 +11972,7 @@ function plClick(e){
       if(!text){ toast('Write a note first'); return; }
       b.disabled=true;
       api('pipeline',{ method:'POST', body:{ op:'add_note', card_key:c.key, body:text }})
-        .then(()=>{ if(ta) ta.value=''; toast('Note saved'); ta&&ta.blur(); plLoad(true); })
+        .then(()=>{ if(ta) ta.value=''; delete _plNoteDraft[c.key]; toast('Note saved'); ta&&ta.blur(); plLoad(true); })
         .catch(err=>{ toast(err.message||'Could not save'); b.disabled=false; });
       return;
     }

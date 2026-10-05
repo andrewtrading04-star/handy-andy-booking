@@ -1285,7 +1285,7 @@ export async function pipelineHandler(req, res, db, auth, body) {
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (body && body.op === 'add_note') {
-    const key = String(body.card_key || ''), text = String(body.body || '').trim().slice(0, 1000);
+    const key = String(body.card_key || ''), text = String(body.body || '').trim().slice(0, 10000);
     if (!/^c_[0-9a-f-]{36}$/i.test(key) || !text) return res.status(400).json({ error: 'Write a note first.' });
     // Secretaries may add notes to every card they can see, including Joey's other brands.
     const act = pipelineSlugsFor(auth);
