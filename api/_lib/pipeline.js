@@ -189,7 +189,7 @@ export function makeContext(raw) {
   const lines = new Map();
   for (const l of raw.tracking || []) {
     const p = phone10(l.phone); if (!p) continue;
-    lines.set(p, { phone: p, slug: l.business_slug || null, name: l.display_name || null, active: l.active !== false });
+    lines.set(p, { phone: p, slug: l.business_slug || null, name: l.display_name || null, market: l.market || null, active: l.active !== false });
   }
   // Who a handset belongs to: staff_users plus Heather's old phone.
   const handsetName = new Map(), handsetsOf = new Map();
@@ -1011,6 +1011,7 @@ function shapeCard(c, ctx, { nowMs, isOwner, mark, history, audits }) {
     family: c.family,
     source: sourceLabel(c.opener, ctx),
     our_phone: cardLine(c, ctx),
+    city: (ctx.lines.get(cardLine(c, ctx)) || {}).market || null,   // for the local-time line (owner 2026-10-06)
     secretary,
     amount: amount != null ? cents(amount) : null,
     opened_at: iso(c.openedMs),
@@ -1218,7 +1219,7 @@ export async function loadPipelineRaw(db, { nowMs = Date.now(), withAudits = fal
     fetchAll('staff_users', () => db.from('staff_users').select('name, phone, active').order('id')),
     fetchAll('silent_numbers', () => db.from('silent_numbers').select('phone').order('id')),
     fetchAll('blocked_numbers', () => db.from('blocked_numbers').select('phone').order('id')),
-    fetchAll('tracking_numbers', () => db.from('tracking_numbers').select('phone, business_slug, display_name, active, forward_to, created_at').order('phone')),
+    fetchAll('tracking_numbers', () => db.from('tracking_numbers').select('phone, business_slug, display_name, market, active, forward_to, created_at').order('phone')),
     fetchAll('businesses', () => db.from('businesses').select('id, slug, name').order('slug')),
     withAudits
       ? fetchAll('call_audits', () => db.from('call_audits').select(AUDIT_COLS).gte('occurred_at', iso(sinceMs - 3 * HOUR)).order('occurred_at').order('id'))

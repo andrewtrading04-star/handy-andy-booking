@@ -11511,6 +11511,9 @@ function plOwes(c){
   }
   return promiseAt!=null&&Date.now()-promiseAt>36e5;
 }
+// Local time where the customer is (owner 2026-10-06): "Time in Houston 1:38 PM".
+const PL_CITY_TZ={ 'Denver':'America/Denver','Golden':'America/Denver','Colorado Springs':'America/Denver','Houston':'America/Chicago','Austin':'America/Chicago','Dallas':'America/Chicago','Fort Worth':'America/Chicago','Arlington':'America/Chicago','Oklahoma City':'America/Chicago','Tulsa':'America/Chicago','San Antonio':'America/Chicago','Los Angeles':'America/Los_Angeles','Phoenix':'America/Phoenix' };
+function plCityTime(city){ const z=PL_CITY_TZ[city]; if(!z) return ''; try{ return 'Time in '+city+' '+new Date().toLocaleTimeString('en-US',{timeZone:z,hour:'numeric',minute:'2-digit'}); }catch(_){ return ''; } }
 function plCardHtml(c){
   const open=_plOpen===c.key, next=c.next||{}, tone=PL_TONES.includes(next.tone)?next.tone:'mute';
   const returning=!!(c.history && Number(c.history.prior_jobs)>0);
@@ -11522,6 +11525,7 @@ function plCardHtml(c){
   ].filter(Boolean).join(' · ');
   return `<div class="pl-card${c.leak?' leak':''}${plOwes(c)?' owes':''}${open?' open':''}" data-plkey="${esc(c.key)}">
     <button type="button" class="pl-row" data-pl="toggle" aria-expanded="${open}">
+      ${plCityTime(c.city)?`<span class="pl-meta" style="font-weight:700;">${esc(plCityTime(c.city))}</span>`:''}
       ${_plWhyUnseen.has(c.key)?'<span class="pl-chip" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">New note from Andrew</span>':''}
       <span class="pl-row-top"><span class="pl-name">${vipPre(c.phone)+esc(plTitle(c))}${vipStar(c.phone)}</span>${c.source?`<span class="pl-chip">${esc(c.source)}</span>`:''}${returning?'<span class="pl-chip ret">Returning</span>':''}${amt?`<span class="pl-amt">${amt}</span>`:''}</span>
       ${next.text?`<span class="pl-next ${tone}">${tone==='danger'?PL_ALERT:''}<span>${esc(next.text)}</span></span>`:''}
