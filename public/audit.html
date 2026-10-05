@@ -403,6 +403,30 @@
   .tkt-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line2);font-size:13.5px;}
   .tkt-row:first-of-type{border-top:none;}
 /* QA Dashboard (2026-10-05) */
+  .ca-h1{font-size:22px;margin:0;}
+  .ca-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+  .ca-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px;}
+  @media (max-width:860px){.ca-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  .ca-tbl tbody tr{cursor:pointer;} .ca-tbl tbody tr:hover{background:var(--line2);}
+  .ca-act{white-space:nowrap;} .ca-act .actbtn{margin-left:4px;padding:4px 8px;}
+  .actbtn[disabled]{opacity:.35;cursor:not-allowed;}
+  .actbtn.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .ca-empty{text-align:center;padding:28px !important;}
+  .ca-skel td i{display:block;height:14px;border-radius:6px;background:linear-gradient(90deg,var(--line2),var(--line),var(--line2));background-size:200% 100%;animation:caSk 1.2s infinite linear;}
+  @keyframes caSk{from{background-position:200% 0}to{background-position:-200% 0}}
+  .ca-pager{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .ca-pg{display:flex;gap:4px;align-items:center;flex-wrap:wrap;}
+  .ca-menu{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(20,26,34,.15);padding:4px;display:flex;flex-direction:column;min-width:150px;}
+  .ca-menu button{border:0;background:none;text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;font:inherit;}
+  .ca-menu button:hover{background:var(--line2);}
+  #caDrawer{position:fixed;inset:0;z-index:55;background:rgba(20,26,34,.35);}
+  .ca-dr{position:absolute;top:0;right:0;bottom:0;width:440px;max-width:100%;background:#fff;box-shadow:-8px 0 24px rgba(20,26,34,.15);display:flex;flex-direction:column;padding:16px;box-sizing:border-box;}
+  @media (max-width:600px){.ca-dr{width:100%;}}
+  .ca-tabs{margin:10px 0;} .ca-body{flex:1;overflow:auto;}
+  .ca-body h3{font-size:12px;margin:12px 0 4px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;}
+  .ca-dl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;margin:0;font-size:14px;} .ca-dl dt{color:var(--mute);} .ca-dl dd{margin:0;word-break:break-word;}
+  .ca-foot{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:10px;}
+  .ca-flag input,.ca-flag textarea,#caNote{width:100%;box-sizing:border-box;}
   .db-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
   .db-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px;}
   @media (max-width:1100px){.db-kpis{grid-template-columns:repeat(3,minmax(0,1fr));}}
@@ -463,7 +487,7 @@
     <nav class="sidenav" id="sidenav" aria-label="Pages">
       <button type="button" data-nav="dashboard"><span class="nav-ic">📊</span>Dashboard</button>
       <button type="button" data-nav="audit"><span class="nav-ic">📝</span>Audit</button>
-      <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Calls<span class="nav-n" id="navCallsN" hidden></span></button>
+      <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Call Activity<span class="nav-n" id="navCallsN" hidden></span></button>
       <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
       <button type="button" data-nav="messages"><span class="nav-ic">💬</span>Messages</button>
       <button type="button" data-nav="notes"><span class="nav-ic">📌</span>Notes</button>
@@ -564,6 +588,38 @@
 
     <!-- ══════════ Page: Calls (every call, every business, every line) ══════════ -->
     <section class="page" data-page="calls" id="pageCalls">
+      <div id="caWrap">
+        <div class="db-top">
+          <div><h1 class="ca-h1">Call Activity</h1><div class="sub">Find a call, listen, audit, flag or add a note.</div></div>
+          <button type="button" class="btn ghost sm" id="caOffice">Office view</button>
+        </div>
+        <div class="db-top">
+          <input id="caQ" class="db-search" type="search" placeholder="Search by phone number, caller name, or agent">
+          <div class="seg" id="caRange">
+            <button type="button" data-r="today" class="on">Today</button><button type="button" data-r="yesterday">Yesterday</button><button type="button" data-r="tw">This Week</button><button type="button" data-r="lw">Last Week</button><button type="button" data-r="tm">This Month</button><button type="button" data-r="custom">Custom</button>
+          </div>
+        </div>
+        <div class="row hidden" id="caCustom" style="margin-bottom:12px;">
+          <input type="date" id="caFrom"> <span class="sub">to</span> <input type="date" id="caTo">
+          <button type="button" class="btn ghost" id="caApply">Apply</button>
+        </div>
+        <div class="ca-filters">
+          <select id="caAgent"><option value="">All agents</option></select>
+          <select id="caType"><option value="">All call types</option></select>
+          <select id="caStatus"><option value="">All statuses</option><option value="answered">Answered</option><option value="missed">Missed</option><option value="voicemail">Voicemail</option></select>
+          <select id="caDur"><option value="">Any duration</option><option value="0-120">Under 2 min</option><option value="120-300">2&ndash;5 min</option><option value="300-600">5&ndash;10 min</option><option value="600-">Over 10 min</option></select>
+          <select id="caFlag"><option value="">QA flag: all</option><option value="y">Flagged</option><option value="n">Not flagged</option></select>
+        </div>
+        <div class="err" id="caErr"></div>
+        <div class="ca-kpis" id="caKpis"></div>
+        <div class="card">
+          <h2>Call Activity</h2>
+          <div class="tblwrap"><table class="logs ca-tbl"><thead><tr><th>Date &amp; time</th><th>Caller</th><th>Agent</th><th>Call type</th><th>Status</th><th>Duration</th><th>QA flag</th><th></th></tr></thead><tbody id="caRows"></tbody></table></div>
+          <div class="ca-pager" id="caPager"></div>
+        </div>
+      </div>
+      <div id="caEmbed" class="hidden"><button type="button" class="btn ghost sm" id="caBack" style="margin-bottom:8px;">&lsaquo; Call Activity</button><div id="caEmbedBox"></div></div>
+      <div hidden>
       <div class="card">
         <div class="cf-row">
           <div class="seg" id="cfRange">
@@ -579,6 +635,7 @@
         </div>
         <div class="cstat" id="cfStats"></div>
         <div id="callsList"><div class="sub">Loading calls…</div></div>
+      </div>
       </div>
     </section>
 
@@ -1768,7 +1825,7 @@ async function enter(){
 // Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
 let page='audit';
 function embedOwnerScreen(which, callId){
-  const sec=$(which==='calls'?'pageCalls':'pageMessages'); if(!sec) return;
+  const sec=$(which==='calls'?'caEmbedBox':'pageMessages'); if(!sec) return;
   const src='/admin.html?embed=auditor&view='+which+(callId?'&call='+encodeURIComponent(callId):'');
   const cur=sec.querySelector('iframe[data-embed]');
   if(cur && !callId) return;
@@ -1776,12 +1833,12 @@ function embedOwnerScreen(which, callId){
 }
 function showPage(p){
   page=p;
-  document.body.classList.toggle('embed-on', p==='calls'||p==='messages');
+  document.body.classList.toggle('embed-on', p==='messages');
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
   // Owner 2026-09-28: Calls and Messages are the owner's own screens, read-only.
-  if(p==='calls') embedOwnerScreen('calls');
+  if(p==='calls') caShow();
   if(p==='messages') embedOwnerScreen('messages');
   if(p==='notes') loadNotesSent();
   if(p==='dashboard') loadDash();
@@ -2278,7 +2335,7 @@ $('startQueue').onclick=async()=>{
   let ov=$('qOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='qOverlay'; document.body.appendChild(ov); }
   qShow();
 };
-function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount(); if(qDone) load(); }
+function qClose(){ const ov=$('qOverlay'); if(ov) ov.remove(); refreshQueueCount(); if(qDone) load(); if(page==='calls') caLoad(); }
 // Every forwarded call is stored as handled_by "Answered"; the person is the
 // staff member it was forwarded to.
 function qWho(r){ const h=r.handled_by; return (h&&h!=='Answered'&&h!=='Booked')?h:(r.routed_to_name||h||''); }
@@ -2748,8 +2805,272 @@ async function dbSearch(){
 $('dbQ').oninput=()=>{ clearTimeout(dbSearchT); dbSearchT=setTimeout(dbSearch,350); };
 $('dbSearchOut').addEventListener('click',e=>{
   const v=e.target.closest('[data-dbview]'); if(v) return openView(v.dataset.dbview);
-  const c=e.target.closest('[data-dbcall]'); if(c){ showPage('calls'); embedOwnerScreen('calls', c.dataset.dbcall); }
+  const c=e.target.closest('[data-dbcall]'); if(c){ showPage('calls'); caOpenById(c.dataset.dbcall); }
 });
+
+// ── Call Activity (Jiyah's request, owner-approved 2026-10-05) ──────────────
+// Real data only: calls from the existing 'calls' action (staffed markets, same
+// as her queue), audits from 'audit_dashboard' joined on call_id. Flags and
+// notes are saved on the call's EXISTING audit through audit_save -- no new
+// storage. A call with no audit gets "Start audit" (the guided queue, this
+// call only), never a blank audit row.
+let caRange='today', caRows=[], caAud={}, caReq=0, caPage=1, caOpen=null, caLoaded=false;
+const CA_PER=25;
+const caDig=p=>String(p||'').replace(/\D/g,'').slice(-10);
+function caDates(){
+  const t=ctDateStr(new Date()), mon=dbAddDays(t,-((new Date(t+'T12:00:00Z').getUTCDay()+6)%7));
+  switch(caRange){
+    case 'yesterday': { const y=dbAddDays(t,-1); return [y,y]; }
+    case 'tw': return [mon,t];
+    case 'lw': return [dbAddDays(mon,-7),dbAddDays(mon,-1)];
+    case 'tm': return [t.slice(0,8)+'01',t];
+    case 'custom': { const a=$('caFrom').value, b=$('caTo').value; if(a&&b) return a<=b?[a,b]:[b,a]; return [t,t]; }
+    default: return [t,t];
+  }
+}
+function caStatus(r){ if(r.kind==='live'||r.answered===true) return 'answered'; if(r.left_voicemail) return 'voicemail'; if(r.answered===false) return 'missed'; return ''; }
+const CA_ST={answered:['Answered','good'],missed:['Missed','bad'],voicemail:['Voicemail','warn']};
+function caAgent(r){ const w=qWho(r); return DB_HIDE.has(String(w).toLowerCase())||w==='Answered'||w==='Booked'?'':w; }
+function caName(r){ const a=caAud[r.id]; return (r.customer&&r.customer.name)||(a&&a.caller_name)||''; }
+function caDurTxt(s){ s=Number(s)||0; if(!s) return '&mdash;'; return pad(Math.floor(s/60))+':'+pad(s%60); }
+function caShow(){
+  $('caWrap').classList.remove('hidden'); $('caEmbed').classList.add('hidden');
+  document.body.classList.remove('embed-on');
+  if(!caLoaded) caLoad();
+}
+async function caLoad(){
+  const req=++caReq; $('caErr').textContent='';
+  const [d1,d2]=caDates(), from=dbStartISO(d1), to=dbStartISO(dbAddDays(d2,1));
+  $('caRows').innerHTML=Array.from({length:6},()=>'<tr class="ca-skel"><td colspan="8"><i></i></td></tr>').join('');
+  $('caKpis').innerHTML=''; $('caPager').innerHTML='';
+  try{
+    // The calls action caps at 200 rows; walk back page by page for long ranges.
+    const seen=new Map(); let cur=to;
+    for(let i=0;i<15;i++){
+      const d=await crm('calls',{limit:200, from, to:cur});
+      const got=[...(d.open||[]),...(d.handled||[])];
+      got.forEach(r=>seen.set(r.id,r));
+      if(got.length<200) break;
+      const oldest=got.reduce((m,r)=>r.occurred_at<m?r.occurred_at:m,got[0].occurred_at);
+      if(oldest>=cur) break; cur=oldest;
+    }
+    const au=await crm('audit_dashboard',{from,to,d1:dbAddDays(d1,-1),d2:dbAddDays(d2,1)});
+    if(req!==caReq) return;
+    caAud={};
+    (au.audits||[]).forEach(a=>{ dbAuditById[a.id]=a; if(a.call_id && !caAud[a.call_id]) caAud[a.call_id]=a; });
+    caRows=[...seen.values()].filter(r=>STAFFED_MARKETS.has(r.market)).sort((a,b)=>a.occurred_at<b.occurred_at?1:-1);
+    caLoaded=true; caPage=1; caFill(); caRender();
+    if(caOpen){ const r=caRows.find(x=>x.id===caOpen.r.id); if(r) caDrawer(r,caOpen.tab); }
+  }catch(e){ if(req===caReq){ $('caErr').textContent=e.message; $('caRows').innerHTML=''; } }
+}
+function caFill(){
+  const keep=(sel,vals,label)=>{ const cur=sel.value, opts=[...new Set(vals.filter(Boolean))].sort();
+    sel.innerHTML='<option value="">'+label+'</option>'+opts.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
+    sel.value=opts.includes(cur)?cur:''; };
+  keep($('caAgent'),caRows.map(caAgent),'All agents');
+  keep($('caType'),caRows.map(r=>r.service),'All call types');
+  const st=new Set(caRows.map(caStatus));
+  [...$('caStatus').options].forEach(o=>{ if(o.value) o.hidden=!st.has(o.value); });
+}
+function caFiltered(){
+  const q=$('caQ').value.trim().toLowerCase(), qd=q.replace(/\D/g,'');
+  const ag=$('caAgent').value, ty=$('caType').value, st=$('caStatus').value, du=$('caDur').value, fl=$('caFlag').value;
+  return caRows.filter(r=>{
+    const a=caAud[r.id];
+    if(ag && caAgent(r)!==ag) return false;
+    if(ty && r.service!==ty) return false;
+    if(st && caStatus(r)!==st) return false;
+    if(du){ const [lo,hi]=du.split('-'), s=Number(r.duration_sec)||0; if(s<Number(lo)||(hi&&s>=Number(hi))) return false; }
+    if(fl==='y' && !(a&&a.flagged)) return false;
+    if(fl==='n' && a&&a.flagged) return false;
+    if(q){
+      const hay=[caName(r),r.caller_display,caAgent(r),r.id,r.service,(CA_ST[caStatus(r)]||[''])[0]].join(' ').toLowerCase();
+      if(!hay.includes(q) && !(qd.length>=3 && caDig(r.caller_phone).includes(qd))) return false;
+    }
+    return true;
+  });
+}
+function caRender(){
+  const rows=caFiltered(), n=rows.length;
+  const pct=v=>n?Math.round(100*v/n)+'%':'';
+  const cnt=k=>rows.filter(r=>caStatus(r)===k).length;
+  const fl=rows.filter(r=>caAud[r.id]&&caAud[r.id].flagged).length;
+  const k=(cls,l,v,p)=>'<div class="db-k '+cls+'"><div class="t-l">'+l+'</div><div class="t-v">'+v+'</div>'+(p?'<div class="db-chg">'+p+'</div>':'')+'</div>';
+  const vm=cnt('voicemail');
+  $('caKpis').innerHTML=k('hero','Total calls',n.toLocaleString())+k('','Answered',cnt('answered'),pct(cnt('answered')))+
+    k('','Missed',cnt('missed'),pct(cnt('missed')))+(caRows.some(r=>caStatus(r)==='voicemail')?k('','Voicemail',vm,pct(vm)):'')+
+    k(fl?'crit':'','Flagged',fl,pct(fl));
+  const pages=Math.max(1,Math.ceil(n/CA_PER)); if(caPage>pages) caPage=pages;
+  const slice=rows.slice((caPage-1)*CA_PER,caPage*CA_PER);
+  $('caRows').innerHTML=slice.length?slice.map(r=>{
+    const a=caAud[r.id], st=CA_ST[caStatus(r)], nm=caName(r);
+    const when=new Date(r.occurred_at).toLocaleString('en-US',{timeZone:CT,month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    const flag=a&&a.flagged?'<span class="flagpill" title="'+esc(a.listen_reason||'Flagged')+'">&#128681; Flagged</span>':'<span class="sub">'+(a?'No':'&mdash;')+'</span>';
+    return '<tr data-ca="'+esc(r.id)+'"><td class="num">'+esc(when)+'</td>'+
+      '<td><b>'+esc(nm||'Unknown caller')+'</b><div class="sub">'+esc(r.caller_pretty||prettyPhone(r.caller_phone))+'</div></td>'+
+      '<td>'+esc(caAgent(r)||'')+'</td><td>'+(r.service?'<span class="pill">'+esc(r.service)+'</span>':'')+'</td>'+
+      '<td>'+(st?'<span class="pill '+st[1]+'">'+st[0]+'</span>':'')+'</td><td class="num">'+caDurTxt(r.duration_sec)+'</td><td>'+flag+'</td>'+
+      '<td class="ca-act"><button type="button" class="actbtn" data-caplay title="Play"'+(r.recording_url?'':' disabled')+'>&#9654;</button>'+
+      '<button type="button" class="actbtn" data-caview title="View">&#128065;</button>'+
+      '<button type="button" class="actbtn" data-camore title="More">&#8943;</button></td></tr>';
+  }).join(''):'<tr><td colspan="8" class="ca-empty"><b>No calls found</b><div class="sub">Try other filters or dates.</div></td></tr>';
+  if(n){
+    const from=(caPage-1)*CA_PER+1, to=Math.min(n,caPage*CA_PER);
+    const nums=[]; for(let i=1;i<=pages;i++){ if(i===1||i===pages||Math.abs(i-caPage)<=2) nums.push(i); else if(nums[nums.length-1]!=='gap') nums.push('gap'); }
+    $('caPager').innerHTML='<span class="sub">Showing '+from+'&ndash;'+to+' of '+n.toLocaleString()+'</span><span class="ca-pg">'+
+      '<button type="button" class="actbtn" data-pg="'+(caPage-1)+'"'+(caPage<=1?' disabled':'')+'>&larr; Prev</button>'+
+      nums.map(i=>i==='gap'?'<span class="sub">&hellip;</span>':'<button type="button" class="actbtn'+(i===caPage?' on':'')+'" data-pg="'+i+'">'+i+'</button>').join('')+
+      '<button type="button" class="actbtn" data-pg="'+(caPage+1)+'"'+(caPage>=pages?' disabled':'')+'>Next &rarr;</button></span>';
+  } else $('caPager').innerHTML='';
+}
+function caMenuClose(){ const m=$('caMenu'); if(m) m.remove(); }
+function caMenu(r,btn){
+  caMenuClose();
+  const a=caAud[r.id], items=[['view','View call']];
+  if(a) items.push(['audit','View audit'],['note','Add note'],['flag',a.flagged?'Edit flag':'Flag call']);
+  else if(caStatus(r)==='answered') items.push(['start','Start audit']);
+  const m=document.createElement('div'); m.id='caMenu'; m.className='ca-menu';
+  m.innerHTML=items.map(([k,t])=>'<button type="button" data-m="'+k+'">'+t+'</button>').join('');
+  document.body.appendChild(m);
+  const b=btn.getBoundingClientRect();
+  m.style.top=(b.bottom+window.scrollY+4)+'px'; m.style.left=Math.max(8,b.right+window.scrollX-m.offsetWidth)+'px';
+  m.onclick=e=>{ const x=e.target.closest('[data-m]'); if(!x) return; caMenuClose();
+    const k=x.dataset.m;
+    if(k==='view') caDrawer(r,'details'); else if(k==='audit') caDrawer(r,'audit');
+    else if(k==='note') caDrawer(r,'notes'); else if(k==='flag') caDrawer(r,'audit',true); else caStartAudit(r); };
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('#caMenu')&&!e.target.closest('[data-camore]')) caMenuClose(); });
+function caStartAudit(r){
+  if(caAud[r.id]) return caDrawer(r,'audit');   // never a second audit for one call
+  qList=[r]; qIdx=0; qDone=0; qSkipped=new Set();
+  let ov=$('qOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='qOverlay'; document.body.appendChild(ov); }
+  caClose(); qShow();
+}
+async function caEditAudit(a){
+  caClose();
+  if($('date').value!==a.audit_date){ $('date').value=a.audit_date; await load(); }
+  showPage('audit');
+  const fresh=(data.audits||[]).find(x=>x.id===a.id);
+  if(fresh){ openForm(fresh); $('formCard').scrollIntoView({behavior:'smooth',block:'start'}); }
+}
+// Re-saves the call's existing audit with every field it already has, changing
+// only the flag or the notes. 'ratings' is left out so audit_save keeps the
+// stars and complaint untouched.
+async function caSaveAudit(r,a,patch){
+  const body={
+    id:a.id, from_queue:true, business:(a.business&&a.business.slug)||qSlug(r),
+    date:a.audit_date, grasshopper_number:a.grasshopper_number||caDig(r.grasshopper_number),
+    call_id:a.call_id||r.id, time_local:a.time_local||'', direction:a.direction||'incoming',
+    handled_by:a.handled_by||'', service:a.service||'',
+    caller_phone:a.caller_phone||caDig(r.caller_phone), caller_name:a.caller_name||'', caller_zip:a.caller_zip||'',
+    answers:a.answers||{}, flagged:!!a.flagged, listen_reason:a.listen_reason||'', notes:a.notes||'',
+  };
+  Object.assign(body,patch);
+  await api('audit_save',{method:'POST',body});
+  Object.assign(a,{flagged:body.flagged,listen_reason:body.flagged?body.listen_reason:null,notes:body.notes||null,caller_phone:body.caller_phone});
+  caRender();
+}
+function caClose(){ const d=$('caDrawer'); if(d) d.remove(); caOpen=null; }
+function caDrawer(r,tab,flagForm){
+  caMenuClose();
+  let d=$('caDrawer');
+  if(!d){ d=document.createElement('div'); d.id='caDrawer'; document.body.appendChild(d);
+    d.addEventListener('click',e=>{ if(e.target===d) caClose(); }); }
+  caOpen={r,tab};
+  const a=caAud[r.id], st=CA_ST[caStatus(r)], s=a?scoreOf(a):null, canAudit=caStatus(r)==='answered';
+  const recSrc='/api/admin?action=call_recording&id='+encodeURIComponent(r.id)+'&token='+encodeURIComponent(token);
+  const dl=pairs=>'<dl class="ca-dl">'+pairs.filter(p=>p[1]).map(p=>'<dt>'+p[0]+'</dt><dd>'+p[1]+'</dd>').join('')+'</dl>';
+  const tabs=[['details','Details'],['recording','Recording'],['audit','Audit'],['notes','Notes']];
+  let body='';
+  if(tab==='details'){
+    body='<h3>Caller</h3>'+dl([['Name',esc(caName(r)||'Unknown')],['Phone',esc(r.caller_pretty||prettyPhone(r.caller_phone))],['ZIP',a&&a.caller_zip?esc(a.caller_zip):'']])+
+      '<h3>Call</h3>'+dl([['Date &amp; time',esc(fmtSentAt(r.occurred_at))+' CT'],['Agent',caAgent(r)?esc(caAgent(r)):''],['Call type',esc(r.service||'')],
+        ['Status',st?'<span class="pill '+st[1]+'">'+st[0]+'</span>':''],['Duration',r.duration_sec?caDurTxt(r.duration_sec):''],['Business',bizLineLabel(r)],
+        ['Follow-up',esc(callFollowUpFull(r))],['Booked',r.booking?esc(fmtSentAt(r.booking.scheduled_at)):''],['Call ID','<span class="sub">'+esc(r.id)+'</span>']])+
+      '<h3>QA</h3>'+dl([['Audit',a?'Done':'Not audited'],['Score',s!=null?scoreHtml(a):''],['Flag',a&&a.flagged?'<span class="flagpill">&#128681; Flagged</span>':'No'],['Reason',a&&a.flagged&&a.listen_reason?esc(a.listen_reason):'']])+
+      callMoreLinks(r);
+  } else if(tab==='recording'){
+    body=r.recording_url?'<audio controls autoplay preload="auto" src="'+recSrc+'" style="width:100%;"></audio>'+
+      (r.transcript?'<h3>Transcript</h3><div class="qw-tx">'+esc(r.transcript)+'</div>':''):'<p class="sub">No recording for this call.</p>';
+  } else if(tab==='audit'){
+    if(!a) body='<p class="sub">No audit yet.</p>';
+    else body=dl([['Date',esc(a.audit_date)+(a.time_local?' '+esc(centralTime(a)):'')],['Agent',esc(a.handled_by||'')],['Score',s!=null?scoreHtml(a):''],
+        ['Flag',a.flagged?'<span class="flagpill">&#128681; Flagged</span>'+(a.listen_reason?' '+esc(a.listen_reason):''):'No'],
+        ['Complaint',esc(a.complaint||'')],['Andrew',esc(a.owner_note||'')]])+
+      '<div class="row" style="gap:8px;margin:10px 0;"><button type="button" class="btn ghost" data-cx="full">Full audit</button><button type="button" class="btn ghost" data-cx="edit">Edit audit</button></div>'+
+      (flagForm?'<div class="card ca-flag"><h3>&#128681; Flag call</h3>'+
+        '<input type="text" id="caFlagWhy" placeholder="Reason" value="'+esc(a.flagged?(a.listen_reason||''):'')+'">'+
+        '<input type="text" id="caFlagAt" placeholder="Timestamp (e.g. 3:42)" style="margin-top:6px;">'+
+        '<textarea id="caFlagNote" rows="2" placeholder="Note (optional)" style="margin-top:6px;"></textarea>'+
+        '<div class="err" id="caFlagErr"></div><div class="row" style="gap:8px;margin-top:6px;"><button type="button" class="btn" data-cx="flagsave">Save flag</button>'+
+        (a.flagged?'<button type="button" class="btn ghost" data-cx="unflag">Remove flag</button>':'')+'</div></div>':'');
+  } else {
+    body=(r.notes?'<h3>Office note</h3><div class="qw-tx">'+esc(r.notes)+'</div>':'')+
+      (a?'<h3>Audit notes</h3>'+(a.notes?'<div class="qw-tx">'+esc(a.notes)+'</div>':'')+
+        '<textarea id="caNote" rows="3" placeholder="Add a note" style="margin-top:6px;"></textarea><div class="err" id="caNoteErr"></div>'+
+        '<button type="button" class="btn" data-cx="notesave" style="margin-top:6px;">Add note</button>'
+      :(r.notes?'':'<p class="sub">No notes.</p>'));
+  }
+  const foot=[];
+  if(a) foot.push('<button type="button" class="btn" data-cx="viewaudit">View audit</button>','<button type="button" class="btn ghost" data-cx="flag">&#128681; '+(a.flagged?'Edit flag':'Flag call')+'</button>','<button type="button" class="btn ghost" data-cx="note">Add note</button>');
+  else if(canAudit) foot.push('<button type="button" class="btn" data-cx="start">Start audit</button>');
+  d.innerHTML='<div class="ca-dr"><div class="spread"><h2>Call Details</h2><button type="button" class="btn ghost sm" data-cx="close">&#10005;</button></div>'+
+    '<div class="seg ca-tabs">'+tabs.map(([k,t])=>'<button type="button" data-tab="'+k+'"'+(k===tab?' class="on"':'')+'>'+t+'</button>').join('')+'</div>'+
+    '<div class="ca-body">'+body+'</div>'+(foot.length?'<div class="ca-foot">'+foot.join('')+'</div>':'')+'</div>';
+  d.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>caDrawer(r,b.dataset.tab));
+  d.querySelectorAll('[data-ticket]').forEach(b=>b.onclick=()=>openTicket(b.dataset.ticket));
+  d.querySelectorAll('[data-callblock]').forEach(b=>b.onclick=async()=>{ await blockCaller(b.dataset.callblock, b.dataset.callphone, b); if(r.blocked) caDrawer(r,'details'); });
+  d.querySelectorAll('[data-cx]').forEach(b=>b.onclick=async()=>{
+    const k=b.dataset.cx;
+    if(k==='close') return caClose();
+    if(k==='start') return caStartAudit(r);
+    if(k==='full') return openView(a.id);
+    if(k==='edit') return caEditAudit(a);
+    if(k==='viewaudit') return caDrawer(r,'audit');
+    if(k==='flag') return caDrawer(r,'audit',true);
+    if(k==='note') return caDrawer(r,'notes');
+    if(k==='notesave'){
+      const t=$('caNote').value.trim(); if(!t){ $('caNote').focus(); return; }
+      b.disabled=true;
+      const stamp=new Date().toLocaleDateString('en-US',{timeZone:CT,month:'short',day:'numeric'});
+      try{ await caSaveAudit(r,a,{notes:(a.notes?a.notes+'\n':'')+'['+stamp+'] '+t}); caDrawer(r,'notes'); }
+      catch(e){ b.disabled=false; $('caNoteErr').textContent=e.message||'Could not save'; }
+    }
+    if(k==='flagsave'||k==='unflag'){
+      const why=$('caFlagWhy').value.trim(), at=$('caFlagAt').value.trim(), note=$('caFlagNote').value.trim();
+      if(k==='flagsave'&&!why){ $('caFlagErr').textContent='Add a reason.'; $('caFlagWhy').focus(); return; }
+      b.disabled=true;
+      const patch=k==='unflag'?{flagged:false,listen_reason:''}:{flagged:true,listen_reason:why+(at?' (at '+at+')':'')};
+      if(note) patch.notes=(a.notes?a.notes+'\n':'')+note;
+      try{ await caSaveAudit(r,a,patch); caDrawer(r,'audit'); }
+      catch(e){ b.disabled=false; $('caFlagErr').textContent=e.message||'Could not save'; }
+    }
+  });
+}
+async function caOpenById(id){
+  if(!caLoaded) await caLoad();
+  const r=caRows.find(x=>x.id===id); if(r) caDrawer(r,'details');
+}
+$('caRange').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  caRange=b.dataset.r;
+  $('caRange').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  $('caCustom').classList.toggle('hidden',caRange!=='custom');
+  if(caRange!=='custom') caLoad();
+});
+$('caApply').onclick=()=>{ if($('caFrom').value&&$('caTo').value) caLoad(); };
+['caAgent','caType','caStatus','caDur','caFlag'].forEach(id=>$(id).onchange=()=>{ caPage=1; caRender(); });
+$('caQ').oninput=()=>{ caPage=1; caRender(); };
+$('caPager').addEventListener('click',e=>{ const b=e.target.closest('[data-pg]'); if(!b||b.disabled) return; caPage=Number(b.dataset.pg); caRender(); });
+$('caRows').addEventListener('click',e=>{
+  const tr=e.target.closest('[data-ca]'); if(!tr) return;
+  const r=caRows.find(x=>x.id===tr.dataset.ca); if(!r) return;
+  const mb=e.target.closest('[data-camore]'); if(mb){ e.stopPropagation(); return caMenu(r,mb); }
+  if(e.target.closest('[data-caplay]')) return caDrawer(r,'recording');
+  caDrawer(r,'details');
+});
+$('caOffice').onclick=()=>{ $('caWrap').classList.add('hidden'); $('caEmbed').classList.remove('hidden'); document.body.classList.add('embed-on'); embedOwnerScreen('calls'); };
+$('caBack').onclick=caShow;
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&$('caDrawer')) caClose(); });
 </script>
 </body>
 </html>

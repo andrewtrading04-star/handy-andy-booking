@@ -9206,7 +9206,7 @@ const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary'
 // calls in [from,to) (same kinds the Calls tab lists), the graded audits whose
 // audit_date is in [d1,d2], and -- with ?q= -- calls/audits matching a phone,
 // call id, caller name or agent. Never selects prices, pay or payment fields.
-const AUDIT_DASH_COLS = 'id, audit_date, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at';
+const AUDIT_DASH_COLS = 'id, audit_date, call_id, occurred_at, time_local, direction, handled_by, service, caller_name, caller_phone, caller_zip, answers, flagged, notes, ratings, complaint, listen_reason, owner_note, owner_note_at, grasshopper_number, business:businesses ( slug )';
 async function auditDashboard(req, res, db, auth) {
   if (auth.role !== 'owner' && !auth.auditor) return res.status(403).json({ error: 'Not allowed' });
   const isoOk = s => !isNaN(Date.parse(s));
