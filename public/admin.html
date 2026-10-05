@@ -5100,6 +5100,7 @@ function openBooking(b){
       <div id="bkLineItems"></div>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
         <button type="button" class="btn ghost sm" id="bkLiAdd">+ Add line item</button>
+        <button type="button" class="btn ghost sm" id="bkLiGds">+ Redeemed GDS</button>
         <button type="button" class="btn ghost sm" id="bkLiDiscount" style="color:#4ade80;border-color:rgba(74,222,128,.4);">💲 Add discount</button>
         <button type="button" class="btn ghost sm" id="bkSendInvoice" ${b.customer&&b.customer.email?'':'disabled title="No customer email on file"'} style="color:#60a5fa;border-color:rgba(96,165,250,.4);">🧾 Send invoice</button>
       </div>
@@ -5407,7 +5408,7 @@ function tvSizeIndex(name){
     if(v<=32) return 0; if(v<=59) return 1; if(v<=69) return 2; if(v<=84) return 3; if(v<=97) return 4; return 5; }
   return -1;
 }
-function liIsZeroExtra(name,total){ return !(Number(total)||0) && !/^tax\b/i.test(String(name||'').trim()); }
+function liIsZeroExtra(name,total){ return !(Number(total)||0) && !/^tax\b/i.test(String(name||'').trim()) && !/guaranteed\s+dismount/i.test(String(name||'')); }   // a $0 redeemed GDS stays visible: it pays the tech
 function mountLineItemsEditor(b){
   const has=Array.isArray(b.line_items)&&b.line_items.length;
   let hiddenItems=[];   // default "TV Type: Regular TV" lines — kept in the data, hidden from the editor
@@ -5552,6 +5553,8 @@ function mountLineItemsEditor(b){
   // from scratch. It's just a normal line item under the hood — Save persists
   // it exactly like any other — so it shows on the ticket, the total, and any
   // printed/emailed receipt the same way a coupon line already does.
+  // Redeemed GDS: a $0 line with the exact name payroll pays as a redeemed dismount.
+  document.getElementById('bkLiGds').onclick=()=>{ rows.push({ name:'Guaranteed Dismount Service', display:'GDS', unit:0, qty:1, kind:'service' }); render(); recalc(); };
   document.getElementById('bkLiDiscount').onclick=()=>{
     rows.push({ name:'Discount', display:'Discount', unit:-10, qty:1, kind:'coupon' });
     render(); recalc();
