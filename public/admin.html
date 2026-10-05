@@ -9125,8 +9125,9 @@ function launchTodoHtml(notes){
     }
     if(on){ const t=l.replace(/^([-•*]|\d+[.)]|[A-Z][.)])\s*/,''); if(t) out.push(t); }
   }
-  if(!out.length) return '';
-  return `<ul class="launch-todo" style="margin:10px 0 0;padding-left:18px;font-size:12px;line-height:1.45;color:var(--ink-2);">${out.slice(0,10).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`;
+  const todo=out.filter(t=>!/DONE/.test(t));   // finished items drop off the list
+  if(!todo.length) return '';
+  return `<ul class="launch-todo" style="margin:10px 0 0;padding-left:18px;font-size:12px;line-height:1.45;color:var(--ink-2);">${todo.slice(0,10).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`;
 }
 function launchCardHtml(b, items){
   const live=launchIsLive(b, items), s=launchScoreOf(b, items);
