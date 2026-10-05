@@ -106,7 +106,7 @@ function fmtLong(dateStr){
 function renderDays(){
   const row=$('dayRow');
   const avail=days.filter(d=>(d.timeslots||[]).length);
-  if(!avail.length){ row.innerHTML='<div class="empty-slots">No open times in the next 45 days — please call or text us.</div>'; return; }
+  if(!avail.length){ row.innerHTML='<div class="empty-slots">No open times in the next 3 months — please call or text us.</div>'; return; }
   row.innerHTML=avail.map(d=>{
     const f=fmtDay(d.date);
     return `<div class="day${selDay===d.date?' on':''}" data-date="${esc(d.date)}"><div class="dw">${f.dw}</div><div class="dn">${f.dn}</div></div>`;

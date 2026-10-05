@@ -13843,7 +13843,7 @@ async function estimateSlots(req, res) {
     return res.status(200).json({ days: [], timezone: est.business?.timezone || 'America/Denver' });
   }
   try {
-    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, onlyTechId: est.technician_id || null, zip: est.customer_zip });
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 92, serviceAreaId, onlyTechId: est.technician_id || null, zip: est.customer_zip });
     return res.status(200).json({ days: result.days || [], timezone: result.timezone || 'America/Denver' });
   } catch (e) {
     console.warn('[estimate_slots] availability lookup failed:', e.message);
@@ -14033,7 +14033,7 @@ async function rescheduleInfo(req, res, body) {
 
   let days = [];
   try {
-    const result = await publicOpenSlots(db, { businessSlug: slug, days: 45, serviceAreaId, timezone: tz, crossHire: true, zip: b.postal_code });
+    const result = await publicOpenSlots(db, { businessSlug: slug, days: 92, serviceAreaId, timezone: tz, crossHire: true, zip: b.postal_code });
     days = result.days || [];
   } catch (e) { console.warn('[reschedule_info] availability lookup failed:', e.message); }
 
