@@ -11626,13 +11626,30 @@ function plDetailHtml(c){
     const lt=left>=36e5?`${Math.floor(left/36e5)}h ${Math.round(left%36e5/6e4)}m`:`${Math.max(1,Math.round(left/6e4))} min`;
     info.push(['3-hour auto follow-up', e.coupon_at?`Sent ${esc(plWhen(e.coupon_at,c.tz))}`:left>0?`Goes out in ${lt}`:'Not sent']);
   }
+  // Estimate as 4 progress steps (owner 2026-10-06): green = happened,
+  // grey = not yet, red = failed/bounced. Booked is never red.
+  let estSteps='';
+  if(e.id){
+    const G='#22c55e', Y='#cbd5e1', R='#ef4444';
+    const fuLeft=e.sent_at?Date.parse(e.sent_at)+3*36e5-Date.now():null;
+    const st=[
+      ['Sent', e.bounced?R:e.sent_at?G:Y, e.bounced?'Bounced':''],
+      ['Viewed', e.opened?G:Y, ''],
+      ['3-hr follow-up', e.coupon_at?G:(e.sent_at&&fuLeft<=0)?R:Y, (!e.coupon_at&&fuLeft>0)?(fuLeft>=36e5?Math.floor(fuLeft/36e5)+'h':Math.max(1,Math.round(fuLeft/6e4))+'m'):''],
+      ['Booked', (c.booking||e.approved_at)?G:Y, ''],
+    ];
+    estSteps=`<div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#fff;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><b style="font-size:16px;">Estimate ${plMoney(e.total)||''}</b><button type="button" data-pl="estview" style="font:inherit;font-size:13px;font-weight:800;padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111418;cursor:pointer;">${_plEstOpen?'Hide':'Open'}</button></div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;font-size:12px;text-align:center;">${st.map(([l,col,x])=>`<div><div style="height:6px;border-radius:3px;background:${col};margin-bottom:6px;"></div><span style="color:${col===Y?'#94a3b8':col===R?'#b91c1c':'#15803d'};font-weight:700;">${l}${x?' · '+esc(x):''}</span></div>`).join('')}</div>
+    </div>`;
+  }
   const tab=_plTab||'ov', nHist=Array.isArray(c.timeline)?c.timeline.length:0;
   const tabs=`<div class="plt-tabs" role="tablist">${[['ov','Overview'],['hist',`History (${nHist})`],['more','More']].map(([k,l])=>`<button type="button" role="tab" class="${tab===k?'on':''}" data-pl="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join('')}</div>`;
   const body=tab==='hist'
     ? `${role==='owner'&&c.audit?plAuditHtml(c.audit):''}${plTimelineHtml(c)||'<div class="plv-none">No history yet.</div>'}`
     : tab==='more'
     ? `${moreBtns.length?`<div class="pl-acts">${moreBtns.join('')}</div>`:'<div class="plv-none">Nothing else to do here.</div>'}`
-    : `${c.stage==='completed'?plReviewHtml(c):`<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`}
+    : `${c.stage==='completed'?plReviewHtml(c):estSteps||`<div class="plt-info">${info.map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`}
        ${_plEstOpen&&e.id?`<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;">
          <div style="font-weight:800;margin-bottom:6px;">${esc(e.label||'Estimate')}${e.sent_at?` <span style="color:var(--mute);font-weight:600;">· sent ${esc(plWhen(e.sent_at,c.tz))}${e.opened?' · opened':' · not opened'}</span>`:''}</div>
          ${(e.items||[]).map(it=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-top:1px solid var(--line2);"><span>${esc(it.name)}${it.qty>1?' × '+it.qty:''}</span><span>${plMoney(it.qty*it.price)||'$0'}</span></div>`).join('')||'<div style="color:var(--mute);">No line items.</div>'}
