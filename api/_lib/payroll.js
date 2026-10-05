@@ -683,6 +683,7 @@ export function computeJobPay(job, techName) {
   // each on a $240 pool).
   let pay = 0;
   let sawSize = false;
+  let gdsRedeemed = false;
   const businessSlug = String(job.business_slug || '').toLowerCase();
 
   if (special === 'handyman') {
@@ -744,6 +745,7 @@ export function computeJobPay(job, techName) {
         ? (perUnit > 0 ? 0 : gdsRedeemedRate(job.scheduled_at))
         : (perUnit <= 0 ? 0 : (perUnit > 60 ? 60 : 50));
       const amt = unit * qty;
+      if (isGuaranteed && unit > 0) gdsRedeemed = true;
       if (amt) breakdown.push({ label: `${isGuaranteed ? 'Guaranteed Dismount' : 'Dismount'}${qty > 1 ? ` ×${qty}` : ''}`, amount: amt });
       pay += amt;
       continue;
@@ -869,7 +871,8 @@ export function computeJobPay(job, techName) {
   if (!sawSize && !special && (job.line_items || []).some(li => matchSize(li.name))) {
     // (unreachable guard kept for clarity)
   }
-  if (!sawSize && !special && businessSlug !== '' && (job.line_items || []).length) {
+  // A redeemed Guaranteed Dismount is a dismount-only visit: no TV size expected.
+  if (!sawSize && !special && !gdsRedeemed && businessSlug !== '' && (job.line_items || []).length) {
     flags.push('No TV size base detected — owner review');
   }
 
