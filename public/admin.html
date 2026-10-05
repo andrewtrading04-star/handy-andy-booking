@@ -9113,9 +9113,10 @@ function launchHealthHtml(rows, key){
 // line under TO DO / NEXT / WAITING / MISSING, until a DONE or IN PROGRESS line.
 // Each one is a checkbox; checking it deletes that line from the notes.
 function launchTodoHtml(notes, kind, id){
-  const out=[]; let on=false;
+  const out=[]; let on=false; const phones=[];
   for(const raw of String(notes||'').split(/\r?\n/)){
     const l=raw.trim(); if(!l) continue;
+    const ph=l.match(/^PHONE:\s*(.+)$/i); if(ph){ phones.push(ph[1]); continue; }   // a label, not a to-do
     const head=l.match(/^(TO DO|NEXT|WAITING[^:]*|MISSING|IN PROGRESS|DONE[^:]*)\b[^:]*:?\s*(.*)$/i);
     if(head){
       const k=head[1].toUpperCase();
@@ -9127,8 +9128,9 @@ function launchTodoHtml(notes, kind, id){
     if(on){ const t=l.replace(/^([-•*]|\d+[.)]|[A-Z][.)])\s*/,''); if(t) out.push({ raw:l, t }); }
   }
   const todo=out.filter(x=>!/\bDONE\b/.test(x.t));
-  if(!todo.length) return '';
-  return `<div class="launch-todo" style="margin:10px 0 0;display:flex;flex-direction:column;gap:2px;" onclick="event.stopPropagation()">${todo.slice(0,12).map(x=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:1.4;color:var(--ink-2);cursor:pointer;padding:2px 0;"><input type="checkbox" data-launch-todo data-kind="${esc(kind)}" data-id="${esc(id)}" data-raw="${esc(x.raw)}" style="width:15px;height:15px;flex:none;margin-top:1px;">${esc(x.t)}</label>`).join('')}</div>`;
+  const phoneHtml=phones.map(p=>`<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#334155;background:#f1f5f9;border-radius:999px;padding:3px 10px;">\u{1F4DE} ${esc(p)}</div>`).join(' ');
+  if(!todo.length) return phoneHtml;
+  return phoneHtml+`<div class="launch-todo" style="margin:10px 0 0;display:flex;flex-direction:column;gap:2px;" onclick="event.stopPropagation()">${todo.slice(0,12).map(x=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:1.4;color:var(--ink-2);cursor:pointer;padding:2px 0;"><input type="checkbox" data-launch-todo data-kind="${esc(kind)}" data-id="${esc(id)}" data-raw="${esc(x.raw)}" style="width:15px;height:15px;flex:none;margin-top:1px;">${esc(x.t)}</label>`).join('')}</div>`;
 }
 document.addEventListener('change', async e=>{
   const cb=e.target.closest && e.target.closest('[data-launch-todo]'); if(!cb||!cb.checked) return;
