@@ -11641,10 +11641,13 @@ function plStoryHtml(c){
   }
   if(c.booking&&Number(c.booking.price)) prices.push({ label:'Booked', v:Math.round(Number(c.booking.price)), at:c.booking.created_at });
   // Same price twice in a row shows once (owner 2026-09-30).
-  for(let i=prices.length-1;i>0;i--) if(prices[i].v===prices[i-1].v) prices.splice(i,1);
+  // Same price = equal within $2, or one is the other plus sales tax (up to ~10.5%):
+  // a $467 quote and its $506 estimate with 8.25% tax match (owner 2026-10-05).
+  const samePrice=(a,b)=>{ const lo=Math.min(a,b), hi=Math.max(a,b); return hi-lo<=2 || (lo>0 && hi/lo<=1.105 && hi>lo); };
+  for(let i=prices.length-1;i>0;i--) if(samePrice(prices[i].v,prices[i-1].v)) prices.splice(i,1);
   // Paid = customer and staff agreed on the price (owner 2026-09-30): no warning.
   const paid=!!(c.booking&&c.booking.paid_at);
-  const mismatch=!paid&&new Set(prices.map(p=>p.v)).size>1;
+  const mismatch=!paid&&prices.some(p=>prices.some(q=>!samePrice(p.v,q.v)));
   // Layout (owner 2026-09-30, from his mockup): icon circles on a line, each
   // event in its own box, date over time on the right.
   const COL={ phone:['#fde8ec','#e11d48'], missed:['#fde8ec','#e11d48'], callout:['#fde8ec','#e11d48'], text:['#ede9fe','#7c3aed'], auto:['#ede9fe','#7c3aed'],
