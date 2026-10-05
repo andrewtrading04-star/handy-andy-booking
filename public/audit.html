@@ -2576,9 +2576,22 @@ async function loadNotesSent(){
       const replies=reads.filter(r=>r.reply).map(r=>'<div style="margin-top:6px;padding:7px 9px;background:var(--line2);border-radius:8px;font-size:13px;"><b>'+esc(r.reader)+'</b> replied: '+esc(r.reply)+'</div>').join('');
       const photos=(n.photo_urls||[]).map(u=>'<img src="'+esc(notePhotoSrc(u))+'" style="width:52px;height:52px;object-fit:cover;border-radius:8px;margin-top:6px;margin-right:6px;">').join('');
       return '<div class="call"><div class="call-meta" style="margin-bottom:4px;">To '+esc(notesWhoLabel[n.recipient]||n.recipient)+' · '+esc(fmtSentAt(n.created_at))+'</div>'
-        +'<div style="font-size:14px;white-space:pre-wrap;">'+esc(n.body)+'</div>'+photos
+        +'<div style="font-size:14px;white-space:pre-wrap;" data-nbody="'+esc(n.id)+'">'+esc(n.body)+'</div>'+photos
+        +'<div style="display:flex;gap:8px;margin-top:6px;"><button type="button" class="btn ghost" style="width:auto;padding:4px 10px;font-size:12px;" data-nedit="'+esc(n.id)+'">Edit</button><button type="button" class="btn ghost" style="width:auto;padding:4px 10px;font-size:12px;" data-ndel="'+esc(n.id)+'">Delete</button></div>'
         +'<div class="call-meta" style="margin-top:6px;">'+status+'</div>'+replies+'</div>';
     }).join('');
+    const byId=Object.fromEntries(notes.map(n=>[n.id,n]));
+    wrap.querySelectorAll('[data-ndel]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Delete this note?')) return;
+      try{ await crm('auditor_note_delete',{},{ method:'POST', body:{ id:b.dataset.ndel } }); await loadNotesSent(); }catch(e){ alert(e.message||'Could not delete'); }
+    });
+    wrap.querySelectorAll('[data-nedit]').forEach(b=>b.onclick=()=>{
+      const id=b.dataset.nedit, box=wrap.querySelector('[data-nbody="'+id+'"]'); if(!box||box.querySelector('textarea')) return;
+      box.innerHTML='<textarea rows="6" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;"></textarea><button type="button" class="btn" style="width:auto;margin-top:6px;">Save</button>';
+      const ta=box.querySelector('textarea'); ta.value=byId[id].body; ta.focus();
+      box.querySelector('button').onclick=async()=>{ const v=ta.value.trim(); if(!v) return;
+        try{ await crm('auditor_note_edit',{},{ method:'POST', body:{ id, body:v } }); await loadNotesSent(); }catch(e){ alert(e.message||'Could not save'); } };
+    });
   }catch(err){ wrap.className='err'; wrap.textContent=err.message||'Could not load sent notes.'; if(grid){ grid.className='err'; grid.textContent=''; } }
 }
 

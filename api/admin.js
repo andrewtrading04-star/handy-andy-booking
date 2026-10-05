@@ -638,6 +638,8 @@ export default async function handler(req, res) {
       case 'call_ticket':       return await callTicket(req, res, db, auth);
       case 'auditor_note_send': return await auditorNoteSend(req, res, db, auth, body);
       case 'auditor_notes_sent': return await auditorNotesSent(req, res, db, auth);
+      case 'auditor_note_edit':
+      case 'auditor_note_delete': return await auditorNoteChange(req, res, db, auth, body, action);
       case 'email_quota': return await emailQuota(req, res, auth);
       case 'bracket_inventory': return await bracketInventory(req, res, db, auth);
       case 'bracket_purchases': return await bracketPurchases(req, res, db, auth);
@@ -9246,7 +9248,7 @@ async function auditDashboard(req, res, db, auth) {
 // deliberate exception to the GET-only rule below. Not call_unblock: that
 // stays owner-only (callUnblock's own auth.role check), and isn't on this list
 // at all, so her token never even reaches it.
-const AUDITOR_WRITE_ACTIONS = new Set(['call_block', 'auditor_note_send', 'notes_photo', 'notes_read']);
+const AUDITOR_WRITE_ACTIONS = new Set(['call_block', 'auditor_note_send', 'auditor_note_edit', 'auditor_note_delete', 'notes_photo', 'notes_read']);
 // How long a claim ("I am ringing this person now") stays hot. Long enough to
 // cover dialing, a conversation and writing a note; short enough that a claim
 // someone forgot to close does not hide a customer forever. After this the card
@@ -16035,6 +16037,26 @@ async function auditorNoteSend(req, res, db, auth, body) {
   const { data, error } = await db.from('staff_notes').insert(row).select('id').maybeSingle();
   if (error) throw error;
   return res.status(200).json({ ok: true, id: data && data.id });
+}
+
+// POST — Jiyah edits or deletes one of HER OWN notes (owner 2026-10-05).
+// Delete is the same soft delete (deleted_at) the rest of Notes uses.
+async function auditorNoteChange(req, res, db, auth, body, action) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(body.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  let patch;
+  if (action === 'auditor_note_delete') patch = { deleted_at: new Date().toISOString() };
+  else {
+    const text = (body.body || '').toString().trim();
+    if (!text) return res.status(400).json({ error: 'Write something first' });
+    patch = { body: text };
+  }
+  const { data, error } = await db.from('staff_notes').update(patch)
+    .eq('id', id).eq('created_by', auth.name || 'Jiyah').is('deleted_at', null).select('id').maybeSingle();
+  if (error) throw error;
+  if (!data) return res.status(404).json({ error: 'Note not found' });
+  return res.status(200).json({ ok: true });
 }
 
 // GET — Jiyah's own sent history, with per-note read status, for her Notes
