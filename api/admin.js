@@ -2604,7 +2604,7 @@ async function launchTraffic(req, res, db, auth) {
   const marketPath = {};
   for (const m of (markets || [])) { const p = pathOf(m.url); if (p) marketPath[m.slug] = p; }
 
-  const keys = [...new Set([...(businesses || []).map(b => siteKeyOf(b.slug)), ...Object.values(marketPath)])];
+  const keys = [...new Set([...(businesses || []).map(b => siteKeyOf(b.slug)), ...Object.values(marketPath), 'doms-okc', 'doms-tulsa'])];
   const { data: rows, error } = await serviceClientPublic()
     .rpc('launch_daily_traffic', { p_days: DAYS }).in('key', keys).limit(5000);
   if (error) throw error;
@@ -2626,8 +2626,13 @@ async function launchTraffic(req, res, db, auth) {
     // Dom's reports to web_events_doms, which the SQL function returns as site 'doms'.
     series[b.slug] = (b.slug === 'handy-andy') ? null : (bucket[`site:${siteKeyOf(b.slug)}`] || zero());
   }
+  // Dom's cities come back from SQL as their own site keys (migration 0174):
+  // okc-doms -> 'doms-okc', tulsa-doms -> 'doms-tulsa'. Dom's own card ('doms')
+  // is the home page + Denver pages only.
   for (const m of (markets || [])) {
-    marketSeries[m.slug] = marketPath[m.slug] ? (bucket[`path:${marketPath[m.slug]}`] || zero()) : null;
+    const domsKey = /-doms$/.test(m.slug) ? 'doms-' + m.slug.replace(/-doms$/, '') : null;
+    marketSeries[m.slug] = domsKey ? (bucket[`site:${domsKey}`] || zero())
+      : marketPath[m.slug] ? (bucket[`path:${marketPath[m.slug]}`] || zero()) : null;
   }
   return res.status(200).json({ days, series, marketSeries });
 }
