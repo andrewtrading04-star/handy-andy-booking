@@ -2832,7 +2832,7 @@ function caStatus(r){ if(r.kind==='live'||r.answered===true) return 'answered'; 
 const CA_ST={answered:['Answered','good'],missed:['Missed','bad'],voicemail:['Voicemail','warn']};
 function caAgent(r){ const w=qWho(r); return DB_HIDE.has(String(w).toLowerCase())||w==='Answered'||w==='Booked'?'':w; }
 function caName(r){ const a=caAud[r.id]; return (r.customer&&r.customer.name)||(a&&a.caller_name)||''; }
-function caDurTxt(s){ s=Number(s)||0; if(!s) return '&mdash;'; return pad(Math.floor(s/60))+':'+pad(s%60); }
+function caDurTxt(s){ s=Number(s)||0; if(!s) return '&mdash;'; const p2=n=>(n<10?'0':'')+n; return p2(Math.floor(s/60))+':'+p2(s%60); }
 function caShow(){
   $('caWrap').classList.remove('hidden'); $('caEmbed').classList.add('hidden');
   document.body.classList.remove('embed-on');
