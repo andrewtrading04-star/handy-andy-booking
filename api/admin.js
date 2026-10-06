@@ -636,8 +636,7 @@ export default async function handler(req, res) {
       case 'my_day': return await myDay(req, res, db, auth, body);
       case 'ask_andrew': return await askHandler(req, res, db, auth, body);
       case 'transcribe_recent': return await transcribeRecent(req, res, db, auth);
-      // Owner + secretaries only: pipelineHandler refuses role 'auditor', and
-      // 'pipeline' must never be added to AUDITOR_ADMIN_ACTIONS.
+      // Auditor: GET board only, view only -- pipelineHandler enforces (owner 2026-10-07).
       case 'pipeline': return await pipelineHandler(req, res, db, auth, body);
       case 'estimate_bulk_close': return await estimateBulkClose(req, res, db, auth, body);
       case 'estimate_decline':  return await estimateDecline(req, res, db, auth, body);
@@ -9269,7 +9268,7 @@ async function notificationResend(req, res, db, auth, body) {
 const CALL_OPEN_STATUSES = ['new', 'calling', 'called_back'];
 // What the call auditor's token may read through this API (see the gate in
 // handler()). All GET, all about calls. Add here to widen her portal.
-const AUDITOR_ADMIN_ACTIONS = new Set(['calls', 'call_recording', 'call_summary', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo',
+const AUDITOR_ADMIN_ACTIONS = new Set(['pipeline' /* view only (owner 2026-10-07) */, 'calls', 'call_recording', 'call_summary', 'call_analytics', 'call_numbers', 'call_day_detail', 'call_ticket', 'auditor_notes_sent', 'note_photo',
   // Read-only text threads (owner rule 2026-09-23: "add the messages tab to
   // jiyahs portal"). Deliberately NOT messages_send/messages_block/
   // messages_read -- she reads what was said, the office still owns replying

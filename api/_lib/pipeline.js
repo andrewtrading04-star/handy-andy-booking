@@ -40,10 +40,11 @@ import { allowedSlugsFor, mayUseBusiness, SECRETARY_EXTRA_BUSINESSES } from './s
 // Pipeline = own business + its family only, never access-only brands
 // (owner 2026-09-30: Dom's staff see Dom's family, not Handy Andy).
 // Every write and dial (card ops, notes, the Call button) uses this list.
-const pipelineWriteSlugsFor = (auth) => { const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
+// Jiyah (auditor) acts on nothing: every card view_only (owner 2026-10-07).
+const pipelineWriteSlugsFor = (auth) => { if (auth && auth.role === 'auditor') return []; const a = allowedSlugsFor(auth); return a === null ? null : [auth.scope, ...(SECRETARY_EXTRA_BUSINESSES[auth.scope] || [])].filter(Boolean); };
 // Joey sees every brand's Pipeline (owner 2026-10-03) -- read only outside
 // her family, like her all-jobs view (admin.js resolveBusiness).
-const pipelineSlugsFor = (auth) => ((auth && auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey') ? null : pipelineWriteSlugsFor(auth));
+const pipelineSlugsFor = (auth) => ((auth && ((auth.role === 'secretary' && auth.scope === 'doms' && auth.name === 'Joey') || auth.role === 'auditor')) ? null : pipelineWriteSlugsFor(auth));
 import { localDayStartUTC } from './time.js';
 
 export const PIPELINE_FLOOR = '2026-09-22T15:00:00Z';
@@ -1255,8 +1256,12 @@ export async function loadHistory(db, phones) {
 const OPS = new Set(['mark_lost', 'not_a_lead', 'reopen', 'no_talk', 'talk', 'log_attempt', 'attempt_outcome', 'set_stage']);
 
 export async function pipelineHandler(req, res, db, auth, body) {
-  // The auditor never reaches CRM customer data (api/audit.js header).
-  if (!auth || auth.role === 'auditor' || auth.auditor) return res.status(403).json({ error: 'Not available for this login' });
+  if (!auth) return res.status(403).json({ error: 'Not available for this login' });
+  // Jiyah (auditor): the plain board GET only, view only (owner 2026-10-07).
+  // No writes, no Ask why answers, no owner lists.
+  if (auth.role === 'auditor' || auth.auditor) {
+    if (req.method !== 'GET' || req.query.why_unseen || req.query.why_for || req.query.marked) return res.status(403).json({ error: 'Not available for this login' });
+  }
   // The owner's "Ask why" notes waiting for this secretary (cheap: polled for the nav badge).
   if (req.method === 'GET' && req.query.why_unseen === '1') {
     if (auth.role === 'owner' || !auth.name) return res.status(200).json({ notes: [] });

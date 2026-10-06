@@ -522,6 +522,9 @@
   body.ro-embed .rc-btn, body.ro-embed .rc-btn-row, body.ro-embed .rc-actions, body.ro-embed .msg-reply, body.ro-embed [data-bkc],
   body.ro-embed [data-callresolve], body.ro-embed [data-callact], body.ro-embed [data-calldelete], body.ro-embed [data-msgcall], body.ro-embed [data-rc-offer],
   body.ro-embed .rc-call, body.ro-embed .cv-head-btns, body.ro-embed [data-callclaim], body.ro-embed [data-callmsg]{display:none !important;}
+  /* Pipeline view only (owner 2026-10-07) */
+  body.ro-embed #plRoot .pl-btn, body.ro-embed #plRoot .pl-link, body.ro-embed #plRoot .pl-acts, body.ro-embed #plRoot .ps-link, body.ro-embed #plRoot #plNoteIn{display:none !important;}
+  body.ro-embed #plRoot [data-pl="bktoggle"]{display:inline-flex !important;}
   body.ro-embed .main{margin-left:0 !important;padding:0 !important;}
   body.ro-embed .wrap, body.ro-embed #view{max-width:none !important;width:100% !important;}
   body.ro-embed .wrap{padding:8px !important;}
@@ -3962,7 +3965,7 @@ function navTo(s){
   // falls back to the schedule rather than rendering an empty shell.
   if(s==='callhub' && !CALL_TABS.some(t=>t.show())) s='schedule';
   if(s==='analyticshub' && !ANALYTICS_TABS.some(t=>t.show())) s='schedule';
-  if(s==='pipeline' && role!=='owner' && role!=='secretary') s='schedule';
+  if(s==='pipeline' && role!=='owner' && role!=='secretary' && role!=='auditor') s='schedule';
   // A view-only business (Joey) is Schedule-only; any other screen goes back to her own company.
   if(current && current.view_only && s!=='schedule'){ current=businesses.find(b=>b.slug===scope)||businesses[0]||current; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); }
   section=s;
@@ -11314,7 +11317,7 @@ async function plLoad(force){
   const req=++_plReq;
   if(isJoeyHome()) _plRange='3';
   const params={ range:_plRange };
-  if(role==='owner' && _plBiz && _plBiz!=='all') params.business=_plBiz;
+  if((role==='owner'||role==='auditor') && _plBiz && _plBiz!=='all') params.business=_plBiz;
   _plLoading=true;
   try{
     const d=await api('pipeline',{ params, timeoutMs:30000 });
@@ -11379,7 +11382,7 @@ function paintPipeline(){
   // Brand filter: owner only (a secretary's board is already scoped to her
   // brands on the server). Families = Dom's + its lead-gen sites, and Handy
   // Andy + everything else, the same split the cards are grouped by.
-  const bizSel=isOwner?`<select id="plBiz" aria-label="Brand">${opt('all','All brands',_plBiz)}<optgroup label="Families">${opt('family:handy-andy','Handy Andy family',_plBiz)}${opt('family:doms',"Dom's family",_plBiz)}</optgroup><optgroup label="One brand">${businesses.map(b=>opt(b.slug,b.name,_plBiz)).join('')}</optgroup></select>`:'';
+  const bizSel=(isOwner||role==='auditor')?`<select id="plBiz" aria-label="Brand">${opt('all','All brands',_plBiz)}<optgroup label="Families">${opt('family:handy-andy','Handy Andy family',_plBiz)}${opt('family:doms',"Dom's family",_plBiz)}</optgroup><optgroup label="One brand">${businesses.map(b=>opt(b.slug,b.name,_plBiz)).join('')}</optgroup></select>`:'';
   // Redesign (owner, 2026-09-26): stage arrows with count + $, a stats row,
   // a funnel, then one board column per stage. A card opens in a pop-up.
   const board=Array.isArray(d.scoreboard)?d.scoreboard:[];
@@ -11577,6 +11580,7 @@ function plDetailHtml(c){
   if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
   if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
   // Other-brand cards allow notes and Not a lead; keep remaining actions restricted.
+  if(role==='auditor'){ top.length=0; a.length=0; b.length=0; }   // view only (owner 2026-10-07)
   if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); const notLead=b.filter(x=>x.includes('data-pl="notlead"')||(userName==='Joey'&&x.includes('data-pl="lost"'))); b.length=0; b.push(...notLead); }
   const f=[];
   f.push(phone
@@ -11670,7 +11674,7 @@ function plDetailHtml(c){
     <b>Not called back · ${esc(who)}'s lead</b><br>${esc(plTitle(c))} ${un.kind==='voicemail'?'left a voicemail':un.kind==='text'?'texted us':'called and we missed it'} ${esc(plWhen(un.at,c.tz))}. No reply for ${un.hours>=1?un.hours+'h':un.mins+' min'}.</div>`:'';
   // Ask why (owner 2026-09-27): Opus explains what's holding this card back.
   const W_=_plWhy&&_plWhy.key===c.key?_plWhy:null;
-  const whyBox=(c.stage==='booked'||c.stage==='new')?'':(W_&&W_.ans
+  const whyBox=(c.stage==='booked'||c.stage==='new'||role==='auditor')?'':(W_&&W_.ans
     ?`<div style="border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
         <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
         ${W_.ans.what_went_wrong&&!/^\W*(nothing|none|no (real |major )?(mistakes?|issues?|problems?)|n\/a)\b/i.test(W_.ans.what_went_wrong)&&!/nothing (major |really )?went wrong/i.test(W_.ans.what_went_wrong)?`<div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>`:''}
@@ -11762,6 +11766,7 @@ function plReviewHtml(c){
 const _plNoteDraft={};
 function plNotesHtml(c){
   const ns=Array.isArray(c.notes)?c.notes:[];
+  if(role==='auditor') return ns.length?`<div class="rc-count" style="margin:10px 0 6px;">Notes</div>${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}`:'';   // view only (owner 2026-10-07)
   return `<div class="rc-count" style="margin:10px 0 6px;">Notes</div>
     ${ns.map(n=>`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:5px;font-size:13px;line-height:1.45;">${esc(n.body)}<div style="font-size:11px;color:var(--mute);margin-top:2px;">${esc(n.by||'')} · ${esc(plWhen(n.at,c.tz))}</div></div>`).join('')}
     <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:10px;">
@@ -11919,6 +11924,8 @@ function plSaveLost(c){
 function plClick(e){
   const b=e.target.closest('[data-pl]'); if(!b || b.disabled) return;
   const act=b.dataset.pl;
+  // Auditor: look only (owner 2026-10-07).
+  if(role==='auditor' && !['stage','bktoggle','tab','leaks','toggle','estview'].includes(act)) return;
   if(act==='stage'){ _plStage=b.dataset.stage; _plScrollTo=_plStage; paintPipeline(); return; }
   if(act==='bktoggle'){ _plBookedOpen=!_plBookedOpen; paintPipeline(); return; }
   if(act==='view'){ _plView=b.dataset.view==='marked'?'marked':'board'; _plOpen=null; paintPipeline(); if(_plView==='marked') plLoad(true); return; }
@@ -11941,7 +11948,7 @@ function plClick(e){
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
       if(_plOpen===c.key) plWhySeen(c.key);
       // Saved answers stay (owner 2026-09-30): load the last one on open.
-      if(_plOpen===c.key && !(_plWhy&&_plWhy.key===c.key)){ const key=c.key;
+      if(_plOpen===c.key && role!=='auditor' && !(_plWhy&&_plWhy.key===c.key)){ const key=c.key;
         api('pipeline',{ params:{ why_for:key } }).then(a=>{ if(a&&a.holding_back&&_plOpen===key&&!(_plWhy&&_plWhy.key===key)){ _plWhy={ key, ans:a }; paintPipeline(); } }).catch(()=>{}); }
       if(_plOpen!==c.key && _plLost && _plLost.key===c.key) _plLost=null;   // a collapsed picker would hold the refresh forever
       paintPipeline(); return;
@@ -25913,7 +25920,9 @@ function embedAuditorBoot(q){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   const cid=q.get('call'); if(cid){ _callFocusId=cid; _callsPeriod='7d'; }
-  if(q.get('view')==='messages') navTo('messages'); else { callHubTab='log'; navTo('callhub'); }
+  if(q.get('view')==='messages') navTo('messages');
+  else if(q.get('view')==='pipeline'){ _plBiz='all'; navTo('pipeline'); }   // view only (owner 2026-10-07)
+  else { callHubTab='log'; navTo('callhub'); }
 }
 { let _q=null; try{ _q=new URLSearchParams(location.search); }catch(_){}
   if(_q && _q.get('embed')==='auditor') embedAuditorBoot(_q);

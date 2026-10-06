@@ -490,6 +490,7 @@
       <button type="button" data-nav="calls"><span class="nav-ic">📞</span>Call Activity<span class="nav-n" id="navCallsN" hidden></span></button>
       <button type="button" data-nav="secretaries"><span class="nav-ic">👥</span>Secretaries</button>
       <button type="button" data-nav="messages"><span class="nav-ic">💬</span>Messages</button>
+      <button type="button" data-nav="pipeline"><span class="nav-ic">📈</span>Pipeline</button>
       <button type="button" data-nav="notes"><span class="nav-ic">📌</span>Notes</button>
     </nav>
     <div class="pages">
@@ -504,6 +505,9 @@
          to jiyahs portal") -- READ-ONLY. Same threads the office sees on the
          CRM's Messages screen, so she can audit what was actually said in
          text as well as on the phone; her token cannot send or block. ══════════ -->
+    <!-- Pipeline, view only (owner 2026-10-07) -->
+    <section class="page" data-page="pipeline" id="pagePipeline"></section>
+
     <section class="page" data-page="messages" id="pageMessages">
       <div class="card">
         <div class="row" style="margin-bottom:10px;">
@@ -1818,14 +1822,14 @@ async function enter(){
   // call data, well organized -- not the secretary/audit stuff up top). A
   // hash from a bookmark or reload picks a specific page instead.
   const fromHash=(location.hash||'').replace('#','');
-  showPage(['dashboard','calls','audit','secretaries','messages','notes'].includes(fromHash)?fromHash:'dashboard');   // 2026-10-05: Dashboard is the landing page   // owner, 2026-09-25: Audit is the landing page
+  showPage(['dashboard','calls','audit','secretaries','messages','pipeline','notes'].includes(fromHash)?fromHash:'dashboard');   // 2026-10-05: Dashboard is the landing page   // owner, 2026-09-25: Audit is the landing page
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 // Owner plan (2026-09-22): Jiyah gets her own dashboard, one page per job.
 let page='audit';
 function embedOwnerScreen(which, callId){
-  const sec=$(which==='calls'?'caEmbedBox':'pageMessages'); if(!sec) return;
+  const sec=$(which==='calls'?'caEmbedBox':which==='pipeline'?'pagePipeline':'pageMessages'); if(!sec) return;
   const src='/admin.html?embed=auditor&view='+which+(callId?'&call='+encodeURIComponent(callId):'');
   const cur=sec.querySelector('iframe[data-embed]');
   if(cur && !callId) return;
@@ -1833,13 +1837,14 @@ function embedOwnerScreen(which, callId){
 }
 function showPage(p){
   page=p;
-  document.body.classList.toggle('embed-on', p==='messages');
+  document.body.classList.toggle('embed-on', p==='messages'||p==='pipeline');
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===p));
   document.querySelectorAll('#sidenav [data-nav]').forEach(b=>b.classList.toggle('on',b.dataset.nav===p));
   try{ history.replaceState(null,'','#'+p); }catch(_){}
   // Owner 2026-09-28: Calls and Messages are the owner's own screens, read-only.
   if(p==='calls') caShow();
   if(p==='messages') embedOwnerScreen('messages');
+  if(p==='pipeline') embedOwnerScreen('pipeline');
   if(p==='notes') loadNotesSent();
   if(p==='dashboard') loadDash();
 }
