@@ -11594,7 +11594,9 @@ function plDetailHtml(c){
   // Overview = every step of the customer's journey + the main buttons.
   const MAIN=['call','text','job','est'];
   const mainBtns=a.filter(x=>MAIN.some(k=>x.includes(`data-pl="${k}"`)));
-  const moreBtns=[...a.filter(x=>!mainBtns.includes(x)), ...b];
+  // Joey: Mark lost + Not a lead sit on Overview, not under More (owner 2026-10-07).
+  const joeyBtns=role!=='owner'&&userName==='Joey'?b.filter(x=>/data-pl="(lost|notlead)"/.test(x)):[];
+  const moreBtns=[...a.filter(x=>!mainBtns.includes(x)), ...b.filter(x=>!joeyBtns.includes(x))];
   const tz=c.tz, W=iso=>iso?esc(plWhen(iso,tz)):'';
   const e=c.estimate||{}, bk=c.booking||{};
   const tlFirst=(Array.isArray(c.timeline)&&c.timeline[0])||null;
@@ -11660,6 +11662,7 @@ function plDetailHtml(c){
        ${plNotesHtml(c)}
        ${mainBtns.length?`<div class="pl-acts plt-main">${mainBtns.join('')}</div>`:''}
        ${plReviewOutcomeHtml(c)}
+       ${joeyBtns.length?`<div class="pl-acts" style="margin-top:8px;">${joeyBtns.join('')}</div>`:''}
        ${plOwnerMoveHtml(c)}`;
   // Red banner: the customer reached out and nobody got back to them (owner 2026-09-27).
   const un=c.unanswered, who=c.secretary||'the office';
