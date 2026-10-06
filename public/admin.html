@@ -3281,12 +3281,15 @@ function currentPersonKey(){ return role==='owner' ? 'admin' : (VIEW_AS_PEOPLE['
 // Joey's shift pill: 6am-6pm Denver (owner 2026-10-07).
 function shiftPillTick(){
   const el=document.getElementById('shiftPill'); if(!el) return;
-  const on=role==='secretary'&&userName==='Joey'; el.classList.toggle('hidden',!on); if(!on) return;
+  el.classList.add('hidden');   // lives in Joey's "Covering today" card now (owner 2026-10-07)
+  document.querySelectorAll('.jy-shift').forEach(x=>{ x.innerHTML=joeyShiftHtml(); });
+}
+function joeyShiftHtml(){
   let hh=0,mm=0; try{ const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour12:false,hour:'2-digit',minute:'2-digit'}).formatToParts(new Date()); hh=Number(p.find(x=>x.type==='hour').value)%24; mm=Number(p.find(x=>x.type==='minute').value); }catch(_){}
   const m=hh*60+mm, a=6*60, b=18*60, inShift=m>=a&&m<b;
   const left=b-m, clock=`${hh%12||12}:${String(mm).padStart(2,'0')}`;
-  document.getElementById('shiftBar').style.width=(inShift?Math.round(100*(m-a)/(b-a)):0)+'%';
-  document.getElementById('shiftTxt').textContent=inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT';
+  const pct=inShift?Math.round(100*(m-a)/(b-a)):0;
+  return `<div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#475569;"><span>🕕</span><span style="flex:1;max-width:90px;height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i style="display:block;height:4px;width:${pct}%;background:#16a34a;"></i></span><span>${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</span></div>`;
 }
 setInterval(shiftPillTick,60000);
 function updateWhoAvatar(){
@@ -20164,7 +20167,7 @@ function joeyCardsHtml(){
   const card=(l,v)=>`<div class="gstat"><span class="gstat-l">${l}</span>${v}</div>`;
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
-  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
+  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div><div class="jy-shift">${joeyShiftHtml()}</div></div>`;
   const u=Number(j.urgent_tasks)||0;
   const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
   const low=Number(greetingData.lowStockTechs)||0;
