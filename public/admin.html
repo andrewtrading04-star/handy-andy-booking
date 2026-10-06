@@ -687,7 +687,7 @@
   .tk-sum .tk-title{flex:1;min-width:0;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .tk-ico{font-size:12px;flex:none;}
   .tk-car{color:var(--mute);flex:none;transition:transform .15s;} .tk-row[open] .tk-car{transform:rotate(90deg);} .tk-row[open] .tk-sum .tk-title{white-space:normal;}
   /* Phone: Pipeline + Task boards stack, no side scroll; tap a section to open (owner 2026-10-07). */
-  @media (max-width:700px){ .plv-chev{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min,.tk-board .plv-col{flex:none;width:100%;}
+  @media (max-width:700px){ .plv-chev{display:none;} .plv-board #plcol-booked{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min,.tk-board .plv-col{flex:none;width:100%;}
     .plv-board .plv-col-h{cursor:pointer;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;} .plv-board .plv-col-h:after{content:'\25B8';color:var(--mute);} .plv-board .plv-col.m-open .plv-col-h:after{content:'\25BE';} .plv-board .plv-col.m-lock .plv-col-h{cursor:default;} .plv-board .plv-col.m-lock .plv-col-h:after{content:none;}
     .plv-board .plv-col:not(.m-open) .plv-col-b{display:none;} .pl-joey .plv-kpis{display:none;} }
   .tk-row .tk-body{padding:0 12px 12px 48px;} .tk-row.done{opacity:.7;} .tk-row.done .tk-title{text-decoration:line-through;color:var(--mute);}
@@ -11475,10 +11475,10 @@ function paintPipeline(){
     const list=cards.filter(c=>c.stage===k&&(!_plLeakOnly||c.leak));
     // Booked is the goal -- collapsed to a thin column by default (owner 2026-09-27).
     if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
-      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span></div>
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span></div>
       <div class="plv-col-b"><button type="button" class="rc-btn ghost" data-pl="bktoggle">Show</button></div></div>`;
     return `<div class="plv-col${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
-      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
       <div class="plv-col-b">${list.length?list.map(plTileHtml).join(''):'<div class="plv-none">Empty</div>'}</div></div>`;
   };
   const openC=_plOpen&&plCard(_plOpen);
