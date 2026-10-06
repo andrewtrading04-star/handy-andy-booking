@@ -7,8 +7,9 @@
 // per-business routing (which this quote form doesn't need — no line items,
 // no dashboard row, just "someone asked a question, go tell a human").
 import { sendEmail } from './_lib/email.js';
+import { serviceClient } from './_lib/supabase.js';
 import { sendSMS, toE164 } from './_lib/sms.js';
-import { overSpeedLimit, clientIp } from './_lib/lead-guard.js';
+import { overSpeedLimit, clientIp, isGibberish } from './_lib/lead-guard.js';
 import { isBlockedPhone } from './_lib/blocked.js';
 
 function esc(s) {
@@ -84,6 +85,11 @@ export default async function handler(req, res) {
   if (!name) return res.status(400).json({ error: 'Your name is required.' });
   if (!phone) return res.status(400).json({ error: 'A phone number is required.' });
   if (!message) return res.status(400).json({ error: 'Please tell us what you need help with.' });
+  // Bot junk (owner 2026-10-06): random-letter name or a message that is only digits. Silent success.
+  if (isGibberish(name) || /^[\d\s()+.-]+$/.test(message)) {
+    console.warn('[quote] dropped junk submission', who);
+    return res.status(200).json({ ok: true });
+  }
 
   // Same connection, inbox or phone sending a 4th request inside 10 minutes —
   // see _lib/lead-guard.js for the bursts that prompted this. It is still
@@ -116,12 +122,27 @@ export default async function handler(req, res) {
     <p style="margin:14px 0 0;"><b>What they need:</b> ${esc(message)}</p>
   </div>`;
 
-  const smsText = [
-    'New quote request — ihandyandy.com',
-    `${name}${phone ? ' · ' + phone : ''}`,
-    tvSize ? `TV: ${tvSize}` : null,
-    message.slice(0, 140),
-  ].filter(Boolean).join('\n');
+  // Save it as an estimate so it shows in the CRM, and text its link
+  // (owner 2026-10-06: link only, no phone number). If saving fails the
+  // text still goes out, with the message instead of the link.
+  let link = null;
+  try {
+    const db = serviceClient();
+    const { data: biz } = await db.from('businesses').select('id').eq('slug', 'handy-andy').maybeSingle();
+    if (biz) {
+      const ins = await db.from('estimates').insert({
+        business_id: biz.id,
+        service_label: service || 'Website quote',
+        customer_name: name, customer_phone: phone, customer_email: email || null, customer_zip: zipcode || null, customer_city: city || null,
+        description: [message, tvSize ? `TV: ${tvSize}` : '', hasBracket ? `Bracket: ${hasBracket}` : ''].filter(Boolean).join('\n').slice(0, 4000),
+        notes: pageUrl ? `Quote form · ${pageUrl}` : 'Quote form',
+        source: 'website_form', status: 'new', line_items: [], preferred_slots: [], sms_consent: !!phone,
+      }).select('id').single();
+      if (ins.error) throw ins.error;
+      link = `${(process.env.PUBLIC_URL || 'https://handy-andy-booking.vercel.app').replace(/\/$/, '')}/admin.html?estimate=${encodeURIComponent(ins.data.id)}`;
+    }
+  } catch (e) { console.error('[quote] could not save estimate', e.message); }
+  const smsText = [`New quote request — ${name}`, link || message.slice(0, 140)].join('\n');
 
   // Heather (the Handy Andy line) AND the owner. The owner was never on this
   // list, so he only ever learned of a quote request by happening to open the
