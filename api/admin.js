@@ -11570,7 +11570,7 @@ async function estimates(req, res, db, auth) {
 // normal per-business gate. Deleted estimates are hard-deleted, so never show.
 async function estimatesAllCompanies(req, res, db) {
   const status = (req.query.status || '').toString();
-  const q = (req.query.q || '').toString().replace(/[,()*%\]/g, ' ').trim().slice(0, 80);
+  const q = (req.query.q || '').toString().replace(/[,()*%\\]/g, ' ').trim().slice(0, 80);
   let cols = 'id, business_id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, followup_emailed_at, followup_sent_by, business:businesses(slug, name)';
   const runQuery = () => {
     let x = db.from('estimates').select(cols).order('created_at', { ascending: false }).limit(200);
