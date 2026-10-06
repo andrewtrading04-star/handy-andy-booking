@@ -11455,7 +11455,7 @@ function paintPipeline(){
   const usd=n=>'$'+Math.round(Number(n)||0).toLocaleString('en-US');
   const chev=`${isJoeyHome()?'':`<div class="plv-total">${usd(liveVal)} <span>· ${liveCards.length} open deal${liveCards.length===1?'':'s'}</span></div>`}
     <div class="plv-chev" role="group" aria-label="Stages">${PL_STAGES.map(([k,l])=>
-      `<button type="button" class="plv-chev-i st-${k}${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}"><b>${esc(l)}</b><span class="plv-chev-v">${usd(val(k))}</span><span class="plv-chev-n">${count(k)} deal${count(k)===1?'':'s'}${leaks[k]?` · <em>${leaks[k]} leak${leaks[k]===1?'':'s'}</em>`:''}</span></button>`).join('')}</div>`;
+      `<button type="button" class="plv-chev-i st-${k}${_plStage===k?' on':''}" data-pl="stage" data-stage="${k}"><b>${esc(l)}</b>${k==='new'?'':`<span class="plv-chev-v">${usd(val(k))}</span>`}<span class="plv-chev-n">${count(k)} deal${count(k)===1?'':'s'}${leaks[k]?` · <em>${leaks[k]} leak${leaks[k]===1?'':'s'}</em>`:''}</span></button>`).join('')}</div>`;
   const kpi=(l,v,sub,cls)=>`<div class="plv-kpi${cls?' '+cls:''}"><span>${l}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
   const kpis=`<div class="plv-kpis">
     ${kpi('Calls',calls,esc(rangeName))}
@@ -11478,10 +11478,10 @@ function paintPipeline(){
     const list=cards.filter(c=>c.stage===k&&(!_plLeakOnly||c.leak));
     // Booked is the goal -- collapsed to a thin column by default (owner 2026-09-27).
     if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
-      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span></div>
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='new'?'':k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span></div>
       <div class="plv-col-b"><button type="button" class="rc-btn ghost" data-pl="bktoggle">Show</button></div></div>`;
     return `<div class="plv-col${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
-      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
+      <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${k==='new'?'':k==='completed'?`${list.length} possible review${list.length===1?'':'s'}`:usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
       <div class="plv-col-b">${list.length?list.map(plTileHtml).join(''):'<div class="plv-none">Empty</div>'}</div></div>`;
   };
   const openC=_plOpen&&plCard(_plOpen);
