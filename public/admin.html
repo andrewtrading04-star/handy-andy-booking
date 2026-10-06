@@ -11676,10 +11676,10 @@ function plDetailHtml(c){
         <div style="margin-top:6px;font-size:11.5px;color:var(--mute);">Opus 5.5 · ${W_.ans.at?esc(plWhen(W_.ans.at,c.tz)):''} <a href="#" data-pl="askwhy-fresh" style="margin-left:6px;">Ask again</a></div></div>`
     :`<div style="margin:0 0 12px;"><button type="button" class="pl-btn" data-pl="askwhy"${W_&&W_.loading?' disabled':''}>${W_&&W_.loading?'Thinking…':(c.stage==='completed'?'Ask why no review':'Ask why')}</button>${W_&&W_.err?` <span class="danger" style="font-size:12.5px;">${esc(W_.err)}</span>`:''}</div>`);
   const bizHead=c.business&&c.business.name?`<div style="text-align:center;font-weight:800;font-size:17px;margin:0 0 10px;color:${BRAND_TEXT[c.business.slug]||'#374151'};">${esc(c.business.name)}</div>`:'';
-  // OK-to-call banner, same rule as Review Calls (owner 2026-09-30).
+  // OK-to-call banner: red 8pm-8am, green 8am-8pm (owner 2026-10-06).
   const tzArea={'America/Denver':'Denver','America/Chicago':'Texas','America/Los_Angeles':'Los Angeles','America/Phoenix':'Phoenix'}[c.tz]||'their area';
-  const tb=rcCallBand(c.tz);
-  const timeBand=c.phone?`<div class="rc-timeband ${tb.band}" data-rc-tzcard="${esc(c.tz||'')}" data-rc-area="${esc(tzArea)}" style="margin:0 0 10px;text-align:center;">${rcTimeBandLabel(tb.band,tb.hhmm,tzArea)}</div>`:'';
+  const tb=rcCallBand(c.tz,true);
+  const timeBand=c.phone?`<div class="rc-timeband ${tb.band}" data-rc-tzcard="${esc(c.tz||'')}" data-rc-simple="1" data-rc-area="${esc(tzArea)}" style="margin:0 0 10px;text-align:center;">${rcTimeBandLabel(tb.band,tb.hhmm,tzArea,true)}</div>`:'';
   return `<div class="pl-detail">${top.join('')}${unBanner}${bizHead}${timeBand}${whyBox}${tabs}<div class="plt-body">${body}</div>
   </div>`;
 }
@@ -13320,7 +13320,8 @@ function rcStatusLabel(s){ return ({called:'Spoke',voicemail:'Left voicemail',ca
 //   red    12:00am-9:00am and 8:00pm-12:00am -- do not contact
 //   green  2:00pm-5:00pm -- best time
 //   yellow everything else
-function rcCallBand(tz){
+// simple (owner 2026-10-06): everything but Review Calls -- red 8pm-8am, green 8am-8pm.
+function rcCallBand(tz, simple){
   const zone=tz||'America/Denver';
   let hh=9, mm=0;
   try{
@@ -13328,12 +13329,13 @@ function rcCallBand(tz){
     hh=Number(p.find(x=>x.type==='hour').value)%24; mm=Number(p.find(x=>x.type==='minute').value);
   }catch(_){ /* bad/unknown tz string -- falls through as if it were 9:00am, a yellow hour, rather than throwing */ }
   const mins=hh*60+mm;
-  const band = (mins<9*60 || mins>=20*60) ? 'red' : (mins>=14*60 && mins<17*60) ? 'green' : 'yellow';
+  const band = simple ? ((mins<8*60 || mins>=20*60) ? 'red' : 'green') : (mins<9*60 || mins>=20*60) ? 'red' : (mins>=14*60 && mins<17*60) ? 'green' : 'yellow';
   const label = mm===0 ? `${hh%12||12}:00 ${hh<12?'AM':'PM'}` : `${hh%12||12}:${String(mm).padStart(2,'0')} ${hh<12?'AM':'PM'}`;
   return { band, hhmm:label };
 }
-function rcTimeBandLabel(band, hhmm, area){
+function rcTimeBandLabel(band, hhmm, area, simple){
   const a=esc(area);
+  if(simple&&band==='green') return `🟢 OK to call · ${hhmm} in ${a}`;
   if(band==='red')    return `🔴 Do not contact · ${hhmm} in ${a}`;
   if(band==='green')  return `🟢 Best time to call · ${hhmm} in ${a}`;
   return `🟡 OK to call · ${hhmm} in ${a}`;
@@ -13357,12 +13359,13 @@ function rcRepaintTimeBands(){
   // screen right now" -- ask it instead of trying to catch each exit.
   if(!onScreen('reviewcalls')){ if(_rcClockTimer){ clearInterval(_rcClockTimer); _rcClockTimer=null; } return; }
   document.querySelectorAll('[data-rc-tzcard]').forEach(el=>{
-    const {band,hhmm}=rcCallBand(el.dataset.rcTzcard);
+    const simple=!!el.dataset.rcSimple;
+    const {band,hhmm}=rcCallBand(el.dataset.rcTzcard,simple);
     const area=el.dataset.rcArea||'their area';
     el.className='rc-timeband '+band;
     // innerHTML, not textContent: the label carries an emoji + escaped text,
     // same as the initial render, so a repaint can't drift from first paint.
-    el.innerHTML=rcTimeBandLabel(band,hhmm,area);
+    el.innerHTML=rcTimeBandLabel(band,hhmm,area,simple);
   });
 }
 // ── Call Performance ───────────────────────────────────────────────────────
