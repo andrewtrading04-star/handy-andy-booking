@@ -2039,6 +2039,9 @@
   .jy-stock{display:inline-flex;width:fit-content;max-width:100%;align-self:flex-start;align-items:center;gap:9px;margin:0 0 10px;padding:9px 13px;border:1px solid #f3d48b;border-radius:10px;background:#fffbeb;color:#854d0e;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
   .greeting.gl .greet-stats.jy>.gstat:first-child{align-items:center;justify-content:center;text-align:center;}
   .jy-coverage{font-size:15px;line-height:1.7;}
+  /* Joey's cards: bold titles, plain text (owner 2026-10-07). */
+  .greeting.gl .greet-stats.jy .gstat .gstat-l{font-size:14px;color:#111827;text-transform:none;letter-spacing:0;font-weight:800;}
+  .jy-coverage b{font-weight:400;}
   .jy-stock:focus-visible{outline:2px solid #534ab7;outline-offset:3px;}
   .dpl-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
   .dpl-cell{border:none;background:#f3f4f8;border-radius:10px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;font:inherit;color:inherit;}
@@ -3289,7 +3292,7 @@ function joeyShiftHtml(){
   const m=hh*60+mm, a=6*60, b=18*60, inShift=m>=a&&m<b;
   const left=b-m, clock=`${hh%12||12}:${String(mm).padStart(2,'0')}`;
   const pct=inShift?Math.round(100*(m-a)/(b-a)):0;
-  return `<div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#475569;"><span>🕕</span><span style="flex:1;max-width:90px;height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i style="display:block;height:4px;width:${pct}%;background:#16a34a;"></i></span><span>${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</span></div>`;
+  return `<div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:14px;color:#111827;"><span>🕕</span><span style="flex:1;max-width:90px;height:6px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i style="display:block;height:6px;width:${pct}%;background:#16a34a;"></i></span><span>${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</span></div>`;
 }
 setInterval(shiftPillTick,60000);
 function updateWhoAvatar(){
