@@ -689,7 +689,7 @@
   /* Phone: Pipeline + Task boards stack, no side scroll; tap a section to open (owner 2026-10-07). */
   @media (max-width:700px){ .plv-chev{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min,.tk-board .plv-col{flex:none;width:100%;}
     .plv-board .plv-col-h{cursor:pointer;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;} .plv-board .plv-col-h:after{content:'\25B8';color:var(--mute);} .plv-board .plv-col.m-open .plv-col-h:after{content:'\25BE';} .plv-board .plv-col.m-lock .plv-col-h{cursor:default;} .plv-board .plv-col.m-lock .plv-col-h:after{content:none;}
-    .plv-board .plv-col:not(.m-open) .plv-col-b{display:none;} }
+    .plv-board .plv-col:not(.m-open) .plv-col-b{display:none;} .pl-joey .plv-kpis{display:none;} }
   .tk-row .tk-body{padding:0 12px 12px 48px;} .tk-row.done{opacity:.7;} .tk-row.done .tk-title{text-decoration:line-through;color:var(--mute);}
   .tk-link{display:inline-block;margin:6px 8px 0 0;font-size:13px;font-weight:700;color:var(--accent);}
   .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
@@ -11487,7 +11487,7 @@ function paintPipeline(){
         <div class="plv-pop-h st-${openC.stage}"><div><b>${vipPre(openC.phone)+esc(plTitle(openC))}${vipStar(openC.phone)}</b>${plPhoneSub(openC)?`<small style="display:block;">${esc(plPhoneSub(openC))}</small>`:''}<small>${esc(plStageLabel(openC.stage))}${openC.voicemail?' · <b class="plv-vm2">Left a voicemail</b>':''}${plMoney(openC.amount)?' · '+plMoney(openC.amount):''}</small></div><button type="button" class="plv-x" data-pl="toggle" aria-label="Close">✕</button></div>
         ${plCardHtml(openC).replace(/^<div class="pl-card/, '<div class="pl-card plv-in')}
       </div></div>`:'';
-  view.innerHTML=`<div class="wrap pl-wrap plv" id="plRoot">
+  view.innerHTML=`<div class="wrap pl-wrap plv${isJoeyHome()?' pl-joey':''}" id="plRoot">
     ${isJoeyHome()?'':`<div class="pl-head"><div class="pl-title">Pipeline<small>${esc(upd)}</small></div>${rangeSel}${bizSel}</div>`}
     ${plMarkedTabs()}
     ${_plView==='marked'?plMarkedHtml():chev+kpis}
