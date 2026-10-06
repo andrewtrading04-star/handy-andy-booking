@@ -549,7 +549,7 @@
          the portal's own yes/no score (scoreOf). ══════════ -->
     <section class="page" data-page="dashboard" id="pageDashboard">
       <div class="db-top">
-        <input id="dbQ" class="db-search" type="search" placeholder="Search by agent, caller, phone number, or call ID...">
+        <input id="dbQ" class="db-search" type="search" placeholder="Search by phone number, caller name, or agent...">
         <div class="seg" id="dbRange">
           <button type="button" data-r="today" class="on">Today</button><button type="button" data-r="yesterday">Yesterday</button><button type="button" data-r="tw">This Week</button><button type="button" data-r="lw">Last Week</button><button type="button" data-r="tm">This Month</button><button type="button" data-r="custom">Custom</button>
         </div>
@@ -2987,7 +2987,7 @@ function caDrawer(r,tab,flagForm){
     body='<h3>Caller</h3>'+dl([['Name',esc(caName(r)||'Unknown')],['Phone',esc(r.caller_pretty||prettyPhone(r.caller_phone))],['ZIP',a&&a.caller_zip?esc(a.caller_zip):'']])+
       '<h3>Call</h3>'+dl([['Date &amp; time',esc(fmtSentAt(r.occurred_at))+' CT'],['Agent',caAgent(r)?esc(caAgent(r)):''],['Call type',esc(r.service||'')],
         ['Status',st?'<span class="pill '+st[1]+'">'+st[0]+'</span>':''],['Duration',r.duration_sec?caDurTxt(r.duration_sec):''],['Business',bizLineLabel(r)],
-        ['Follow-up',esc(callFollowUpFull(r))],['Booked',r.booking?esc(fmtSentAt(r.booking.scheduled_at)):''],['Call ID','<span class="sub">'+esc(r.id)+'</span>']])+
+        ['Follow-up',esc(callFollowUpFull(r))],['Booked',r.booking?esc(fmtSentAt(r.booking.scheduled_at)):'']])+
       '<h3>QA</h3>'+dl([['Audit',a?'Done':'Not audited'],['Score',s!=null?scoreHtml(a):''],['Flag',a&&a.flagged?'<span class="flagpill">&#128681; Flagged</span>':'No'],['Reason',a&&a.flagged&&a.listen_reason?esc(a.listen_reason):'']])+
       callMoreLinks(r);
   } else if(tab==='recording'){
