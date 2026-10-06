@@ -195,6 +195,24 @@ async function isDenverArea(db, areaId) {
   })().catch(() => { _denverAreaCache.delete(areaId); return false; }));
   return _denverAreaCache.get(areaId);
 }
+// Handy Andy DFW is staffed by A1's DFW crew (owner, 2026-10-06).
+const _dfwAreaCache = new Map();
+async function isDfwArea(db, areaId) {
+  if (!_dfwAreaCache.has(areaId)) _dfwAreaCache.set(areaId, (async () => {
+    const { data } = await db.from('service_areas').select('name').eq('id', areaId).maybeSingle();
+    return /dfw|dallas|fort worth/i.test(data?.name || '');
+  })().catch(() => { _dfwAreaCache.delete(areaId); return false; }));
+  return _dfwAreaCache.get(areaId);
+}
+// Partner for this host in this metro: A1 for Handy Andy in DFW, else the usual.
+async function metroPartner(db, hostSlug, hostArea) {
+  if (hostSlug === 'handy-andy' && hostArea && await isDfwArea(db, hostArea)) {
+    const { data } = await db.from('businesses')
+      .select('id, slug, name, timezone').eq('slug', 'a1tvmounting').eq('active', true).maybeSingle();
+    return data || null;
+  }
+  return partnerBusiness(db, hostSlug);
+}
 async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   const zip = (postalCode || '').toString().trim();
   const hostArea = hostAreaOverride !== undefined
@@ -210,8 +228,11 @@ async function rosterScopes(db, hostBiz, pool, postalCode, hostAreaOverride) {
   // Other metros keep their own-company default.
   if ((pool === '' || pool === 'own') && (hostBiz.slug === 'handy-andy' || hostBiz.slug === 'doms')
       && hostArea && await isDenverArea(db, hostArea)) pool = 'cross';
+  // Same for Handy Andy in DFW: "any tech" includes A1's DFW crew.
+  if ((pool === '' || pool === 'own') && hostBiz.slug === 'handy-andy'
+      && hostArea && await isDfwArea(db, hostArea)) pool = 'cross';
   if (pool !== 'cross' && pool !== 'partner') return [host];
-  const p = await partnerBusiness(db, hostBiz.slug);
+  const p = await metroPartner(db, hostBiz.slug, hostArea);
   if (!p) return [host];
   const partnerArea = zip ? await serviceAreaIdFromPostal(db, p.id, zip) : null;
   const partnerScope = { bizId: p.id, serviceAreaId: partnerArea, soleTechOf: hostBiz.slug, zip };
@@ -7594,12 +7615,17 @@ async function partnerTechnicians(req, res, db, auth) {
   // alongside resolveBusiness in Promise.all below.
   if (!slug) return bail(res, Object.assign(new Error('business is required'), { status: 400 }));
   if (!mayUseBusiness(auth, slug)) return bail(res, Object.assign(new Error('Forbidden for this business'), { status: 403 }));
-  let partner;
+  let partner, hostBiz;
   try {
     // resolveBusiness still runs (confirms the business actually exists) but
     // partnerBusiness only needs the slug string itself, not biz's DB row, so
     // it doesn't have to wait for resolveBusiness to finish first.
-    [, partner] = await Promise.all([resolveBusiness(db, auth, slug), partnerBusiness(db, slug)]);
+    [hostBiz, partner] = await Promise.all([resolveBusiness(db, auth, slug), partnerBusiness(db, slug)]);
+    // Handy Andy DFW zip: the partner picker lists A1's DFW techs.
+    if (slug === 'handy-andy' && req.query.postal_code) {
+      const ha = await serviceAreaIdFromPostal(db, hostBiz.id, req.query.postal_code.toString());
+      if (ha && await isDfwArea(db, ha)) partner = await metroPartner(db, slug, ha);
+    }
   } catch (e) { return bail(res, e); }
   if (!partner) return res.status(200).json({ partner: null, technicians: [] });
 

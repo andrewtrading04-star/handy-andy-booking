@@ -125,7 +125,8 @@ const SLOT_BY_KEY = Object.fromEntries(SLOTS.map(s => [s.key, s]));
 // own overflow must never fall to their perpetually-empty pools, so neither
 // appears as anyone's partner value.
 const PARTNER_SLUG = {
-  'handy-andy': { slug: 'doms',       metro: /denver/i },
+  // Array = one partner per metro; DFW added 2026-10-06 (A1's crew).
+  'handy-andy': [{ slug: 'doms', metro: /denver/i }, { slug: 'a1tvmounting', metro: /dfw|dallas|fort worth/i }],
   'doms':       { slug: 'handy-andy', metro: /denver/i },
   'mile-high':  { slug: 'handy-andy', metro: /denver/i },
   'austin':     { slug: 'handy-andy', metro: /austin/i },
@@ -187,9 +188,8 @@ export function applySoleTech(businessSlug, techs) {
 // business passes none, so we confirm its one area IS the pairing's metro
 // before treating it as eligible).
 async function crossHirePartner(db, businessSlug, serviceAreaId) {
-  const pairing = PARTNER_SLUG[businessSlug];
-  if (!pairing) return null;
-  const { slug: partnerSlug, metro } = pairing;
+  const pairings = [].concat(PARTNER_SLUG[businessSlug] || []);
+  if (!pairings.length) return null;
   let areaName = null;
   if (serviceAreaId) {
     const { data: area } = await db.from('service_areas').select('name').eq('id', serviceAreaId).maybeSingle();
@@ -198,9 +198,11 @@ async function crossHirePartner(db, businessSlug, serviceAreaId) {
     const { data: biz } = await db.from('businesses').select('id').eq('slug', businessSlug).single();
     if (!biz) return null;
     const { data: areas } = await db.from('service_areas').select('name').eq('business_id', biz.id);
-    if ((areas || []).length === 1 && metro.test(areas[0].name || '')) areaName = areas[0].name;
+    if ((areas || []).length === 1 && pairings.some(p => p.metro.test(areas[0].name || ''))) areaName = areas[0].name;
   }
-  if (!areaName || !metro.test(areaName)) return null;
+  const pairing = areaName && pairings.find(p => p.metro.test(areaName));
+  if (!pairing) return null;
+  const { slug: partnerSlug, metro } = pairing;
   const { data: partnerBiz } = await db.from('businesses').select('id').eq('slug', partnerSlug).single();
   if (!partnerBiz) return null;
   // The partner's area for THIS metro. Handy Andy names its areas by metro
