@@ -2514,6 +2514,7 @@
   <div id="navScrim" class="nav-scrim"></div>
 
   <main class="main">
+    <div id="shiftPill" class="hidden" style="position:fixed;top:8px;right:12px;z-index:50;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px 10px;font-size:12px;color:#475569;"><span>🕕</span><span style="width:60px;height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i id="shiftBar" style="display:block;height:4px;width:0;background:#16a34a;"></i></span><span id="shiftTxt"></span></div>
     <div class="mobilebar">
       <button class="ham" id="ham">☰</button>
       <strong id="mobTitle">Schedule</strong>
@@ -3277,7 +3278,19 @@ const VIEW_AS_PEOPLE = {
   auditor:     { name:'Jiyah',  av:'Ji', bg:'#7c3aed', sub:'Call auditor · opens her portal' },
 };
 function currentPersonKey(){ return role==='owner' ? 'admin' : (VIEW_AS_PEOPLE['staff:'+userName] ? 'staff:'+userName : scope); }
+// Joey's shift pill: 6am-6pm Denver (owner 2026-10-07).
+function shiftPillTick(){
+  const el=document.getElementById('shiftPill'); if(!el) return;
+  const on=role==='secretary'&&userName==='Joey'; el.classList.toggle('hidden',!on); if(!on) return;
+  let hh=0,mm=0; try{ const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour12:false,hour:'2-digit',minute:'2-digit'}).formatToParts(new Date()); hh=Number(p.find(x=>x.type==='hour').value)%24; mm=Number(p.find(x=>x.type==='minute').value); }catch(_){}
+  const m=hh*60+mm, a=6*60, b=18*60, inShift=m>=a&&m<b;
+  const left=b-m, clock=`${hh%12||12}:${String(mm).padStart(2,'0')}`;
+  document.getElementById('shiftBar').style.width=(inShift?Math.round(100*(m-a)/(b-a)):0)+'%';
+  document.getElementById('shiftTxt').textContent=inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT';
+}
+setInterval(shiftPillTick,60000);
 function updateWhoAvatar(){
+  shiftPillTick();
   const key = currentPersonKey();
   const p = VIEW_AS_PEOPLE[key] || VIEW_AS_PEOPLE.admin;
   const av = document.getElementById('whoAv');
