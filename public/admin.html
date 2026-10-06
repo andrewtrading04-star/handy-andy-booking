@@ -686,6 +686,10 @@
   .tk-sum input{width:18px;height:18px;flex:none;cursor:pointer;} .tk-dot{width:10px;height:10px;border-radius:50%;flex:none;}
   .tk-sum .tk-title{flex:1;min-width:0;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .tk-ico{font-size:12px;flex:none;}
   .tk-car{color:var(--mute);flex:none;transition:transform .15s;} .tk-row[open] .tk-car{transform:rotate(90deg);} .tk-row[open] .tk-sum .tk-title{white-space:normal;}
+  /* Phone: Pipeline + Task boards stack, no side scroll; tap a section to open (owner 2026-10-07). */
+  @media (max-width:700px){ .plv-chev{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min,.tk-board .plv-col{flex:none;width:100%;}
+    .plv-board .plv-col-h{cursor:pointer;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;} .plv-board .plv-col-h:after{content:'\25B8';color:var(--mute);} .plv-board .plv-col.m-open .plv-col-h:after{content:'\25BE';} .plv-board .plv-col.m-lock .plv-col-h{cursor:default;} .plv-board .plv-col.m-lock .plv-col-h:after{content:none;}
+    .plv-board .plv-col:not(.m-open) .plv-col-b{display:none;} }
   .tk-row .tk-body{padding:0 12px 12px 48px;} .tk-row.done{opacity:.7;} .tk-row.done .tk-title{text-decoration:line-through;color:var(--mute);}
   .tk-link{display:inline-block;margin:6px 8px 0 0;font-size:13px;font-weight:700;color:var(--accent);}
   .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
@@ -3292,8 +3296,7 @@ function joeyShiftHtml(){
   const m=hh*60+mm, a=6*60, b=18*60, inShift=m>=a&&m<b;
   const left=b-m, clock=`${hh%12||12}:${String(mm).padStart(2,'0')}`;
   const pct=inShift?Math.round(100*(m-a)/(b-a)):0;
-  // Bar on its own line, nearly full width (owner 2026-10-07).
-  return `<div style="margin-top:8px;font-size:14px;color:#111827;"><div>🕕 ${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</div><div style="width:94%;height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-top:6px;"><i style="display:block;height:6px;width:${pct}%;background:#16a34a;"></i></div></div>`;
+  return `<div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:14px;color:#111827;"><span>🕕</span><span style="flex:1;max-width:90px;height:6px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i style="display:block;height:6px;width:${pct}%;background:#16a34a;"></i></span><span>${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</span></div>`;
 }
 setInterval(shiftPillTick,60000);
 function updateWhoAvatar(){
@@ -11072,12 +11075,18 @@ function tkDragInit(view){
     });
   });
 }
+// Phone sections the user opened (owner 2026-10-07); one tap on a header opens/closes.
+const plMobOpen=new Set();
+document.addEventListener('click',e=>{ const hd=e.target.closest&&e.target.closest('.plv-board .plv-col-h'); if(!hd||e.target.closest('button,a,input')) return;
+  if(!matchMedia('(max-width:700px)').matches) return; const col=hd.closest('.plv-col'); if(!col||col.classList.contains('m-lock')) return;
+  const on=col.classList.toggle('m-open'); if(on) plMobOpen.add(col.id); else plMobOpen.delete(col.id); });
 function paintTasks(){
   const view=document.getElementById('view'); if(!onScreen('tasks')) return;
   const rank={red:0,yellow:1,green:2,white:3,joey:4};
   const so=t=>t.sort_order==null?1e9:t.sort_order;
   const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||so(a)-so(b)||(a.created_at<b.created_at?-1:1));
-  const done=_tk.tasks.filter(t=>t.done_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
+  const done=_tk.tasks.filter(t=>t.done_at&&t.cleared_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
+  // Done by Joey stays on the board, crossed out, until Andrew taps it (owner 2026-10-07).
   // Board like the Pipeline (owner 2026-10-03): one column per color; the bar on top jumps to a column.
   const cols=[...TASK_ORDER,...(open.some(t=>t.color==='joey')?['joey']:[])];
   const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -11110,8 +11119,10 @@ function paintTasks(){
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
     ${isJoeyHome()?'</details>':''}
-    <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k);
-      return `<div class="plv-col${_tk.filter===k?' on':''}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}</div></div>`; }).join('')}</div>
+    <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k), struck=_tk.tasks.filter(t=>t.done_at&&!t.cleared_at&&t.color===k);
+      // Phone: red with tasks is always open (owner 2026-10-07).
+      const mc=k==='red'&&list.length?' m-open m-lock':(plMobOpen.has('tkcol-'+k)?' m-open':'');
+      return `<div class="plv-col${_tk.filter===k?' on':''}${mc}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}${struck.map(card).join('')}</div></div>`; }).join('')}</div>
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
@@ -11138,6 +11149,9 @@ function paintTasks(){
   };
   view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
     el.addEventListener('toggle',()=>{ if(el.open) _tk.open.add(id); else _tk.open.delete(id); });
+    // Andrew taps a crossed-out task: it leaves the board (owner 2026-10-07).
+    if(role==='owner'&&el.closest('.tk-board')&&el.classList.contains('done')) el.querySelector('.tk-sum').addEventListener('click',async e=>{ if(e.target.closest('[data-tk-done]')) return; e.preventDefault();
+      try{ await api('assistant_tasks',{ method:'POST', body:{ op:'clear', id } }); await renderTasks(); }catch(err){ toast(err.message); } });
     el.querySelector('[data-tk-done]').addEventListener('click',e=>e.stopPropagation());
     el.querySelector('[data-tk-done]').onchange=async e=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'done', id, done:e.target.checked } }); await renderTasks(); }catch(err){ toast(err.message); } };
     const n=el.querySelector('[data-tk-notes]'); n.onchange=async()=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'notes', id, notes:n.value } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.notes=n.value; toast('Note saved'); }catch(err){ toast(err.message); } };
@@ -11459,10 +11473,10 @@ function paintPipeline(){
   const colHtml=([k,l])=>{
     const list=cards.filter(c=>c.stage===k&&(!_plLeakOnly||c.leak));
     // Booked is the goal -- collapsed to a thin column by default (owner 2026-09-27).
-    if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}" id="plcol-${k}">
+    if(k==='booked'&&!_plBookedOpen) return `<div class="plv-col plv-col-min${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
       <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span></div>
       <div class="plv-col-b"><button type="button" class="rc-btn ghost" data-pl="bktoggle">Show</button></div></div>`;
-    return `<div class="plv-col${_plStage===k?' on':''}" id="plcol-${k}">
+    return `<div class="plv-col${_plStage===k?' on':''}${plMobOpen.has('plcol-'+k)?' m-open':''}" id="plcol-${k}">
       <div class="plv-col-h st-${k}"><b>${esc(l)} (${list.length})</b><span>${usd(val(k))}</span>${k==='booked'?'<button type="button" class="rc-btn ghost" data-pl="bktoggle" style="margin-top:6px;align-self:flex-start;">Hide</button>':''}</div>
       <div class="plv-col-b">${list.length?list.map(plTileHtml).join(''):'<div class="plv-none">Empty</div>'}</div></div>`;
   };

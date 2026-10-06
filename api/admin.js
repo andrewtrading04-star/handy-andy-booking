@@ -18412,7 +18412,15 @@ async function assistantTasks(req, res, db, auth, body) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
   if (op === 'done') {
     const done = !!body.done;
-    const { error } = await db.from('assistant_tasks').update(done ? { done_at: new Date().toISOString(), done_by: who } : { done_at: null, done_by: null }).eq('id', id);
+    // Joey's check leaves it crossed out on the board; Andrew's own check clears it (owner 2026-10-07).
+    const { error } = await db.from('assistant_tasks').update(done ? { done_at: new Date().toISOString(), done_by: who, cleared_at: auth.role === 'owner' ? new Date().toISOString() : null } : { done_at: null, done_by: null, cleared_at: null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  // Andrew taps a crossed-out task: off the board, into Done (owner 2026-10-07).
+  if (op === 'clear') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+    const { error } = await db.from('assistant_tasks').update({ cleared_at: new Date().toISOString() }).eq('id', id).not('done_at', 'is', null);
     if (error) throw error;
     return res.status(200).json({ ok: true });
   }
