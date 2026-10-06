@@ -20213,7 +20213,7 @@ function joeyCardsHtml(){
     card('Covering today',covHtml)+
     card('Pipeline',dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
-    `<div class="gstat" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><span class="gstat-l">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div><span class="gstat-l">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
+    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div><span class="gstat-l">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div><span class="gstat-l">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
   `</div>`;
 }
 function greetStatsHtml(){
