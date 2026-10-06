@@ -2,9 +2,9 @@
 // Runs on the 10-min tech_late_check cron:
 //  1. Texts each pending invite whose send_at has passed and that was never
 //     sent, using its custom_message.
-//  2. 24h after a text, if they still haven't signed up, puts one red task on
-//     the owner's dashboard (assistant_tasks).
-import { sendTechSms, inviteLink, smsFailReason } from './tech-invite.js';
+//  2. 24h after a text, if they still haven't signed up, puts one ASAP task
+//     for Joey to call him (assistant_tasks). Never red, never texts (owner 2026-10-07).
+import { sendTechSms, inviteLink, smsFailReason, digits10 } from './tech-invite.js';
 
 const DAY_MS = 864e5;
 
@@ -37,10 +37,12 @@ export async function runScheduledInvites(db, { dryRun = false } = {}) {
   for (const inv of stale || []) {
     if (dryRun) { out.nudged.push(inv.invitee_name); continue; }
     const where = [inv.businesses?.name, inv.service_areas?.name].filter(Boolean).join(' · ');
+    const d = digits10(inv.invitee_phone);
+    const ph = d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : String(inv.invitee_phone || '').trim();
     await db.from('assistant_tasks').insert({
-      title: `${inv.invitee_name || 'New tech'} hasn't signed up (${where})`,
-      color: 'red',
-      notes: `Texted 24h ago. Call ${inv.invitee_phone}. Link: ${inviteLink(inv.code)}`,
+      title: `Call ${inv.invitee_name || 'the new tech'}${ph ? ` (${ph})` : ''}: did he see our texts?`,
+      color: 'yellow',
+      notes: `Invite texted 24h ago, not signed up yet${where ? ` (${where})` : ''}. Link: ${inviteLink(inv.code)}`,
       created_by: 'System',
     });
     await db.from('tech_invites').update({ nudged_at: now.toISOString() }).eq('id', inv.id);
