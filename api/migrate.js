@@ -8,6 +8,7 @@ import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
 import { sendAppointmentReminders } from './_lib/reminders.js';
 import { sendDailyBookingDigest } from './_lib/daily-digest.js';
 import { checkLateTechs } from './_lib/tech-late.js';
+import { runScheduledInvites } from './_lib/invite-schedule.js';
 import { checkPaidNotComplete } from './_lib/paid-not-complete.js';
 import { checkEstimateFollowups } from './_lib/estimate-followup.js';
 import { checkEstimateEscalations } from './_lib/estimate-escalation.js';
@@ -848,7 +849,12 @@ export default async function handler(req, res) {
     try {
       const dryRun = req.query.dry === '1' || req.query.dry === 'true';
       const summary = await checkLateTechs({ dryRun });
-      return res.status(200).json({ ok: true, ...summary });
+      // Scheduled tech invite texts + 24h no-signup task (0178). Own try so a
+      // failure here never hides the late-tech result.
+      let invites = null;
+      try { invites = await runScheduledInvites(serviceClient(), { dryRun }); }
+      catch (e) { console.error('[scheduled_invites]', (e && e.stack) || e); invites = { error: String((e && e.message) || e) }; }
+      return res.status(200).json({ ok: true, ...summary, invites });
     } catch (e) {
       console.error('[tech_late_check]', (e && e.stack) || e);
       return res.status(500).json({ error: String((e && e.message) || e) });
