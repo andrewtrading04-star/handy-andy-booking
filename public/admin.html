@@ -20194,8 +20194,8 @@ function joeyCardsHtml(){
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
   return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
     card('Covering today',covHtml)+
-    card('Jobs today',big(Number(j.jobs_today)||0)+dashPipelineHtml())+
-    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>`+stockNotice)+
+    // Jobs today lives in the Urgent tasks card (owner 2026-10-07).
+    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>`+stockNotice+`<div style="margin-top:10px;font-size:14px;"><b>Jobs today</b> ${Number(j.jobs_today)||0}</div>`+dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
   `</div>`;
 }
