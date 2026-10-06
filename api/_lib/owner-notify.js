@@ -39,7 +39,7 @@ export function bracketCountFromLines(lines) {
     const name = String(l.name || l.label || '');
     // Customer's own hardware never counts: "I have my own bracket", and the
     // Samsung Frame's in-the-box bracket (owner 2026-10-01: 7 Frames + 2 Flat = 2).
-    if (/i have my own bracket|comes in the box|frame tv|using the bracket/i.test(name)) return n;
+    if (/\bmy own\b|\bown (mounting )?bracket|comes in the box|frame tv|using the bracket/i.test(name)) return n;   // 'I have my own mounting bracket' (owner 2026-10-06)
     const isBracket = /\bbracket\b/i.test(name)
       || /^flat$/i.test(name.trim())
       || /^tilting/i.test(name.trim())
