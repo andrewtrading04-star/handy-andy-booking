@@ -19947,7 +19947,7 @@ function dashPipelineHtml(){
   }
   const st=_dashPl;
   const cell=([k,l])=>`<button type="button" class="dpl-cell st-${k}" onclick="_plRange='3';_plStage='${k}';navTo('pipeline')"><b>${st?Number(st[k]||0):'…'}</b><span>${esc(k==='completed'?'Needs review':l)}</span></button>`;
-  return `<div class="dpl"><div class="gstat-l" style="margin:14px 0 6px;">Pipeline${joey?'':' · last 3 days'}</div><div class="dpl-row">${PL_STAGES.filter(([k])=>!joey||k!=='booked').map(cell).join('')}</div></div>`;
+  return `<div class="dpl">${joey?'':'<div class="gstat-l" style="margin:14px 0 6px;">Pipeline · last 3 days</div>'}<div class="dpl-row">${PL_STAGES.filter(([k])=>!joey||k!=='booked').map(cell).join('')}</div></div>`;
 }
 function avgTicketBoxHtml(pf, r){
   const useCache = avgTicketRange!=='7d' && avgTicketCache[avgTicketRange];
@@ -20209,10 +20209,11 @@ function joeyCardsHtml(){
   const low=Number(greetingData.lowStockTechs)||0;
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
   return `<div class="greet-stats jy" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:0;">`+
+    // Order (owner 2026-10-07): Covering+clock, Pipeline 2x2, Booking rate, Urgent/Jobs.
     card('Covering today',covHtml)+
-    // Jobs today lives in the Urgent tasks card (owner 2026-10-07).
-    card('Urgent tasks',`<span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>`+stockNotice+`<div style="margin-top:10px;font-size:14px;"><b>Jobs today</b> ${Number(j.jobs_today)||0}</div>`+dashPipelineHtml())+
+    card('Pipeline',dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
+    `<div class="gstat" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><span class="gstat-l">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div><span class="gstat-l">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
   `</div>`;
 }
 function greetStatsHtml(){
