@@ -3281,15 +3281,12 @@ function currentPersonKey(){ return role==='owner' ? 'admin' : (VIEW_AS_PEOPLE['
 // Joey's shift pill: 6am-6pm Denver (owner 2026-10-07).
 function shiftPillTick(){
   const el=document.getElementById('shiftPill'); if(!el) return;
-  el.classList.add('hidden');   // lives in Joey's "Covering today" card now (owner 2026-10-07)
-  document.querySelectorAll('.jy-shift').forEach(x=>{ x.innerHTML=joeyShiftHtml(); });
-}
-function joeyShiftHtml(){
+  const on=role==='secretary'&&userName==='Joey'; el.classList.toggle('hidden',!on); if(!on) return;
   let hh=0,mm=0; try{ const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',hour12:false,hour:'2-digit',minute:'2-digit'}).formatToParts(new Date()); hh=Number(p.find(x=>x.type==='hour').value)%24; mm=Number(p.find(x=>x.type==='minute').value); }catch(_){}
   const m=hh*60+mm, a=6*60, b=18*60, inShift=m>=a&&m<b;
   const left=b-m, clock=`${hh%12||12}:${String(mm).padStart(2,'0')}`;
-  const pct=inShift?Math.round(100*(m-a)/(b-a)):0;
-  return `<div style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#475569;"><span>🕕</span><span style="flex:1;max-width:90px;height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i style="display:block;height:4px;width:${pct}%;background:#16a34a;"></i></span><span>${inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT'}</span></div>`;
+  document.getElementById('shiftBar').style.width=(inShift?Math.round(100*(m-a)/(b-a)):0)+'%';
+  document.getElementById('shiftTxt').textContent=inShift?`${clock} · ${Math.floor(left/60)}h ${left%60}m left`:'Off shift · 6a–6p MT';
 }
 setInterval(shiftPillTick,60000);
 function updateWhoAvatar(){
@@ -6197,6 +6194,8 @@ function openChargeFlowAdmin(b){
 }
 
 // ── Customers ──────────────────────────────────────────────────────────────
+function _joeyAll(){ return role==='secretary'&&userName==='Joey'; }   // owner 2026-10-07: every company, read-only on others
+function _ownBiz(slug){ return !slug || businesses.some(b=>b.slug===slug); }
 async function renderCustomers(){
   const view=document.getElementById('view');
   view.innerHTML = `<div class="wrap"><input class="search" id="custSearch" placeholder="Search name, phone, email, address…">
@@ -6204,13 +6203,13 @@ async function renderCustomers(){
   const load=async(q)=>{
     const list=document.getElementById('clist');
     try{
-      const d=await api('customers',{ params:{ business:current.slug, q }});
+      const d=await api('customers',{ params:{ business:current.slug, q, ...(_joeyAll()?{ all:'1' }:{}) }});
       custCache={}; d.customers.forEach(c=>custCache[c.id]=c);
       list.innerHTML = d.customers.length ? `<table class="cust-table"><thead><tr><th>Name</th><th>Phone</th><th class="cx">Email</th><th class="cx-loc">Location</th><th class="cx-city">City</th><th class="cx" style="text-align:right;">Jobs</th><th class="cx" style="text-align:right;">Lifetime Value</th><th class="cx">Last Job</th><th class="cx">GDS</th><th class="cx"></th></tr></thead><tbody>${
         d.customers.map(c=>{
           const lastJob=c.last_job_at ? payFmtDateUTC(c.last_job_at.slice(0,10),{month:'short',day:'numeric',year:'numeric'}) : '—';
           const gdsBadge=c.has_gds ? `<span class="badge" style="background:#eaf6ec;color:#1a7a34;">✓ GDS</span>` : `<span class="meta">—</span>`;
-          return `<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}</td><td>${esc(c.phone||'')}</td><td class="cx">${esc(c.email||'')}</td><td class="cx-loc">${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td class="cx-city">${esc(c.city||'')}</td><td class="cx" style="text-align:right;">${c.jobs_count||0}</td><td class="cx" style="text-align:right;">${payFmtUSD(c.lifetime_value||0)}</td><td class="cx">${lastJob}</td><td class="cx">${gdsBadge}</td><td class="cx" style="text-align:right;white-space:nowrap;"><button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button></td></tr>`;
+          return `<tr data-cid="${c.id}" style="cursor:pointer"><td>${esc(c.name)}${c.business_name?'<div class="meta">'+esc(c.business_name)+'</div>':''}</td><td>${esc(c.phone||'')}</td><td class="cx">${esc(c.email||'')}</td><td class="cx-loc">${esc([c.city,c.state,c.postal_code].filter(Boolean).join(', '))}</td><td class="cx-city">${esc(c.city||'')}</td><td class="cx" style="text-align:right;">${c.jobs_count||0}</td><td class="cx" style="text-align:right;">${payFmtUSD(c.lifetime_value||0)}</td><td class="cx">${lastJob}</td><td class="cx">${gdsBadge}</td><td class="cx" style="text-align:right;white-space:nowrap;">${_ownBiz(c.business_slug)?`<button class="btn sm" data-newappt="${c.id}">Create Appointment</button> <button class="btn ghost sm" data-edit="${c.id}">Edit</button>`:''}</td></tr>`;
         }).join('')
       }</tbody></table>` : '<div class="empty">No customers found.</div>';
       list.querySelectorAll('[data-newappt]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const c=custCache[b.dataset.newappt]; if(c) openNewBooking(c); }));
@@ -6393,7 +6392,7 @@ async function openCustomerDetail(id){
   body.innerHTML='<div class="empty">Loading…</div>';
   modal.classList.remove('hidden');
   try{
-    const d=await api('customer_detail',{ params:{ business:current.slug, id }});
+    const d=await api('customer_detail',{ params:{ business:custCache[id]?.business_slug||current.slug, id }});
     renderCustomerDetail(d);
   }catch(err){ body.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
 }
@@ -6419,7 +6418,7 @@ function renderCustomerDetail(d){
 
   // Create Appointment / Edit also live here: on a phone the customer list
   // only shows name, phone and city, so the popup is where these are.
-  html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;">
+  if(_ownBiz(custCache[customer.id]?.business_slug)) html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px;">
     <button type="button" class="btn sm" id="cdNewAppt" style="width:auto;">Create Appointment</button>
     <button type="button" class="btn ghost sm" id="cdEdit" style="width:auto;">Edit</button>
   </div>`;
@@ -6480,7 +6479,7 @@ function renderCustomerDetail(d){
   }
 
   body.innerHTML = html;
-  body.querySelectorAll('.cd-job-row').forEach(row=>row.addEventListener('click',()=>openCustomerJobBooking(row.dataset.jobid)));
+  body.querySelectorAll('.cd-job-row').forEach(row=>row.addEventListener('click',()=>openCustomerJobBooking(row.dataset.jobid, custCache[customer.id]?.business_slug)));
   const close=()=>document.getElementById('custDetailModal').classList.add('hidden');
   document.getElementById('cdNewAppt')?.addEventListener('click',()=>{ close(); openNewBooking(custCache[customer.id]||customer); });
   document.getElementById('cdEdit')?.addEventListener('click',()=>{ close(); openCustomerEdit(customer.id); });
@@ -6510,9 +6509,9 @@ new MutationObserver(()=>{
     document.getElementById('custDetailModal').classList.remove('hidden');
   },60);
 }).observe(document.getElementById('bkModal'),{ attributes:true, attributeFilter:['class'] });
-async function openCustomerJobBooking(jobId){
+async function openCustomerJobBooking(jobId, bizSlug){
   try{
-    const d=await api('bookings',{ params:{ business:current.slug, id:jobId }});
+    const d=await api('bookings',{ params:{ business:bizSlug||current.slug, id:jobId }});
     const b=(d.bookings||[])[0];
     if(!b){ toast('Could not open that job'); return; }
     document.getElementById('custDetailModal').classList.add('hidden');
@@ -6534,7 +6533,9 @@ let galleryGroup='new';
 // (server enforces this too; see resolveBusinessForPhotos in api/admin.js).
 // Everyone else's gallery is always their own business.
 let galleryBizSlug=null; // null = own business (current.slug)
-function galleryIsCrossBusiness(){ return galleryBizSlug==='handy-andy'; }
+function galleryIsCrossBusiness(){ return !!galleryBizSlug && galleryBizSlug!==current.slug && !businesses.some(b=>b.slug===galleryBizSlug); }
+function galleryJoeyAll(){ return role==='secretary'&&userName==='Joey'; }   // owner 2026-10-07: every folder, every business
+function galleryCanMove(){ return !galleryIsCrossBusiness() || galleryBizSlug==='handy-andy'; }
 // Multi-select for bulk move/delete. Cleared on tab switch (selections don't
 // carry across categories — a photo picked in New has nothing to do with To Post).
 let gallerySelected=new Set();
@@ -6668,7 +6669,7 @@ function galleryMoved(ids,to){
 async function renderGallery(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
-  if(galleryIsCrossBusiness()) galleryGroup='to_post';   // the only bucket she's allowed to see there
+  if(galleryIsCrossBusiness()&&!galleryJoeyAll()) galleryGroup='to_post';   // the only bucket she's allowed to see there
   galleryCache={}; galleryCounts=null;   // wiped so a business switch can't show the other company's photos
   await loadGalleryFolder(galleryGroup);
   drawGallery();
@@ -6679,7 +6680,7 @@ function drawGallery(){
   const crossBiz=galleryIsCrossBusiness();
   // Only Joey (Dom's secretary) ever sees this switch -- it's what opens the
   // Handy Andy: To Post view in the first place.
-  const switcher=(role==='secretary'&&scope==='doms') ? `<div class="gal-tabs" style="margin-bottom:8px;">
+  const switcher=galleryJoeyAll() ? `<div style="margin-bottom:8px;"><select id="galBizSel">${[...businesses,...(viewBusinesses||[]).filter(v=>!businesses.some(b=>b.slug===v.slug))].map(b=>`<option value="${esc(b.slug)}" ${(galleryBizSlug||current.slug)===b.slug?'selected':''}>${esc(b.name)}</option>`).join('')}</select></div>` : (role==='secretary'&&scope==='doms') ? `<div class="gal-tabs" style="margin-bottom:8px;">
       <button class="gal-tab ${!crossBiz?'on':''}" data-galbiz="own">Dom's photos</button>
       <button class="gal-tab ${crossBiz?'on':''}" data-galbiz="ha">Handy Andy: To Post</button>
     </div>` : '';
@@ -6691,6 +6692,7 @@ function drawGallery(){
   if(totalKnown===0 && galleryGroup!=='jiyah' && role!=='owner'){
     view.innerHTML=`<div class="wrap">${switcher}<div class="empty">${crossBiz?'Nothing in Handy Andy’s To Post right now.':'No job photos yet. Technicians add photos to each job from their app.'}</div></div>`;
     view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; renderGallery(); }));
+    document.getElementById('galBizSel')?.addEventListener('change',e=>{ galleryBizSlug=e.target.value===current.slug?null:e.target.value; gallerySelected.clear(); renderGallery(); });
     return;
   }
   // Badge counts are the server's real per-folder totals; they only fall back to
@@ -6727,11 +6729,11 @@ function drawGallery(){
     const checked=gallerySelected.has(String(p.id));
     return `<figure class="gal-item${checked?' gal-selected':''}" data-full="${esc(p.url)}" data-bid="${esc(p.booking_id)}" data-pid="${esc(p.id)}">
         ${crossBiz?'':`<button class="gal-del" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}" title="Delete photo">×</button>`}
-        <input type="checkbox" class="gal-check" data-pid="${esc(p.id)}" title="Select photo" ${checked?'checked':''}>
+        ${galleryCanMove()?`<input type="checkbox" class="gal-check" data-pid="${esc(p.id)}" title="Select photo" ${checked?'checked':''}>`:''}
         <img src="${esc(p.url)}" loading="lazy" alt="job photo">
         <figcaption><strong>${esc(p.customer_name)}</strong>${p.technician_name?' · '+esc(p.technician_name):''}<br>
           <span class="sub">${esc(fmtDateTime(p.scheduled_at||p.created_at))}${logoView?' · in '+esc(photoCatLabel(cur)):''}</span><br>
-          <label class="gal-movelbl">Move to <select class="gal-move" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}">${opts}</select></label>
+          ${galleryCanMove()?`<label class="gal-movelbl">Move to <select class="gal-move" data-pid="${esc(p.id)}" data-bid="${esc(p.booking_id)}">${opts}</select></label>`:''}
         </figcaption>
       </figure>`;
   };
@@ -6746,7 +6748,7 @@ function drawGallery(){
   view.innerHTML=`<div class="wrap">
     ${switcher}
     <div class="gal-tabs" id="galMainTabs">
-      ${(crossBiz?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
+      ${(crossBiz&&!galleryJoeyAll()?PHOTO_CATS.filter(c=>c.key==='to_post'):PHOTO_CATS).map(c=>`<button class="gal-tab ${galleryGroup===c.key?'on':''}" data-g="${c.key}">${c.label} <span class="gal-count">${counts[c.key]}</span></button>`).join('')}
       ${(!crossBiz&&role==='owner')?`<button class="gal-tab ${jiyahView?'on':''}" data-g="jiyah" title="Photos Jiyah has sent, in one place -- only you can see this tab">🔒 Jiyah Photos${galleryCache.jiyah?` <span class="gal-count">${galleryCache.jiyah.photos.length}</span>`:''}</button>`:''}
     </div>
     ${bulkBar}
@@ -6766,6 +6768,7 @@ function drawGallery(){
       : ''}
   </div>`;
   view.querySelectorAll('[data-galbiz]').forEach(b=>b.addEventListener('click',()=>{ galleryBizSlug=b.dataset.galbiz==='ha'?'handy-andy':null; gallerySelected.clear(); renderGallery(); }));
+  document.getElementById('galBizSel')?.addEventListener('change',e=>{ galleryBizSlug=e.target.value===current.slug?null:e.target.value; gallerySelected.clear(); renderGallery(); });
   tabsToSelect(document.getElementById('galMainTabs'));
   view.querySelectorAll('.gal-tab[data-g]').forEach(t=>t.addEventListener('click',()=>{
     galleryGroup=t.dataset.g; gallerySelected.clear(); drawGallery();
@@ -10619,6 +10622,14 @@ async function renderTechnicians(){
       });
     });
   }catch(err){ const w=document.getElementById('techWrap'); if(w) w.innerHTML=`<div class="empty">${esc(err.message)}</div>`; }
+  if(_joeyAll()){
+    try{
+      const a=await api('technicians',{ params:{ business:current.slug, all:'1' }});
+      const w=document.getElementById('techWrap'); if(!w||!onScreen('technicians')) return;
+      const rows=(a.technicians||[]).filter(t=>t.active).sort((x,y)=>(x.business_name||'').localeCompare(y.business_name||'')||(x.name||'').localeCompare(y.name||''));
+      w.insertAdjacentHTML('beforeend',`<h3 style="margin:22px 0 8px;">All companies</h3><table class="cust-table"><thead><tr><th>Name</th><th>Phone</th><th>Business</th><th>Area</th><th>Status</th></tr></thead><tbody>${rows.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.phone||'')}</td><td>${esc(t.business_name)}</td><td>${esc(t.area_name||'')}</td><td>${esc(t.status||'')}</td></tr>`).join('')}</tbody></table>`);
+    }catch(_){}
+  }
 }
 
 // ── Notes ───────────────────────────────────────────────────────────────────
@@ -20167,7 +20178,7 @@ function joeyCardsHtml(){
   const card=(l,v)=>`<div class="gstat"><span class="gstat-l">${l}</span>${v}</div>`;
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
-  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div><div class="jy-shift">${joeyShiftHtml()}</div></div>`;
+  const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div></div>`;
   const u=Number(j.urgent_tasks)||0;
   const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
   const low=Number(greetingData.lowStockTechs)||0;

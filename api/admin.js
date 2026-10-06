@@ -6364,10 +6364,12 @@ async function bookingNoteDelete(req, res, db, auth, body) {
 // scope, which is correct for everything else; this is the one deliberate,
 // narrow hole in that rule. Returns { biz, crossBusinessToPostOnly } so
 // callers can clamp what a cross-business caller is allowed to see/do.
-async function resolveBusinessForPhotos(db, auth, slug) {
+async function resolveBusinessForPhotos(db, auth, slug, opts) {
   try {
     return { biz: await resolveBusiness(db, auth, slug), crossBusinessToPostOnly: false };
   } catch (e) {
+    // Joey views every folder of every business (owner 2026-10-07); writes keep the rule below.
+    if (opts && opts.read && isAllJobsViewer(auth)) return { biz: await resolveBusiness(db, auth, slug, { view: true }), crossBusinessToPostOnly: false };
     if (auth.role === 'secretary' && auth.scope === 'doms' && slug === 'handy-andy') {
       const { data, error } = await db.from('businesses').select('id, slug, name, timezone').eq('slug', slug).single();
       if (error || !data) throw e;
@@ -6380,7 +6382,7 @@ async function resolveBusinessForPhotos(db, auth, slug) {
 // ── Photo gallery (every job photo for the business, newest first) ───────────
 async function photoGallery(req, res, db, auth) {
   let biz, crossBusinessToPostOnly;
-  try { ({ biz, crossBusinessToPostOnly } = await resolveBusinessForPhotos(db, auth, req.query.business)); } catch (e) { return bail(res, e); }
+  try { ({ biz, crossBusinessToPostOnly } = await resolveBusinessForPhotos(db, auth, req.query.business, { read: true })); } catch (e) { return bail(res, e); }
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   const offset = Number(req.query.offset) || 0;
   // ?logo=1 narrows to the logo shots (migration 0105) — a finished mount with
@@ -7130,12 +7132,15 @@ function jobHasGds(lineItems) {
 }
 
 async function customers(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  // Joey sees every company's customers (owner 2026-10-07). Read-only; edits keep the normal gate.
+  const allCos = isAllJobsViewer(auth) && req.query.all === '1';
+  let biz = null;
+  if (!allCos) { try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); } }
   const term = (req.query.q || '').toString().trim();
 
   let q = db.from('customers')
-    .select('id, name, phone, email, address_line1, city, state, postal_code, created_at')
-    .eq('business_id', biz.id);
+    .select('id, name, phone, email, address_line1, city, state, postal_code, created_at' + (allCos ? ', business_id, business:businesses(slug, name)' : ''));
+  if (!allCos) q = q.eq('business_id', biz.id);
   if (term) {
     const like = `%${term}%`;
     q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like},address_line1.ilike.${like}`);
@@ -7146,6 +7151,7 @@ async function customers(req, res, db, auth) {
   const { data, error } = await q.order('name', { ascending: true }).limit(200);
   if (error) throw error;
   const customerRows = data || [];
+  if (allCos) for (const c of customerRows) { c.business_slug = c.business?.slug || ''; c.business_name = c.business?.name || ''; delete c.business; }
 
   // One extra query for every customer's job history, aggregated here in JS
   // (no per-customer round-trip) — this is what turns the list from a bare
@@ -7158,9 +7164,10 @@ async function customers(req, res, db, auth) {
     const jobRows = [];
     const PAGE = 1000;
     for (let from = 0; ; from += PAGE) {
-      const { data: page, error: pageErr } = await db.from('bookings')
-        .select('customer_id, price, status, scheduled_at, review_rating, line_items:booking_line_items ( name )')
-        .eq('business_id', biz.id)
+      let jq = db.from('bookings')
+        .select('customer_id, price, status, scheduled_at, review_rating, line_items:booking_line_items ( name )');
+      if (!allCos) jq = jq.eq('business_id', biz.id);
+      const { data: page, error: pageErr } = await jq
         .in('customer_id', customerRows.map(c => c.id))
         .range(from, from + PAGE - 1);
       if (pageErr) { console.warn('[customers] job aggregate failed:', pageErr.message); break; }
@@ -7207,7 +7214,7 @@ async function mergedCustomerId(db, id) {
   return data?.keeper_id || id;
 }
 async function customerDetail(req, res, db, auth) {
-  let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
+  let biz; try { biz = await resolveBusiness(db, auth, req.query.business, { view: true }); } catch (e) { return bail(res, e); }
   const id = await mergedCustomerId(db, (req.query.id || '').toString());
   if (!id) return res.status(400).json({ error: 'id required' });
 
@@ -7471,7 +7478,28 @@ async function placeDetails(req, res, auth) {
   }
 }
 
+// Joey sees every company's technicians (owner 2026-10-07): name, phone,
+// business, area, status ONLY -- never pay, rates, payroll or availability.
+async function techniciansAllCompanies(req, res, db) {
+  const { data, error } = await db.from('technicians')
+    .select('id, name, phone, status, active, service_area_id, business:businesses!inner(slug, name, active)')
+    .eq('business.active', true).order('name');
+  if (error) throw error;
+  const techs = (data || []).map(t => ({ id: t.id, name: t.name, phone: t.phone, status: t.status, active: t.active, service_area_id: t.service_area_id, business_slug: t.business?.slug || '', business_name: t.business?.name || '', area_name: null }));
+  try {
+    const areaIds = [...new Set(techs.map(t => t.service_area_id).filter(Boolean))];
+    if (areaIds.length) {
+      const { data: areas } = await db.from('service_areas').select('id, name').in('id', areaIds);
+      const areaOf = new Map((areas || []).map(a => [a.id, a.name]));
+      for (const t of techs) t.area_name = areaOf.get(t.service_area_id) || null;
+    }
+  } catch { /* cosmetic */ }
+  for (const t of techs) delete t.service_area_id;
+  return res.status(200).json({ technicians: techs });
+}
+
 async function technicians(req, res, db, auth) {
+  if (isAllJobsViewer(auth) && req.query.all === '1') return await techniciansAllCompanies(req, res, db);
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   // service_area_id (0022) powers the New Booking metro filter; max_jobs_per_day
   // (0034) is the per-tech daily cap; photo_url/bio_years/bio_blurb (0060) power
