@@ -1385,7 +1385,8 @@ async function pipelineOp(res, db, auth, body) {
   const { cards, ctx } = computeCards(raw, nowMs);
   const card = cards.find((c) => c.key === key);
   if (!card) return res.status(404).json({ error: 'That card is no longer on the board. Refresh and try again.' });
-  const actionScope=op==='not_a_lead' && auth.role==='secretary' && auth.name==='Joey' ? pipelineSlugsFor(auth) : pipelineWriteSlugsFor(auth);
+  const actionScope=(op==='not_a_lead'||op==='mark_lost') && auth.role==='secretary' && auth.name==='Joey' ?   // Joey: Lost + Not a lead on every card (owner 2026-10-06)
+    pipelineSlugsFor(auth) : pipelineWriteSlugsFor(auth);
   if (!cardVisible(card, actionScope)) return res.status(403).json({ error: 'Forbidden for this business' });
   const biz = card.shownSlug && ctx.bizBySlug.get(card.shownSlug);
   const bizId = biz ? biz.id : null;

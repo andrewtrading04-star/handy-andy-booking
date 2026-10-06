@@ -11577,7 +11577,7 @@ function plDetailHtml(c){
   if(!closed) b.push('<button type="button" class="pl-btn" data-pl="notlead">Not a lead</button>');
   if(lost) b.push('<button type="button" class="pl-btn" data-pl="reopen">Reopen</button>');
   // Other-brand cards allow notes and Not a lead; keep remaining actions restricted.
-  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); const notLead=b.filter(x=>x.includes('data-pl="notlead"')); b.length=0; b.push(...notLead); }
+  if(vo){ const keep=a.filter(x=>['job','est'].some(k=>x.includes(`data-pl="${k}"`))); a.length=0; a.push(...keep); const notLead=b.filter(x=>x.includes('data-pl="notlead"')||(userName==='Joey'&&x.includes('data-pl="lost"'))); b.length=0; b.push(...notLead); }
   const f=[];
   f.push(phone
     ? `<b>${esc(c.phone_pretty||fmtPhone(c.phone))}</b>${c.business&&c.business.name?' · '+esc(c.business.name):''}`
@@ -11932,7 +11932,7 @@ function plClick(e){
   const el=b.closest('[data-plkey]'), c=el&&plCard(el.dataset.plkey);
   if(!c) return;
   // View-only card: reads only; the server refuses the rest (owner 2026-10-03).
-  if(c.view_only && !['note-add','notlead','toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel'].includes(act)) return;
+  if(c.view_only && !['note-add','notlead','toggle','tl-text','tl-call','job','est','estview','askwhy','askwhy-fresh','ask-x','lost-cancel',...(userName==='Joey'?['lost','reason','lost-save']:[])].includes(act)) return;
   switch(act){
     case 'toggle':
       _plOpen=_plOpen===c.key?null:c.key; _plTab='ov'; _plEstOpen=false;
