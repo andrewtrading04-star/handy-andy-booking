@@ -118,6 +118,9 @@
   .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
   .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
   .nav-badge.urgent{background:#dc2626;animation:navbadgepulse 1.6s ease-in-out infinite;}
+  /* ASAP column pulses while it has tasks (owner 2026-10-07). */
+  .tk-pulse{animation:tkpulse 1.6s ease-in-out infinite;border-radius:8px;}
+  @keyframes tkpulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.6);}50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
   @keyframes navbadgepulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}50%{box-shadow:0 0 0 5px rgba(220,38,38,0);}}
   @media(prefers-reduced-motion:reduce){.nav-badge.urgent{animation:none;}}
 
@@ -11123,7 +11126,7 @@ function paintTasks(){
     <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k), struck=_tk.tasks.filter(t=>t.done_at&&!t.cleared_at&&t.color===k);
       // Phone: red with tasks is always open (owner 2026-10-07).
       const mc=k==='red'&&list.length?' m-open m-lock':(plMobOpen.has('tkcol-'+k)?' m-open':'');
-      return `<div class="plv-col${_tk.filter===k?' on':''}${mc}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}${struck.map(card).join('')}</div></div>`; }).join('')}</div>
+      return `<div class="plv-col${_tk.filter===k?' on':''}${mc}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h${k==='yellow'&&list.length?' tk-pulse':''}"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}${struck.map(card).join('')}</div></div>`; }).join('')}</div>
     ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
   </div>`;
   tasksBadge();
@@ -20213,7 +20216,7 @@ function joeyCardsHtml(){
     card('Covering today',covHtml)+
     card('Pipeline',dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
-    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div><span class="gstat-l">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div><span class="gstat-l">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
+    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div style="text-align:center;"><span class="gstat-l" style="display:block;">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div style="text-align:center;"><span class="gstat-l" style="display:block;">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
   `</div>`;
 }
 function greetStatsHtml(){
