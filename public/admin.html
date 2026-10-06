@@ -17650,7 +17650,8 @@ function estTotals(items, taxRate){
   return { subtotal, tax, total:Math.round((subtotal+tax)*100)/100 };
 }
 
-let _estRequest=0,_estRows=[],_estSelected=null,_estQuery='',_estSort='newest',_estMobOpen=null;
+let _estRequest=0,_estRows=[],_estSelected=null,_estQuery='',_estSort='newest',_estMobOpen=null,_estQT=null;
+function _estAllCos(){ return role==='secretary'&&userName==='Joey'; }   // owner 2026-10-07
 // The clock on a collapsed phone row: hours since the quote went out while
 // it's still waiting (same rule as the big timer inside the card), or how
 // long a new request has sat unanswered. Red once it's a day or more.
@@ -17703,7 +17704,7 @@ async function renderEstimates(){
   document.getElementById('estFilterSel').addEventListener('change', e=>{ estFilter=e.target.value; renderEstimates(); });
   document.getElementById('estMoreBtn').addEventListener('click', e=>{ const on=view.querySelector('.est-page').classList.toggle('est-more'); e.currentTarget.classList.toggle('on',on); });
   view.querySelector('#estSort').value=_estSort;
-  view.querySelector('#estSearch').addEventListener('input',e=>{_estQuery=e.target.value;paintEstimates();});
+  view.querySelector('#estSearch').addEventListener('input',e=>{_estQuery=e.target.value;if(_estAllCos()){clearTimeout(_estQT);_estQT=setTimeout(()=>{const el=document.getElementById('estSearch');const pos=el&&el.selectionStart;renderEstimates();const n=document.getElementById('estSearch');if(n){n.focus();try{n.setSelectionRange(pos,pos);}catch(_){}}},400);}else paintEstimates();});
   view.querySelector('#estSort').addEventListener('change',e=>{_estSort=e.target.value;paintEstimates();});
   _estRows=[];
   loadEstFollowups();
@@ -17719,7 +17720,8 @@ async function renderEstimates(){
     // (there's no way for a customer to actively decline, so aging quotes just
     // get a "🚫 Not approved · no response in Nd+ days" badge on the card below,
     // via isNotApproved/NOT_APPROVED_DAYS, instead of being hidden away.
-    const d=await api('estimates',{ params:{ business:current.slug, status:estFilter }});
+    // Joey: every company; last 3 days, or all-time when searching (owner 2026-10-07)
+    const d=await api('estimates',{ params:{ business:current.slug, status:estFilter, ...(_estAllCos()?{ all:'1', q:_estQuery.trim() }:{}) }});
     if(request!==_estRequest||!onScreen('estimates'))return;
     let items=d.estimates||[];
     refreshEstimateBadge();
@@ -17737,7 +17739,7 @@ function paintEstimates(){
     // office can see how many phone estimates vs website estimates are waiting.
     { const n={all:_estRows.length,phone:_estRows.filter(e=>estOriginOf(e)==='phone').length,web:_estRows.filter(e=>estOriginOf(e)==='web').length};
       document.querySelectorAll('#estOrigin [data-eon]').forEach(s=>{ s.textContent=' '+n[s.dataset.eon]; }); }
-    const items=_estRows.filter(e=>(estOrigin==='all'||estOriginOf(e)===estOrigin)&&(!query||[e.customer_name,e.customer_phone,e.customer_email,e.service_label,e.customer_zip].join(' ').toLowerCase().includes(query)));
+    const items=_estRows.filter(e=>(estOrigin==='all'||estOriginOf(e)===estOrigin)&&(!query||_estAllCos()||[e.customer_name,e.customer_phone,e.customer_email,e.service_label,e.customer_zip].join(' ').toLowerCase().includes(query)));
     const value=e=>estTotals(e.line_items||[],Number(e.tax_rate)||0).total;
     items.sort((a,b)=>_estSort==='value'?value(b)-value(a):(_estSort==='oldest'?1:-1)*(Date.parse(a.created_at||0)-Date.parse(b.created_at||0)));
     document.getElementById('estCount').textContent=`${items.length} estimate${items.length===1?'':'s'}`;
@@ -17752,7 +17754,7 @@ function paintEstimates(){
       wrap.innerHTML=`<div class="est-mlist">${items.map(e=>{ const on=e.id===_estMobOpen;
         return `<div class="est-mrow${on?' open':''}" id="estm-${esc(e.id)}"><button type="button" class="est-mhead" data-est-mob="${esc(e.id)}" aria-expanded="${on}">
           <span class="est-mline"><strong>${esc(e.customer_name||e.customer_phone||'Unnamed customer')}</strong>
-            <span>${esc(e.service_label||'Estimate request')}</span>
+            <span>${e.business_name?esc(e.business_name)+' · ':''}${esc(e.service_label||'Estimate request')}</span>
             <span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span></span>
           ${estRowClock(e)}<span class="est-mchev">›</span></button>${on?`<div class="est-mbody">${estCard(e)}</div>`:''}</div>`; }).join('')}</div>`;
       wrap.querySelectorAll('[data-est-mob]').forEach(b=>b.addEventListener('click',()=>{
@@ -17761,7 +17763,7 @@ function paintEstimates(){
         if(_estMobOpen) document.getElementById('estm-'+id)?.scrollIntoView({behavior:'smooth',block:'start'});
       }));
     } else {
-    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email&&!e.customer_phone?' · <b style="color:#b45309;">No phone or email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
+    wrap.innerHTML=`<div class="est-inbox"><div class="ci-list" role="group" aria-label="Select an estimate">${items.map(e=>`<button type="button" class="ci-item" data-est-select="${esc(e.id)}" aria-pressed="${e.id===selected.id}"><strong>${esc(e.customer_name||'Unnamed customer')}</strong><span>${e.business_name?esc(e.business_name)+' · ':''}${esc(e.service_label||'Estimate request')}</span><span>${esc(EST_STATUS[e.status]||e.status)} · ${e.line_items?.length?money2(value(e)):'Not priced'}</span><span>${esc(e.created_at?new Date(e.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'')}${e.source==='website_form'?' · Website message':e.source==='widget'?' · Website estimate':' · Phone call'}${e.source==='manual'&&!e.customer_email&&!e.customer_phone?' · <b style="color:#b45309;">No phone or email</b>':''}</span></button>`).join('')}</div><section class="est-detail" aria-label="Selected estimate">${estCard(selected)}</section></div>`;
     wrap.querySelector('.ci-list').scrollTop=scroll;
     wrap.querySelectorAll('[data-est-select]').forEach(b=>b.addEventListener('click',()=>{_estSelected=b.dataset.estSelect;paintEstimates();}));
     }

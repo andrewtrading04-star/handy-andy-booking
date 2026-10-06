@@ -11478,6 +11478,7 @@ async function cityPagesAnalytics(req, res, db, auth) {
 }
 
 async function estimates(req, res, db, auth) {
+  if (isAllJobsViewer(auth) && req.query.all === '1') return await estimatesAllCompanies(req, res, db);
   const biz = await resolveBusiness(db, auth, req.query.business || '');
   const status = (req.query.status || '').toString();
   // Select with the full column set; if an optional column (e.g. customer_zip
@@ -11561,6 +11562,57 @@ async function estimates(req, res, db, auth) {
     }
   } catch (e) { console.warn('[admin] estimates: booking lookup failed:', e.message); }
 
+  return res.status(200).json({ estimates: data || [] });
+}
+
+// Joey sees every company's estimates (owner 2026-10-07): last 3 days by
+// default; a search covers every estimate ever. Read-only; writes keep the
+// normal per-business gate. Deleted estimates are hard-deleted, so never show.
+async function estimatesAllCompanies(req, res, db) {
+  const status = (req.query.status || '').toString();
+  const q = (req.query.q || '').toString().replace(/[,()*%\]/g, ' ').trim().slice(0, 80);
+  let cols = 'id, business_id, service_label, customer_name, customer_phone, customer_email, customer_zip, customer_address, customer_city, customer_state, description, photo_url, preferred_slots, status, sms_consent, notes, source, line_items, tax_rate, upsells, accepted_upsells, approved_total, approved_at, created_at, customer_note, contacted_at, contacted_by, texted_at, texted_by, emailed_at, emailed_by, text_opened_at, email_opened_at, followup_emailed_at, followup_sent_by, business:businesses(slug, name)';
+  const runQuery = () => {
+    let x = db.from('estimates').select(cols).order('created_at', { ascending: false }).limit(200);
+    if (q) {
+      const digits = q.replace(/D/g, '');
+      const ors = ['customer_name', 'customer_email', 'service_label', 'customer_zip'].map(c => `${c}.ilike.*${q}*`);
+      if (digits.length >= 3) ors.push(`customer_phone.ilike.*${digits}*`);
+      return x.or(ors.join(','));
+    }
+    x = x.gte('created_at', new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString());
+    if (status === 'website') return x.eq('source', 'website_form').neq('status', 'archived');
+    if (status && status !== 'all') x = x.eq('status', status);
+    else x = x.neq('status', 'archived');
+    return x;
+  };
+  let { data, error } = await runQuery();
+  for (let i = 0; error && i < 4; i++) {
+    const col = missingColumn(error.message);
+    if (!col || !cols.includes(col)) break;
+    cols = cols.split(',').map(t => t.trim()).filter(c => c !== col).join(', ');
+    ({ data, error } = await runQuery());
+  }
+  if (error) throw error;
+  for (const e of data || []) { e.business_slug = e.business?.slug || ''; e.business_name = e.business?.name || ''; delete e.business; }
+  try {
+    const ids = (data || []).map((e) => e.id);
+    if (ids.length) {
+      const { data: ns } = await db.from('estimate_office_notes').select('estimate_id, body, created_by, created_at').in('estimate_id', ids).order('created_at');
+      const by = new Map();
+      for (const n of ns || []) (by.get(n.estimate_id) || by.set(n.estimate_id, []).get(n.estimate_id)).push({ body: n.body, by: n.created_by, at: n.created_at });
+      for (const e of data || []) e.office_notes = by.get(e.id) || [];
+    }
+  } catch (e) { console.warn('[admin] estimates(all): office notes failed:', e.message); }
+  try {
+    const ids = (data || []).filter(e => e.status === 'scheduled').map(e => e.id);
+    if (ids.length) {
+      const { data: bks } = await db.from('bookings').select('id, metadata->>source_estimate_id')
+        .in('metadata->>source_estimate_id', ids).neq('status', 'cancelled');
+      const byEst = new Map((bks || []).map(b => [b.source_estimate_id, b.id]));
+      for (const e of (data || [])) if (byEst.has(e.id)) e.booking_id = byEst.get(e.id);
+    }
+  } catch (e) { console.warn('[admin] estimates(all): booking lookup failed:', e.message); }
   return res.status(200).json({ estimates: data || [] });
 }
 
