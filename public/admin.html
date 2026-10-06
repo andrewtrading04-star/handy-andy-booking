@@ -11667,7 +11667,7 @@ function plDetailHtml(c){
     <b>Not called back · ${esc(who)}'s lead</b><br>${esc(plTitle(c))} ${un.kind==='voicemail'?'left a voicemail':un.kind==='text'?'texted us':'called and we missed it'} ${esc(plWhen(un.at,c.tz))}. No reply for ${un.hours>=1?un.hours+'h':un.mins+' min'}.</div>`:'';
   // Ask why (owner 2026-09-27): Opus explains what's holding this card back.
   const W_=_plWhy&&_plWhy.key===c.key?_plWhy:null;
-  const whyBox=c.stage==='booked'?'':(W_&&W_.ans
+  const whyBox=(c.stage==='booked'||c.stage==='new')?'':(W_&&W_.ans
     ?`<div style="border:1px solid var(--line);background:#f8fafc;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13.5px;line-height:1.5;">
         <div><b>Why it's stuck:</b> ${esc(W_.ans.holding_back)}</div>
         ${W_.ans.what_went_wrong&&!/^\W*(nothing|none|no (real |major )?(mistakes?|issues?|problems?)|n\/a)\b/i.test(W_.ans.what_went_wrong)&&!/nothing (major |really )?went wrong/i.test(W_.ans.what_went_wrong)?`<div style="margin-top:5px;"><b>What went wrong:</b> ${esc(W_.ans.what_went_wrong)}</div>`:''}
