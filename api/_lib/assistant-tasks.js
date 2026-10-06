@@ -119,7 +119,8 @@ async function joeyPhone(db, fallback) {
   } catch { /* fallback below */ }
   return fallback || '';
 }
-// Same address Joey's booking alerts go to (owner-notify.js).
+// staff_users.email first (empty for Joey today), else the address Joey's
+// booking alerts already go to (owner-notify.js), so Email works now.
 async function joeyEmail(db) {
   try {
     const { data } = await db.from('staff_users').select('email').eq('name', 'Joey').eq('active', true).maybeSingle();
@@ -220,6 +221,17 @@ async function sendTaskEmail(db, t, who) {
   await addEvent(db, t.id, 'email_failed', reason, who);
   return { ok: false, reason };
 }
+// One channel throwing (e.g. a DB error on its claim) never hides the other's
+// result or turns a create into a 500 (owner 2026-10-07).
+async function safeSend(db, t, kind, who, fn) {
+  try { return await fn(); }
+  catch (e) {
+    const reason = clip((e && e.message) || 'not sent', 200);
+    console.warn(`[tasks] ${kind} notify failed:`, reason);
+    try { await addEvent(db, t.id, kind === 'text' ? 'text_failed' : 'email_failed', reason, who); } catch { /* logged above */ }
+    return { ok: false, reason };
+  }
+}
 async function runNotify(db, t, want, me, opts) {
   const shift = await joeyShift(db);
   if (!shift.on) {
@@ -227,8 +239,8 @@ async function runNotify(db, t, want, me, opts) {
     return { skipped: 'off_shift', shift, text: want.text ? off : null, email: want.email ? off : null };
   }
   const [text, email] = await Promise.all([
-    want.text ? sendTaskText(db, t, me.who, opts) : null,
-    want.email ? sendTaskEmail(db, t, me.who) : null,
+    want.text ? safeSend(db, t, 'text', me.who, () => sendTaskText(db, t, me.who, opts)) : null,
+    want.email ? safeSend(db, t, 'email', me.who, () => sendTaskEmail(db, t, me.who)) : null,
   ]);
   return { text, email };
 }
@@ -258,7 +270,7 @@ export function perms(t, me, shiftOn) {
       reopen: st === 'done', delete: true, comment: true, check_items: true, notify: red && openish && !!shiftOn, order: st !== 'done' };
   }
   if (mine) {
-    return { ...NO_PERMS, edit: true, level: !red, tick: openish || st === 'check', untick: st === 'done', reopen: st === 'done', delete: true, comment: true, check_items: true };
+    return { ...NO_PERMS, edit: true, level: !red, tick: openish || st === 'check', untick: st === 'done', reopen: st === 'done', delete: true, comment: true, check_items: st !== 'done' };
   }
   return { ...NO_PERMS, tick: openish, untick: st === 'check', comment: true, check_items: st !== 'done' };
 }
@@ -274,7 +286,8 @@ function decorate(t, ctx) {
     replies: cs.length, unread,
     checklist: list, checklist_done: list.filter((i) => i && i.done).length, checklist_total: list.length,
     due_state: dueState(t.due_on, ctx.today),
-    needs_you: !!me.owner && !t.deleted_at && status !== 'done' && (status === 'check' || unread > 0),
+    // A reply on a Done task counts too: nothing disappears silently.
+    needs_you: !!me.owner && !t.deleted_at && (status === 'check' || unread > 0),
     text: textState(t), email: emailState(t),
     can: perms(t, me, ctx.shift && ctx.shift.on),
   };
@@ -286,6 +299,28 @@ function commentMap(rows) {
   const m = new Map();
   for (const r of rows || []) { if (!m.has(r.task_id)) m.set(r.task_id, []); m.get(r.task_id).push(r); }
   return m;
+}
+// Comment rows for the listed tasks only: ids in chunks, paged past the
+// PostgREST row cap, so replies/unread never come from a random subset (owner 2026-10-07).
+async function commentRowsFor(db, ids) {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const parts = await Promise.all(chunks.map(async (chunk) => {
+    const rows = [];
+    for (let total = null; total == null || rows.length < total;) {
+      const { data, error, count } = await db.from('assistant_task_events')
+        .select('task_id, by, created_at', { count: total == null ? 'exact' : undefined })
+        .eq('kind', 'comment').in('task_id', chunk)
+        .order('created_at', { ascending: true }).order('id', { ascending: true })
+        .range(rows.length, rows.length + 999);
+      if (error) throw error;
+      if (total == null) total = Number(count) || 0;
+      if (!data || !data.length) break;
+      rows.push(...data);
+    }
+    return rows;
+  }));
+  return parts.flat();
 }
 async function ctxFor(db, me, commentRows, shift) {
   return { me, comments: commentMap(commentRows), today: denverNow().date, shift: shift || await joeyShift(db) };
@@ -324,22 +359,24 @@ async function listV2(req, res, db, me) {
     const ctx = await ctxFor(db, me, (ev || []).filter((e) => e.kind === 'comment'));
     return res.status(200).json({ task: decorate(t, ctx), events: ev || [], shift: ctx.shift });
   }
-  const [open, done, cs, shift, ch] = await Promise.all([
+  const [open, done, shift, ch] = await Promise.all([
     db.from('assistant_tasks').select('*').is('deleted_at', null).is('cleared_at', null).order('created_at', { ascending: true }).limit(500),
     db.from('assistant_tasks').select('*').is('deleted_at', null).not('cleared_at', 'is', null).order('cleared_at', { ascending: false }).limit(300),
-    db.from('assistant_task_events').select('task_id, by, created_at').eq('kind', 'comment').limit(10000),
     joeyShift(db),
     me.owner && !me.viewAs ? channels(db) : null,
   ]);
-  for (const r of [open, done, cs]) if (r.error) throw r.error;
-  const ctx = await ctxFor(db, me, cs.data, shift);
+  for (const r of [open, done]) if (r.error) throw r.error;
+  const cs = await commentRowsFor(db, [...(open.data || []), ...(done.data || [])].map((t) => t.id));
+  const ctx = await ctxFor(db, me, cs, shift);
   const tasks = (open.data || []).sort(byOrder).map((t) => decorate(t, ctx));
   const doneList = (done.data || []).map((t) => decorate(t, ctx));
   const openish = (t) => t.status === 'open' || t.status === 'sent_back';
   const emergency = tasks.filter((t) => t.color === 'red' && openish(t)).length;
   const asap = tasks.filter((t) => t.color === 'yellow' && openish(t)).length;
-  const needsYou = me.owner ? tasks.filter((t) => t.needs_you).length : 0;
-  const joeyBadge = me.owner ? 0 : tasks.filter((t) => ((t.color === 'red' || t.color === 'yellow') && openish(t)) || t.unread > 0).length;
+  // Replies on Done tasks raise badges too (owner 2026-10-07).
+  const doneUnread = doneList.filter((t) => t.unread > 0).length;
+  const needsYou = me.owner ? tasks.filter((t) => t.needs_you).length + doneList.filter((t) => t.needs_you).length : 0;
+  const joeyBadge = me.owner ? 0 : tasks.filter((t) => ((t.color === 'red' || t.color === 'yellow') && openish(t)) || t.unread > 0).length + doneUnread;
   return res.status(200).json({
     tasks, done: doneList,
     me: { role: me.owner ? 'owner' : 'joey', name: me.who, view_as: me.viewAs, read_only: me.viewAs },
@@ -348,7 +385,7 @@ async function listV2(req, res, db, me) {
       badge: me.owner ? needsYou : joeyBadge, needs_you: needsYou,
       emergency_open: emergency, asap_open: asap,
       check: tasks.filter((t) => t.status === 'check').length,
-      unread: tasks.filter((t) => t.unread > 0).length,
+      unread: tasks.filter((t) => t.unread > 0).length + doneUnread,
     },
   });
 }
