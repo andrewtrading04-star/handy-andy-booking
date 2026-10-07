@@ -118,11 +118,11 @@
   .side-nav button.on{background:var(--accent-soft);color:var(--accent);}
   .nav-badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:9px;padding:0 5px;}
   .nav-badge.urgent{background:#dc2626;animation:navbadgepulse 1.6s ease-in-out infinite;}
-  /* ASAP header pulses while it has tasks (owner 2026-10-07). */
+  /* ASAP column pulses while it has tasks (owner 2026-10-07). */
   .tk-pulse{animation:tkpulse 1.6s ease-in-out infinite;border-radius:8px;}
   @keyframes tkpulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.6);}50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
   @keyframes navbadgepulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}50%{box-shadow:0 0 0 5px rgba(220,38,38,0);}}
-  @media(prefers-reduced-motion:reduce){.nav-badge.urgent,.tk-pulse,.tk-gd.pulse{animation:none;}}
+  @media(prefers-reduced-motion:reduce){.nav-badge.urgent{animation:none;}}
 
   .side-section{font-size:11px;font-weight:700;letter-spacing:.7px;color:var(--mute);padding:14px 16px 6px;text-transform:uppercase;}
   /* ── Collapsible sidebar (owner trial 2026-10-01; dark theme removed same day at his request) ── */
@@ -666,154 +666,36 @@
   .ps-s{font-size:12.5px;color:#4b5563;margin-top:2px;line-height:1.4;}
   .ps-when{font-size:11.5px;color:#6b7280;text-align:right;white-space:nowrap;line-height:1.35;}
   .ps-link{display:inline-block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:700;}
-  /* ── Tasks (owner 2026-10-07): light grouped list, right drawer, phone sheet. Own tk- classes; Pipeline untouched. ── */
-  .tk-wrap{max-width:980px;}
-  .tk-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 0 8px;}
-  .tk-head h2{margin:0;font-size:24px;font-weight:800;letter-spacing:-.02em;color:#0f172a;}
-  .tk-new{display:inline-flex;align-items:center;gap:6px;border:none;background:#2563eb;color:#fff;font:inherit;font-size:14px;font-weight:700;padding:9px 14px;border-radius:9px;cursor:pointer;box-shadow:0 1px 2px rgba(37,99,235,.25);}
-  .tk-new:hover{background:#1d4ed8;} .tk-new span{font-size:19px;line-height:1;font-weight:600;}
-  .tk-tabs{display:flex;gap:4px;border-bottom:1px solid #e5e7eb;margin-bottom:14px;background:var(--bg);position:sticky;top:0;z-index:6;}
-  .tk-tabs button{border:none;background:none;font:inherit;font-size:14px;font-weight:700;color:#64748b;padding:10px 12px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
-  .tk-tabs button.on{color:#0f172a;border-bottom-color:#0f172a;}
-  .tk-g{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:12px;}
-  .tk-g.tk-drop{border-color:#93c5fd;box-shadow:0 0 0 3px #dbeafe;}
-  .tk-gh{display:flex;align-items:center;gap:8px;width:100%;border:none;background:#fff;font:inherit;padding:11px 14px;cursor:pointer;text-align:left;color:#0f172a;border-radius:12px 12px 0 0;}
-  .tk-g:not(.open) .tk-gh{border-radius:12px;}
-  .tk-gh b{font-size:13.5px;font-weight:800;}
-  .tk-gn{font-size:12px;font-weight:800;color:#475569;background:#f1f5f9;border-radius:999px;padding:1px 8px;}
-  .tk-gc{margin-left:auto;color:#94a3b8;font-size:12px;transition:transform .15s;}
-  .tk-g:not(.open) .tk-gc{transform:rotate(-90deg);}
-  .tk-g:not(.open) .tk-gb{display:none;}
-  .tk-g.lock .tk-gh{cursor:default;} .tk-g.lock .tk-gc{display:none;}
-  .tk-gh.tk-pulse{border-radius:12px 12px 0 0;}
-  .tk-gd{width:9px;height:9px;border-radius:50%;background:var(--d);flex:none;}
-  .tk-gd.pulse{animation:tkdot 1.4s ease-in-out infinite;}
-  @keyframes tkdot{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}50%{box-shadow:0 0 0 6px rgba(220,38,38,0);}}
-  .tk-gb{border-top:1px solid #eef0f3;}
-  .tk-r{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid #f1f5f9;cursor:pointer;background:#fff;min-height:46px;}
-  .tk-gb>.tk-r:first-child{border-top:none;} .tk-gb>.tk-r:last-child{border-radius:0 0 12px 12px;}
-  .tk-r:hover{background:#f8fafc;} .tk-r.sel{background:#eff6ff;}
-  .tk-grip{flex:none;width:14px;margin-right:-4px;color:#cbd5e1;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;font-size:15px;line-height:1;text-align:center;}
-  .tk-r:hover .tk-grip{color:#64748b;} .tk-grip:not([data-tk-grip]){cursor:default;}
-  .tk-ghost{opacity:.95;box-shadow:0 12px 30px rgba(15,23,42,.2);border-radius:10px;border:1px solid #e5e7eb;}
-  .tk-ph{border:2px dashed #93c5fd;border-radius:10px;margin:4px 8px;box-sizing:border-box;}
-  .tk-cb{flex:none;width:28px;height:28px;border:none;background:none;padding:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
-  .tk-box{width:20px;height:20px;border-radius:6px;border:1.5px solid #cbd5e1;background:#fff;display:inline-flex;align-items:center;justify-content:center;color:transparent;box-sizing:border-box;transition:background .12s,border-color .12s;}
-  .tk-box svg{width:14px;height:14px;}
-  .tk-cb:hover:not(:disabled) .tk-box{border-color:#2563eb;}
-  .tk-cb.on .tk-box{background:#2563eb;border-color:#2563eb;color:#fff;}
-  .tk-r.is-done .tk-cb .tk-box{background:#94a3b8;border-color:#94a3b8;color:#fff;}
-  .tk-cb:disabled{cursor:default;} .tk-cb:disabled:not(.on) .tk-box{background:#f8fafc;}
-  .tk-m{flex:1;min-width:0;}
-  .tk-t{display:flex;align-items:center;gap:7px;min-width:0;}
-  .tk-d{width:8px;height:8px;border-radius:50%;flex:none;background:var(--d);display:inline-block;}
-  .tk-tb{border:none;background:none;padding:0;font:inherit;font-size:14.5px;font-weight:700;color:#0f172a;text-align:left;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .tk-s{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:12px;color:#64748b;margin-top:1px;padding-left:15px;}
-  .tk-s .un{color:#2563eb;font-weight:800;} .tk-s .warn,.tk-s .od{color:#b45309;font-weight:700;}
-  .tk-s-due{display:none;}
-  .tk-r.is-check .tk-tb,.tk-r.is-done .tk-tb{text-decoration:line-through;color:#94a3b8;font-weight:600;}
-  .tk-pill{flex:none;font-size:11.5px;font-weight:800;border-radius:999px;padding:2px 9px;white-space:nowrap;}
-  .tk-pill.check{background:#f3e8ff;color:#7e22ce;} .tk-pill.sb{background:#fef3c7;color:#92400e;} .tk-pill.dn{background:#f1f5f9;color:#475569;}
-  .tk-due{flex:none;font-size:12.5px;color:#64748b;font-weight:600;min-width:64px;text-align:right;}
-  .tk-due.od{color:#b45309;font-weight:800;}
-  .tk-reopen{flex:none;border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:12.5px;font-weight:700;color:#334155;cursor:pointer;}
-  .tk-search{margin-bottom:12px;}
-  .tk-in{font:inherit;font-size:14.5px;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;width:100%;box-sizing:border-box;color:#0f172a;background:#fff;}
-  .tk-in:focus,.tk-date:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px #dbeafe;}
-  .tk-cmp{background:#fff;border:1px solid #bfdbfe;border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 4px 14px rgba(37,99,235,.08);display:flex;flex-direction:column;gap:10px;}
-  .tk-row2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-  .tk-lv{display:flex;gap:6px;flex-wrap:wrap;}
-  .tk-lv button{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #e5e7eb;background:#fff;border-radius:999px;padding:5px 11px;font:inherit;font-size:13px;font-weight:700;color:#334155;cursor:pointer;}
-  .tk-lv button i{width:8px;height:8px;border-radius:50%;background:var(--d);}
-  .tk-lv button.on{border-color:var(--d);background:color-mix(in srgb,var(--d) 10%,#fff);color:#0f172a;}
-  .tk-lvro{display:inline-flex;align-items:center;gap:7px;font-weight:700;padding-top:5px;} .tk-ro{display:inline-block;padding-top:5px;}
-  .tk-date{font:inherit;font-size:13.5px;border:1px solid #e5e7eb;border-radius:9px;padding:6px 9px;color:#0f172a;background:#fff;}
-  .tk-btn{border:none;background:#2563eb;color:#fff;font:inherit;font-size:14px;font-weight:700;padding:9px 16px;border-radius:9px;cursor:pointer;}
-  .tk-btn:hover:not(:disabled){filter:brightness(.95);} .tk-btn:disabled{opacity:.5;cursor:default;}
-  .tk-btn.grey{background:#f1f5f9;color:#334155;} .tk-btn.red{background:#dc2626;}
-  .tk-link{border:none;background:none;padding:2px 0;font:inherit;font-size:13px;font-weight:700;color:#2563eb;cursor:pointer;}
-  .tk-link:disabled{color:#94a3b8;cursor:default;}
-  .tk-chip{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:13px;font-weight:700;color:#0f172a;cursor:pointer;margin-right:8px;}
-  .tk-mute{color:#64748b;} .tk-ok{color:#15803d;font-weight:700;} .tk-warn{color:#b45309;font-weight:700;} .tk-off{color:#64748b;font-weight:700;}
-  .tk-nfy{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;font-size:13px;}
-  .tk-nfy>b{color:#991b1b;font-size:13px;}
-  .tk-nfy2{display:flex;flex-direction:column;align-items:flex-start;gap:6px;}
-  .tk-nl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px;} .tk-nl>b{min-width:42px;font-size:13px;color:#334155;}
-  .tk-sw{display:inline-flex;align-items:center;gap:7px;border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:4px 11px 4px 4px;font:inherit;font-size:13px;font-weight:700;color:#334155;cursor:pointer;}
-  .tk-sw i{width:28px;height:16px;border-radius:999px;background:#cbd5e1;position:relative;transition:background .15s;flex:none;}
-  .tk-sw i:after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s;}
-  .tk-sw.on i{background:#dc2626;} .tk-sw.on i:after{left:14px;}
-  .tk-sw:disabled{opacity:.55;cursor:default;}
-  .tk-dr{position:fixed;top:0;right:0;bottom:0;width:440px;max-width:100vw;background:#fff;border-left:1px solid #e5e7eb;box-shadow:-12px 0 32px rgba(15,23,42,.12);z-index:55;display:flex;flex-direction:column;}
-  .tk-dr-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3;}
-  .tk-x{width:34px;height:34px;border-radius:9px;border:none;background:#f1f5f9;color:#334155;font-size:20px;line-height:1;cursor:pointer;flex:none;}
-  .tk-ic{margin-left:auto;width:34px;height:34px;border-radius:9px;border:none;background:none;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
-  .tk-ic:hover{background:#fef2f2;color:#b91c1c;}
-  .tk-dr-b{flex:1;overflow-y:auto;padding:12px 16px 24px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
-  .tk-dr-title{display:block;width:calc(100% + 8px);box-sizing:border-box;border:1px solid transparent;border-radius:8px;font:inherit;font-size:19px;font-weight:800;line-height:1.3;color:#0f172a;padding:5px 8px;margin:0 0 4px -8px;resize:none;background:transparent;overflow-wrap:anywhere;}
-  textarea.tk-dr-title:hover,textarea.tk-dr-title:focus{border-color:#e5e7eb;background:#fff;outline:none;}
-  .tk-meta{font-size:12.5px;color:#64748b;margin:0 0 6px;}
-  .tk-f{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px;align-items:start;padding:9px 0;border-top:1px solid #f1f5f9;}
-  .tk-fl{font-size:12.5px;color:#64748b;font-weight:700;padding-top:6px;}
-  .tk-fv{min-width:0;font-size:14px;color:#0f172a;}
-  .tk-sec{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#64748b;margin:16px 0 8px;}
-  .tk-sec .tk-mute{text-transform:none;letter-spacing:0;font-weight:700;}
-  .tk-notes{resize:vertical;line-height:1.45;}
-  .tk-nt{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.5;color:#0f172a;}
-  .tk-nt a,.tk-ct a,.tk-links a{color:#2563eb;font-weight:700;}
-  .tk-links{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:13px;}
-  .tk-tools{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;}
-  .tk-jobs{position:relative;}
-  .tk-res{position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border-radius:9px;box-shadow:0 8px 22px rgba(20,30,50,.14);overflow:hidden;}
-  .tk-res button{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 11px;font:inherit;font-size:13px;cursor:pointer;} .tk-res button:hover{background:#f1f5f9;}
-  .tk-cl{display:flex;flex-direction:column;gap:2px;}
-  .tk-ci{display:flex;align-items:center;gap:6px;}
-  .tk-ci label{flex:1;min-width:0;display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;}
-  .tk-ci input{width:18px;height:18px;flex:none;cursor:pointer;accent-color:#2563eb;margin:0;}
-  .tk-ci span{flex:1;min-width:0;font-size:14px;overflow-wrap:anywhere;}
-  .tk-ci.dn span{text-decoration:line-through;color:#94a3b8;}
-  .tk-ci button{border:none;background:none;color:#94a3b8;font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;}
-  .tk-cladd{margin-top:6px;}
-  .tk-ev{display:flex;flex-direction:column;gap:8px;}
-  .tk-c{background:#f8fafc;border:1px solid #eef0f3;border-radius:10px;padding:8px 10px;}
-  .tk-c.me{background:#eff6ff;border-color:#dbeafe;}
-  .tk-cm{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;margin-bottom:2px;} .tk-cm b{color:#0f172a;}
-  .tk-ct{font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;}
-  .tk-sys{font-size:12px;color:#64748b;text-align:center;} .tk-sys.warn{color:#b45309;}
-  .tk-rep{display:flex;gap:8px;align-items:flex-end;margin-top:10px;} .tk-rep textarea{flex:1;min-width:0;width:auto;resize:vertical;} .tk-rep .tk-btn{flex:none;}
-  .tk-dr-f{display:flex;gap:8px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-top:1px solid #eef0f3;background:#fff;}
-  .tk-dr-f .tk-btn{flex:1;padding:12px 16px;font-size:15px;}
-  .tk-dr.kb .tk-dr-f{display:none;}
-  .tk-toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#0f172a;color:#fff;border-radius:10px;padding:10px 12px 10px 16px;font-size:14px;display:flex;align-items:center;gap:14px;z-index:85;box-shadow:0 12px 30px rgba(0,0,0,.25);max-width:calc(100vw - 32px);box-sizing:border-box;}
-  .tk-toast button{border:none;background:none;color:#93c5fd;font:inherit;font-weight:800;cursor:pointer;padding:4px;white-space:nowrap;}
-  .mobilebar .ham{position:relative;} .ham-badge{position:absolute;top:-7px;right:-7px;margin:0;}
-  @media(prefers-reduced-motion:reduce){ .tk-gd.pulse,.tk-gh.tk-pulse{animation:none;} }
-  @media(min-width:1101px){ body.tk-dr-on .tk-wrap{margin-right:440px;} }
-  /* Open|Done stay sticky: on Tasks only, the page clips instead of the scroll wrapper swallowing sticky. */
-  .view-scroll:has(#tkRoot){overflow:visible;}
-  @media(max-width:880px){ .tk-tabs{top:57px;} html:has(#tkRoot),html:has(#tkRoot) body{overflow-x:clip;} }
-  @media(max-width:700px){
-    .tk-wrap{padding:12px 12px 90px;}
-    .tk-new{width:44px;height:44px;border-radius:50%;padding:0;justify-content:center;} .tk-new b{display:none;} .tk-new span{font-size:26px;}
-    .tk-g{margin-bottom:10px;}
-    .tk-gh{padding:13px 12px;}
-    .tk-r{padding:6px 12px 6px 4px;gap:4px;align-items:center;min-height:58px;}
-    .tk-grip{width:18px;margin:0;font-size:17px;color:#94a3b8;}
-    .tk-cb{width:44px;height:44px;} .tk-box{width:24px;height:24px;border-radius:7px;} .tk-box svg{width:16px;height:16px;}
-    .tk-tb{white-space:normal;font-size:15px;line-height:1.3;}
-    .tk-s{font-size:12.5px;}
-    .tk-due-col{display:none;} .tk-s-due{display:inline;}
-    .tk-in,.tk-date{font-size:16px;}
-    .tk-dr{width:100vw;left:0;border-left:none;box-shadow:none;}
-    .tk-dr-b{padding:12px 14px 24px;}
-    .tk-f{grid-template-columns:82px minmax(0,1fr);}
-    body.tk-dr-on{overflow:hidden;}
-    body.tk-dr-on .tk-toast{bottom:calc(80px + env(safe-area-inset-bottom));}
-  }
-  /* Phone: Pipeline board stacks, no side scroll; tap a section to open (owner 2026-10-07). */
-  @media (max-width:700px){ .plv-chev{display:none;} .plv-board #plcol-booked{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min{flex:none;width:100%;}
+  .tk-add{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;}
+  .tk-add input,.tk-add textarea{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%;box-sizing:border-box;}
+  .tk-colors{display:flex;gap:6px;} .tk-colors button{flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-weight:700;font-size:13px;color:var(--c);cursor:pointer;}
+  .tk-colors button.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);}
+  .tk-colors button{color:var(--ci,var(--c));} .tk-colors.sm{margin:2px 0 6px;} .tk-colors.sm button{padding:5px 4px;font-size:12px;}
+  .tk-colors button.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 30%,#fff);}
+  .tk-edit{display:block;width:100%;box-sizing:border-box;margin:2px 0 6px;font:inherit;font-size:14px;font-weight:700;border:1px solid var(--line);border-radius:7px;padding:6px 8px;}
+  .tk-chev .plv-chev-i{flex:1 0 96px;}
+  .tk-board .plv-col{flex:1 0 230px;} .tk-board .plv-col-b{min-height:40px;} .tk-board .tk-row{margin-bottom:0;}
+  .tk-board .tk-sum{padding:9px 10px;gap:8px;} .tk-board .tk-sum .tk-title{white-space:normal;font-size:13.5px;}
+  .tk-board .tk-row .tk-body{padding:0 10px 10px;}
+  .tk-res{position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border-radius:8px;box-shadow:0 8px 22px rgba(20,30,50,.14);} .tk-res button{display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;font:inherit;font-size:13px;cursor:pointer;} .tk-res button:hover{background:var(--line2);}
+  .tk-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-left:5px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .tk-card.done{background:#fff;opacity:.7;} .tk-card.done .tk-title{text-decoration:line-through;color:var(--mute);}
+  .tk-check input{width:20px;height:20px;margin-top:2px;cursor:pointer;} .tk-body{flex:1;min-width:0;}
+  .tk-title{font-weight:800;font-size:15px;} .tk-meta{font-size:12px;color:var(--mute);margin-top:2px;}
+  .tk-job{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 9px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
+  .tk-notes{display:block;width:100%;box-sizing:border-box;margin-top:6px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;background:rgba(255,255,255,.7);resize:vertical;}
+  .tk-row{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#fff;}
+  .tk-sum{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;list-style:none;} .tk-sum::-webkit-details-marker{display:none;}
+  .tk-sum input{width:18px;height:18px;flex:none;cursor:pointer;} .tk-dot{width:10px;height:10px;border-radius:50%;flex:none;}
+  .tk-sum .tk-title{flex:1;min-width:0;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .tk-ico{font-size:12px;flex:none;}
+  .tk-car{color:var(--mute);flex:none;transition:transform .15s;} .tk-row[open] .tk-car{transform:rotate(90deg);} .tk-row[open] .tk-sum .tk-title{white-space:normal;}
+  /* Phone: Pipeline + Task boards stack, no side scroll; tap a section to open (owner 2026-10-07). */
+  @media (max-width:700px){ .plv-chev{display:none;} .plv-board #plcol-booked{display:none;} .plv-board{flex-direction:column;overflow-x:visible;align-items:stretch;} .plv-board .plv-col,.plv-board .plv-col.plv-col-min,.tk-board .plv-col{flex:none;width:100%;}
     .plv-board .plv-col-h{cursor:pointer;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;} .plv-board .plv-col-h:after{content:'\25B8';color:var(--mute);} .plv-board .plv-col.m-open .plv-col-h:after{content:'\25BE';} .plv-board .plv-col.m-lock .plv-col-h{cursor:default;} .plv-board .plv-col.m-lock .plv-col-h:after{content:none;}
     .plv-board .plv-col:not(.m-open) .plv-col-b{display:none;} .pl-joey .plv-kpis{display:none;} }
+  .tk-row .tk-body{padding:0 12px 12px 48px;} .tk-row.done{opacity:.7;} .tk-row.done .tk-title{text-decoration:line-through;color:var(--mute);}
+  .tk-link{display:inline-block;margin:6px 8px 0 0;font-size:13px;font-weight:700;color:var(--accent);}
+  .tk-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:14px;}
   .ps-gap{margin-left:46px;padding:6px 10px;border-radius:8px;background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;font-size:12.5px;font-weight:700;}
   /* Pipeline timeline (owner 2026-10-01, namethatui 'timeline'): time on the left, small dot on the line, text on the right. */
   .tl2.ps-list{gap:14px;}
@@ -2601,7 +2483,7 @@
       <button data-nav="analyticshub" id="navAnalyticsHub"><span class="ic" data-ico="analytics">📊</span> Analytics</button>
       <button data-nav="payroll" id="navPayroll"><span class="ic" data-ico="payroll">💰</span> Payroll</button>
       <button data-nav="askandrew" id="navAskAndrew" style="display:none;"><span class="ic" data-ico="other">🤖</span> Ask Andrew</button>
-      <button data-nav="tasks" id="navTasks"><span class="ic" data-ico="other">📝</span> Tasks <span class="nav-badge" id="tasksBadge" style="display:none;"></span></button>
+      <button data-nav="tasks" id="navTasks"><span class="ic" data-ico="other">📝</span> Task <span class="nav-badge" id="tasksBadge" style="display:none;"></span></button>
       <button data-nav="notes" id="navNotes" style="display:none;"><span class="ic" data-ico="other">📌</span> Notes <span class="nav-badge" id="notesNavBadge" style="display:none;"></span></button>
       <button data-nav="launch" id="navLaunch"><span class="ic" data-ico="launch">🚀</span> Launch</button>
       <button data-nav="brackets"><span class="ic" data-ico="brackets">📦</span> Bracket Inventory</button>
@@ -2644,7 +2526,7 @@
   <main class="main">
     <div id="shiftPill" class="hidden" style="position:fixed;top:8px;right:12px;z-index:50;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px 10px;font-size:12px;color:#475569;"><span>🕕</span><span style="width:60px;height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden;"><i id="shiftBar" style="display:block;height:4px;width:0;background:#16a34a;"></i></span><span id="shiftTxt"></span></div>
     <div class="mobilebar">
-      <button class="ham" id="ham" aria-label="Menu">☰<span class="nav-badge ham-badge" id="hamTasksBadge" style="display:none;"></span></button>
+      <button class="ham" id="ham">☰</button>
       <strong id="mobTitle">Schedule</strong>
     </div>
 
@@ -3355,7 +3237,6 @@ function dismissAllOverlays(){
   step(()=>{ if(window._tinvModal){ window._tinvModal.remove(); window._tinvModal=null; } });   // technician invite sheet
   step(()=>{ document.querySelectorAll('.addr-ac,.charge-ov').forEach(el=>el.remove()); });
   step(()=>closeSidebar());
-  step(()=>tkClose({ noHistory:true }));
 }
 function logout(opts){
   const reason=(opts&&opts.reason)||'manual';   // the #logout click handler passes the Event -> 'manual'
@@ -3643,8 +3524,7 @@ function enterApp(){
   // Task (owner 2026-10-02): Andrew + Joey only. Replaces the old Tasks screen.
   const navTasks=document.getElementById('navTasks');
   if(navTasks) navTasks.style.display = (role==='owner'||(role==='secretary'&&userName==='Joey')) ? '' : 'none';
-  // Tasks badge at sign-in for Andrew and Joey (owner 2026-10-07).
-  tkReset(); if(tkAllowed()) tkLoad().catch(()=>{});
+  if(role==='secretary'&&userName==='Joey') api('assistant_tasks').then(d=>{ _tk.tasks=d.tasks||[]; tasksBadge(); }).catch(()=>{});
   // Ask Andrew (owner, 2026-09-24): owner-only while he teaches it.
   const navAsk=document.getElementById('navAskAndrew');
   if(navAsk){ navAsk.style.display = (role==='owner'||role==='secretary') ? '' : 'none'; navAsk.innerHTML='<span class="ic" data-ico="other">🤖</span> '+(role==='owner'?'Ask Andrew':'Ask the Owner'); }
@@ -3693,10 +3573,8 @@ function enterApp(){
   // scrolls to that exact card once the list renders.
   pendingEstimateId=estimateIdFromUrl();
   let _urlCall=null; try{ _urlCall=new URLSearchParams(location.search).get('call'); }catch(_){}
-  const _urlTask=tkUrlTask();   // ?task=<id> from the Emergency text/email (owner 2026-10-07)
   if(pendingEstimateId){ estFilter='all'; navTo('estimates'); }
   else if(_urlCall){ openCallLink(_urlCall); }
-  else if(_urlTask&&tkAllowed()){ _tk.pending=_urlTask; navTo('tasks'); }
   else navTo(isJoeyHome()?'pipeline':'schedule');
   // navTo('schedule') already runs renderGreeting(), which itself calls
   // refreshEstimateBadge() — no need to fetch the same estimates list twice.
@@ -3707,7 +3585,7 @@ function enterApp(){
   noteBanner();
   domainBanner();
   if(noteTimer) clearInterval(noteTimer);
-  noteTimer=setInterval(()=>{ if(document.hidden) return; noteBanner(); domainBanner(); tkRefresh(); }, 180000);   // + Tasks badge (owner 2026-10-07)
+  noteTimer=setInterval(()=>{ if(document.hidden) return; noteBanner(); domainBanner(); }, 180000);
   if(alertTimer) clearInterval(alertTimer);
   alertTimer=setInterval(()=>{ if(document.hidden) return; loadBadAlerts(); }, 180000);
   // Slide the session while the dashboard is open and visible (see
@@ -4032,7 +3910,7 @@ function configureJoeyNav(){
   document.getElementById('joeyCommunication')?.remove();
   const joey=role==='secretary'&&userName==='Joey';
   const task=document.getElementById('navTasks');
-  Array.from(task.childNodes).filter(n=>n.nodeType===3).forEach(n=>{if(n.textContent.trim()) n.textContent=' Tasks ';});
+  Array.from(task.childNodes).filter(n=>n.nodeType===3).forEach(n=>{if(n.textContent.trim()) n.textContent=joey?' Tasks ':' Task ';});
   document.body.classList.toggle('joey-nav',joey);
   document.getElementById('navNotes').style.display=joey?'':'none';
   if(!joey) return;
@@ -4117,7 +3995,6 @@ function navTo(s){
   if(s==='pipeline' && role!=='owner' && role!=='secretary' && role!=='auditor') s='schedule';
   // A view-only business (Joey) is Schedule-only; any other screen goes back to her own company.
   if(current && current.view_only && s!=='schedule'){ current=businesses.find(b=>b.slug===scope)||businesses[0]||current; availData=null; availViewSlug=null; webLastData=null; profitRangeCache={}; netDailyChartCache={}; applyIconTheme(); renderSwitcher(); }
-  if(s!=='tasks'&&_tk.drawer) tkClose();   // task drawer stays on Tasks (owner 2026-10-07)
   section=s;
   if(lgAll) renderSwitcher();   // Lead Gen pill: "Lead Gen" on Schedule, the bound brand elsewhere
   document.getElementById('view').classList.toggle('calls-workspace',s==='callhub'||s==='launch'||s==='estimates');
@@ -4132,7 +4009,7 @@ function navTo(s){
   const greetEl=document.getElementById('greeting');
   if(!sched){ greetEl.classList.add('hidden'); if(greetingClock){ clearInterval(greetingClock); greetingClock=null; } }
   document.getElementById('bizName').textContent = current ? current.name : 'Schedule';
-  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'Tasks',tasks:'Tasks',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
+  document.getElementById('mobTitle').textContent = ({schedule:'Schedule',estimates:'Estimates',brackets:'Bracket Inventory',customers:'Customers',technicians:'Technicians',reviews:'Reviews',callhub:'Calls',messages:'Messages',mycallperf:'My Call Performance',gallery:'Photos',analyticshub:'Analytics',payroll:'Payroll',myavailability:'My Availability',secretaries:'Secretaries',other:'Other',launch:'Launch',notes:'Notes',myday:'Tasks',tasks:'Task',pipeline:'Pipeline',askandrew:(role==='owner'?'Ask Andrew':'Ask the Owner')})[s];
   if(s==='messages') document.getElementById('mobTitle').textContent='';
   if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
   const view=document.getElementById('view');
@@ -11141,613 +11018,163 @@ function paintMyDay(){
 }
 // Once a day at/after 6 PM Bangkok (until the page turns at 5 AM): if any
 // habit is still open, one popup. Remembered per page so it never repeats.
-// ── Tasks (owner 2026-10-07): Andrew -> Joey, or Joey's own. No clients, no assignee.
-// Level lives in color: red Emergency, yellow ASAP, green Normal, white Someday.
-// Status comes from the server: open / check (Joey ticked, waiting for OK) /
-// sent_back / done. The server enforces every permission; task.can drives the UI.
-// View As Joey is read only (all can flags false, no Seen stamps).
-const TKTZ='America/Denver';
-const TK_LV={ emergency:{ label:'Emergency', d:'#dc2626', c:'red' }, asap:{ label:'ASAP', d:'#f59e0b', c:'yellow' }, normal:{ label:'Normal', d:'#22c55e', c:'green' }, someday:{ label:'Someday', d:'#94a3b8', c:'white' } };
-const TK_LVS=['emergency','asap','normal','someday'];
-const TK_URL_RE=new RegExp('https?://[^'+String.fromCharCode(92)+'s<>"]+','g');   // no raw backslash in source (owner 2026-10-07)
-const TK_UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const TK_CHECK='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const TK_TRASH='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-function tkFresh(){ return { tasks:[], done:[], me:null, shift:null, channels:null, counts:null, today:'', tab:'open', q:'', drawer:null, drId:null, ev:null, reply:'', dn:{ text:true, email:false }, cmp:null, jobOpen:false, jobRes:[], pending:null, pushed:false, skipPop:false, loading:null, inflight:new Set() }; }
-let _tk=tkFresh();
-function tkAllowed(){ return role==='owner'||(role==='secretary'&&userName==='Joey'); }
-function tkOwner(){ return _tk.me?_tk.me.role==='owner':role==='owner'; }
-function tkRO(){ return !!(_tk.me&&_tk.me.read_only); }
-function tkFind(id){ return _tk.tasks.find(t=>t.id===id)||_tk.done.find(t=>t.id===id)||null; }
-function tkPhone(){ try{ return matchMedia('(max-width:700px)').matches; }catch(_){ return false; } }
-function tkTyping(el){ const a=document.activeElement; return !!(el&&a&&el.contains(a)&&['INPUT','TEXTAREA','SELECT'].includes(a.tagName)); }
-function tkUuid(){
-  try{ if(window.crypto&&crypto.randomUUID) return crypto.randomUUID(); }catch(_){}
-  const b=crypto.getRandomValues(new Uint8Array(16)); b[6]=(b[6]&15)|64; b[8]=(b[8]&63)|128;
-  const h=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
-  return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
-}
-// Times: always Denver.
-function tkParts(d,o){ const p={}; try{ new Intl.DateTimeFormat('en-US',Object.assign({ timeZone:TKTZ },o)).formatToParts(d).forEach(x=>{ p[x.type]=x.value; }); }catch(_){} return p; }
-function tkYmd(d){ const p=tkParts(d,{ year:'numeric', month:'2-digit', day:'2-digit' }); return p.year+'-'+p.month+'-'+p.day; }
-function tkTime(iso){ if(!iso) return ''; const p=tkParts(new Date(iso),{ hour:'numeric', minute:'2-digit', hour12:true }); return (p.hour||'')+':'+(p.minute||'')+(String(p.dayPeriod||'').toUpperCase().startsWith('P')?'p':'a'); }
-function tkDate(iso){ if(!iso) return ''; const p=tkParts(new Date(iso),{ month:'short', day:'numeric' }); return (p.month||'')+' '+(p.day||''); }
-function tkWhen(iso){ if(!iso) return ''; return tkYmd(new Date(iso))===tkYmd(new Date())?tkTime(iso):tkDate(iso)+', '+tkTime(iso); }
-function tkDay(ymd){ try{ const [y,m,d]=String(ymd).split('-').map(Number); return new Date(Date.UTC(y,m-1,d,12)).toLocaleDateString('en-US',{ timeZone:'UTC', month:'short', day:'numeric' }); }catch(_){ return String(ymd||''); } }
-function tkDue(t){
-  if(!t.due_on||t.status==='done') return '';
-  const s=t.due_state; return s==='overdue'?'Overdue':s==='today'?'Today':s==='tomorrow'?'Tomorrow':tkDay(t.due_on);
-}
-function tkShortUrl(u){ return String(u).replace('https://','').replace('http://','').replace(/^www[.]/,''); }
-function tkLinkify(s){
-  const str=String(s||''); let out='', last=0;
-  str.replace(TK_URL_RE,(m,off)=>{ out+=esc(str.slice(last,off))+`<a href="${esc(m)}" target="_blank" rel="noopener">${esc(tkShortUrl(m))}</a>`; last=off+m.length; return m; });
-  return out+esc(str.slice(last));
-}
-function tkLinks(s){ const u=[...new Set(String(s||'').match(TK_URL_RE)||[])]; return u.length?`<div class="tk-links">${u.map(x=>`<a href="${esc(x)}" target="_blank" rel="noopener">${esc(tkShortUrl(x))} ↗</a>`).join('')}</div>`:''; }
-function tkReason(r){ return ({ recent:'Sent less than a minute ago', in_progress:'Already sending', not_open:'Task is not open', off_shift:'Joey is off', notifications_off:'Notifications are off', bad_phone:'Bad phone number', not_configured:'Not set up', no_recipient:'No address', no_api_key:'No email key' })[r]||String(r||'Not sent'); }
-function tkNotifyMsg(n){
-  if(!n) return '';
-  if(n.skipped==='off_shift') return 'Joey is off. Not sent.';
-  const out=[];
-  const busy=x=>x.reason==='recent'||x.reason==='in_progress';   // guard hit: nothing failed
-  if(n.text) out.push(n.text.ok?'Texted Joey':busy(n.text)?'Text: '+tkReason(n.text.reason):'Text failed: '+tkReason(n.text.reason));
-  if(n.email) out.push(n.email.ok?'Emailed Joey':busy(n.email)?'Email: '+tkReason(n.email.reason):'Email failed: '+tkReason(n.email.reason));
-  return out.join(' · ');
-}
-function tkChWhy(k){ const ch=(_tk.channels||{})[k]||{}; if(ch.available) return ''; if(k==='email'&&ch.on_file===false) return 'No email on file'; return ch.reason==='notifications_off'?'Off':ch.reason==='not_configured'?'Not set up':''; }
-function tkNever(t,k){ return !t[k]||!t[k].state||t[k].state==='never'; }
-// Toast with an action (Undo / Notify Joey), 8s. Replaces confirm boxes.
-let _tkToastT=null;
-function tkToast(msg,act,fn,ms){
-  document.querySelectorAll('.tk-toast').forEach(x=>x.remove()); clearTimeout(_tkToastT);
-  const el=document.createElement('div'); el.className='tk-toast'; el.setAttribute('role','status');
-  const s=document.createElement('span'); s.textContent=msg; el.appendChild(s);
-  if(act&&fn){ const b=document.createElement('button'); b.type='button'; b.textContent=act; b.onclick=()=>{ el.remove(); clearTimeout(_tkToastT); fn(); }; el.appendChild(b); }
-  document.body.appendChild(el);
-  _tkToastT=setTimeout(()=>el.remove(),ms||8000);
-}
-
-// ── Load / counts / badge ──
-async function tkLoad(){
-  const st=_tk; if(st.loading) return st.loading;
-  st.loading=api('assistant_tasks',{ params:{ v:'2' } }).then(d=>{
-    Object.assign(st,{ tasks:d.tasks||[], done:d.done||[], me:d.me||null, shift:d.shift||null, channels:d.channels||null, counts:d.counts||null, today:d.today||'' });
-    if(st===_tk){ tasksBadge(); tkJoeyCard(); }
-    return d;
-  }).finally(()=>{ st.loading=null; });
-  return st.loading;
-}
-function tkReset(){ try{ tkClose({ noHistory:true }); }catch(_){} _tk=tkFresh(); tasksBadge(); }
+// ── Task list (owner 2026-10-02): Andrew gives Joey tasks; Joey adds her own.
+// Red = urgent, yellow = today, green = when you can. Colors never change;
+// a done task is crossed out on white. Optional linked job + notes per task.
+// Task colors (owner 2026-10-03), same palette as the Pipeline bar. Red texts Joey.
+const TASK_COL={ red:{ bar:'#f87171', ink:'#991b1b', bg:'#fef2f2', label:'Drop everything' }, yellow:{ bar:'#fbbf24', ink:'#92400e', bg:'#fffbeb', label:'ASAP' }, green:{ bar:'#a3d65c', ink:'#3f6212', bg:'#f7fee7', label:'Soon' }, white:{ bar:'#94a3b8', ink:'#374151', bg:'#fff', label:'Whenever' }, joey:{ bar:'#a78bfa', ink:'#5b21b6', bg:'#f5f3ff', label:"Joey's own" } };
+const TASK_ORDER=['red','yellow','green','white'];
+let _tk={ tasks:[], color:'yellow', job:null, open:new Set(), filter:null };
 async function renderTasks(){
   const view=document.getElementById('view');
-  try{ await tkLoad(); }catch(e){ if(onScreen('tasks')) view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  if(!_tk.tasks.length) view.innerHTML='<div class="wrap"><div class="empty">Loading…</div></div>';
+  try{ const d=await api('assistant_tasks'); _tk.tasks=d.tasks||[]; }catch(e){ view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
   paintTasks();
-  if(_tk.pending){ const id=_tk.pending; _tk.pending=null; tkOpen(id); }
-  else if(_tk.drawer) tkPaintDrawer();
 }
-// Every screen: the 180s note timer and coming back to the tab call this.
-async function tkRefresh(){
-  if(!token||!tkAllowed()) return;
-  try{ await tkLoad(); }catch(_){ return; }
-  if(onScreen('tasks')&&!tkTyping(document.getElementById('tkRoot'))) paintTasks();
-  if(_tk.drawer) tkDrawerLoad(_tk.drawer,false);
-}
-function tkRecount(){
-  const T=_tk.tasks, owner=tkOwner(), oi=t=>t.status==='open'||t.status==='sent_back';
-  const needs=owner?T.filter(t=>t.needs_you).length:0;
-  const jb=owner?0:T.filter(t=>((t.level==='emergency'||t.level==='asap')&&oi(t))||t.unread>0).length;
-  _tk.counts={ badge:owner?needs:jb, needs_you:needs, emergency_open:T.filter(t=>t.level==='emergency'&&oi(t)).length, asap_open:T.filter(t=>t.level==='asap'&&oi(t)).length,
-    check:T.filter(t=>t.status==='check').length, unread:T.filter(t=>t.unread>0).length };
-  tasksBadge(); tkJoeyCard();
-}
-// Owner: Needs you count. Joey: open Emergency + ASAP + unread replies; red pulse while an Emergency is open.
 function tasksBadge(){
-  const c=_tk.counts||{}, n=tkAllowed()?(Number(c.badge)||0):0, urgent=!tkOwner()&&(Number(c.emergency_open)||0)>0;
-  ['tasksBadge','hamTasksBadge'].forEach(id=>{ const el=document.getElementById(id); if(!el) return; el.textContent=n; el.style.display=n?'':'none'; el.classList.toggle('urgent',urgent); });
+  const el=document.getElementById('tasksBadge'); if(!el) return;
+  const n=_tk.tasks.filter(t=>!t.done_at&&t.color!=='white').length;
+  el.textContent=n; el.style.display=(n&&role!=='owner')?'':'none';
 }
-// Joey's "Urgent tasks" home card counts open Emergency tasks.
-function tkJoeyCard(){ try{ if(isJoeyHome()&&(section==='pipeline'||section==='tasks')) paintGreeting(); }catch(_){} }
-const tkByOrder=(a,b)=>{ const sa=a.sort_order==null?Infinity:Number(a.sort_order), sb=b.sort_order==null?Infinity:Number(b.sort_order); if(sa!==sb) return sa<sb?-1:1; return Date.parse(a.created_at)-Date.parse(b.created_at); };
-function tkPut(t){
-  if(!t||!t.id) return;
-  tkDrop(t.id);
-  if(t.deleted_at) return;
-  if(t.status==='done'){ _tk.done.unshift(t); _tk.done.sort((a,b)=>String(b.cleared_at||'').localeCompare(String(a.cleared_at||''))); }
-  else { _tk.tasks.push(t); _tk.tasks.sort(tkByOrder); }
-}
-function tkDrop(id){ _tk.tasks=_tk.tasks.filter(x=>x.id!==id); _tk.done=_tk.done.filter(x=>x.id!==id); }
-function tkRepaint(){ if(onScreen('tasks')) paintTasks(); if(_tk.drawer) tkPaintDrawer(); }
-async function tkDo(body){
-  try{
-    const r=await api('assistant_tasks',{ method:'POST', body });
-    if(r&&r.task) tkPut(r.task);
-    tkRecount(); tkRepaint();
-    return r||{};
-  }catch(e){
-    toast(e.message||'Could not save');
-    if(e.status===404||e.status===409) tkRefresh();
-    return null;
-  }
-}
-
-// ── Actions ──
-// One tap: owner -> Done (Undo); Joey on Andrew's -> Check; on a Check task the owner OKs, Joey unticks.
-async function tkTick(id){
-  const t=tkFind(id); if(!t||_tk.inflight.has(id)) return;
-  const c=t.can||{}; let op=null;
-  if(t.status==='check') op=c.ok?'ok':(c.untick?'untick':null);
-  else if(t.status==='open'||t.status==='sent_back') op=c.tick?'tick':null;
-  if(!op) return;
-  const cb=document.querySelector(`#tkRoot [data-tk="${CSS.escape(id)}"] [data-tk-cb]`); if(cb) cb.classList.toggle('on',op!=='untick');
-  _tk.inflight.add(id);
-  let r=null; try{ r=await tkDo({ op, id }); }finally{ _tk.inflight.delete(id); }
-  if(!r){ tkRepaint(); return; }
-  if(r.task&&r.task.status==='done'){
-    if(_tk.drawer===id) tkClose();
-    if(r.undo) tkToast(op==='ok'?"OK'd":'Done','Undo',()=>tkDo(r.undo));
-  }
-}
-async function tkEdit(id,patch){ const r=await tkDo(Object.assign({ op:'edit', id },patch)); if(r&&r.offer_notify) tkOffer(id); return r; }
-async function tkReopen(id){ const r=await tkDo({ op:'reopen', id }); if(r) toast('Reopened'); }
-async function tkDelete(id){
-  try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'delete', id } });
-    tkDrop(id); if(_tk.drawer===id) tkClose(); tkRecount(); tkRepaint();
-    tkToast('Deleted','Undo',()=>tkDo((r&&r.undo)||{ op:'undelete', id }));
-  }catch(e){ toast(e.message); }
-}
-async function tkSendBack(id){
-  const saved=_tk.reply.trim(); _tk.reply='';
-  const r=await tkDo(saved?{ op:'send_back', id, body:saved }:{ op:'send_back', id });
-  if(!r){ _tk.reply=saved; return; }
-  toast('Sent back'); if(_tk.drawer===id) tkDrawerLoad(id,false);
-}
-async function tkComment(id){
-  const body=_tk.reply.trim(); if(!body||_tk.inflight.has('c'+id)) return;
-  _tk.inflight.add('c'+id);
-  try{
-    const r=await api('assistant_tasks',{ method:'POST', body:{ op:'comment', id, body } });
-    _tk.reply='';
-    if(r&&r.event&&_tk.drawer===id&&_tk.ev) _tk.ev.push(r.event);
-    const t=tkFind(id); if(t){ t.replies=(t.replies||0)+1; t.unread=0; if(tkOwner()) t.needs_you=t.status==='check'; }
-    tkRecount(); if(onScreen('tasks')) paintTasks(); tkPaintDrawer(true);
-    const rb=document.querySelector('#tkDrawer .tk-dr-b'); if(rb) rb.scrollTop=rb.scrollHeight;
-  }catch(e){ toast(e.message); }
-  finally{ _tk.inflight.delete('c'+id); }
-}
-async function tkCheck(id,body,refocus){
-  try{
-    const r=await api('assistant_tasks',{ method:'POST', body:Object.assign({ op:'checklist', id },body) });
-    const t=tkFind(id);
-    if(t&&r&&Array.isArray(r.checklist)){ t.checklist=r.checklist; t.checklist_total=r.checklist.length; t.checklist_done=r.checklist.filter(i=>i.done).length; }
-  }catch(e){ toast(e.message); }
-  if(onScreen('tasks')&&!tkTyping(document.getElementById('tkRoot'))) paintTasks();
-  tkPaintDrawer(true);
-  if(refocus){ const i=document.querySelector('#tkDrawer [data-tk-cladd]'); if(i) i.focus(); }
-}
-// Notify Joey: owner tap only, Emergency only, on shift only (the server checks all three).
-async function tkNotify(id,want){
-  if(!(want.text||want.email)||_tk.inflight.has('n'+id)) return;
-  _tk.inflight.add('n'+id);
-  const t=tkFind(id); if(t){ if(want.text) t.text={ state:'sending' }; if(want.email) t.email={ state:'sending' }; tkPaintDrawer(true); }
-  try{
-    const r=await api('assistant_tasks',{ method:'POST', body:{ op:'notify', id, text:!!want.text, email:!!want.email } });
-    if(r&&r.task) tkPut(r.task);
-    toast(tkNotifyMsg(r)||'Sent');
-  }catch(e){ toast(e.code==='off_shift'?'Joey is off. Not sent.':e.message); }
-  finally{ _tk.inflight.delete('n'+id); }
-  tkRecount(); tkRepaint();
-  if(_tk.drawer===id) tkDrawerLoad(id,false); else tkRefresh();
-}
-// After a recolor/drag to Emergency: never notifies by itself, only offers.
-function tkOffer(id){
-  tkToast('Moved to Emergency','Notify Joey',()=>{ const ch=_tk.channels||{}; if(ch.text&&ch.text.available) tkNotify(id,{ text:true, email:false }); else tkOpen(id); });
-}
-async function tkAddPhotos(id,files){
-  const t=tkFind(id); if(!t) return;
-  const urls=[...(t.photo_urls||[])], list=[...files].slice(0,NOTE_MAX_PHOTOS-urls.length); if(!list.length) return;
-  toast('Uploading…');
-  try{ for(const f of list){ const dataUrl=await compressImage(f,1400,0.8); const r=await api('notes_photo',{ method:'POST', body:{ image:dataUrl } }); urls.push(r.url); }
-    await tkEdit(id,{ photos:urls });
-  }catch(e){ toast(e.message||'Could not add the photo'); }
-}
-let _tkJobTmr=null;
-function tkJobSearch(q){
-  clearTimeout(_tkJobTmr); q=String(q||'').trim();
-  const host=document.querySelector('#tkDrawer .tk-res'); if(!host) return;
-  if(q.length<2){ _tk.jobRes=[]; host.innerHTML=''; return; }
-  _tkJobTmr=setTimeout(async()=>{ try{ const d=await api('assistant_tasks',{ params:{ q } }); _tk.jobRes=d.jobs||[];
-    const h=document.querySelector('#tkDrawer .tk-res'); if(h) h.innerHTML=_tk.jobRes.map((j,i)=>`<button type="button" data-tk-jobpick="${i}">${esc(j.label)}</button>`).join('');
-  }catch(_){} },250);
-}
-
-// ── List ──
-function tkCmpNew(){ return { id:tkUuid(), title:'', level:'normal', due:'', text:true, email:false }; }
-const _tkFoldMem={};
-function tkFolds(){
-  const k=tkPhone()?'m':'d'; if(_tkFoldMem[k]) return _tkFoldMem[k];
-  let o={}; try{ const v=JSON.parse(localStorage.getItem('tk-fold-'+k)||'{}'); if(v&&typeof v==='object') o=v; }catch(_){}
-  return (_tkFoldMem[k]=o);
-}
-// Phone: Needs you, Emergency and ASAP start open; folds remembered per phone (own tk- keys).
-function tkFoldOpen(g){ const f=tkFolds(); if(Object.prototype.hasOwnProperty.call(f,g)) return !!f[g]; return tkPhone()?(g==='needs'||g==='emergency'||g==='asap'):true; }
-function tkFoldSet(g,on){ const k=tkPhone()?'m':'d', f=tkFolds(); f[g]=!!on; try{ localStorage.setItem('tk-fold-'+k,JSON.stringify(f)); }catch(_){} }
-function paintTasks(){
-  const view=document.getElementById('view'); if(!onScreen('tasks')) return;
-  const ro=tkRO();
-  if(ro) _tk.cmp=null;
-  const head=`<div class="tk-head"><h2>Tasks</h2>${ro?'':'<button type="button" class="tk-new" data-tk-new aria-label="New task"><span aria-hidden="true">+</span><b>New task</b></button>'}</div>`;
-  const tabs=`<div class="tk-tabs" role="tablist">${['open','done'].map(k=>`<button type="button" role="tab" aria-selected="${_tk.tab===k}" class="${_tk.tab===k?'on':''}" data-tk-tab="${k}">${k==='open'?'Open':'Done'}</button>`).join('')}</div>`;
-  const body=_tk.tab==='done'
-    ?`<div class="tk-search"><input class="tk-in" type="search" data-tk-q placeholder="Search" value="${esc(_tk.q)}" aria-label="Search done tasks"></div><div id="tkDoneList">${tkDoneListHtml()}</div>`
-    :(_tk.cmp?tkCmpHtml():'')+tkGroupsHtml();
-  view.innerHTML=`<div class="wrap tk-wrap" id="tkRoot">${head}${tabs}${body}</div>`;
-  tkWire(view.querySelector('#tkRoot'));
-  tkMarkSel();
-}
-function tkGroupsHtml(){
-  const owner=tkOwner(), G={ needs:[], emergency:[], asap:[], normal:[], someday:[] };
-  for(const t of _tk.tasks){ if(owner&&t.needs_you) G.needs.push(t); else (G[t.level]||G.normal).push(t); }
-  return (owner?['needs',...TK_LVS]:TK_LVS).map(k=>{
-    let list=G[k]; if(!list.length) return '';
-    // Crossed-out (Check) tasks sit at the bottom of their group.
-    if(k!=='needs') list=[...list.filter(t=>t.status!=='check'),...list.filter(t=>t.status==='check')];
-    const live=k==='needs'?list.length:list.filter(t=>t.status!=='check').length;
-    const lock=k==='emergency'&&live>0, open=lock||tkFoldOpen(k);
-    const lab=k==='needs'?'Needs you':TK_LV[k].label, dot=k==='needs'?'#7c3aed':TK_LV[k].d;
-    return `<section class="tk-g${open?' open':''}${lock?' lock':''}" data-g="${k}">`
-      +`<button type="button" class="tk-gh${k==='asap'&&live?' tk-pulse':''}" data-tk-fold="${k}" aria-expanded="${open}"${lock?' aria-disabled="true"':''}><i class="tk-gd${k==='emergency'&&live?' pulse':''}" style="--d:${dot}"></i><b>${lab}</b>${live?`<span class="tk-gn">${live}</span>`:''}<span class="tk-gc" aria-hidden="true">▾</span></button>`
-      +`<div class="tk-gb" data-lv="${k==='needs'?'':k}">${list.map(t=>tkRowHtml(t,k)).join('')}</div></section>`;
-  }).join('');
-}
-function tkRowHtml(t,g){
-  const owner=tkOwner(), lv=TK_LV[t.level]||TK_LV.normal, st=t.status, c=t.can||{};
-  const on=st==='check', act=st==='check'?(c.ok||c.untick):c.tick;
-  const lab=st==='check'?(c.ok?'OK':'Not done'):(owner?'Mark complete':'Done');
-  const due=tkDue(t), od=t.due_state==='overdue';
-  const sub=[];
-  if(t.replies) sub.push(`<span class="${t.unread?'un':''}">💬 ${t.replies}</span>`);
-  if(t.checklist_total) sub.push(`<span>${t.checklist_done||0} of ${t.checklist_total}</span>`);
-  if(due) sub.push(`<span class="tk-s-due${od?' od':''}">${esc(due)}</span>`);
-  if(t.mine) sub.push(`<span>${owner?"Joey's":'Mine'}</span>`);
-  if(owner){ const ts=t.text&&t.text.state;
-    if(ts==='sent'||ts==='delivered') sub.push('<span>Texted</span>');
-    else if(ts==='undelivered') sub.push('<span class="warn">Undelivered</span>');
-    else if(ts==='failed') sub.push('<span class="warn">Text failed</span>');
-    else if(t.email&&t.email.state==='sent') sub.push('<span>Emailed</span>'); }
-  const grip=owner&&!tkRO()?(c.order&&g!=='needs'?'<span class="tk-grip" data-tk-grip aria-hidden="true" title="Drag">⠿</span>':'<span class="tk-grip" aria-hidden="true"></span>'):'';
-  return `<div class="tk-r${on?' is-check':''}" data-tk="${esc(t.id)}">${grip}`
-    +`<button type="button" class="tk-cb${on?' on':''}" data-tk-cb ${act?'':'disabled'} aria-label="${lab}" aria-pressed="${on}"><i class="tk-box">${TK_CHECK}</i></button>`
-    +`<div class="tk-m"><div class="tk-t"><i class="tk-d" style="--d:${lv.d}"></i><button type="button" class="tk-tb" data-tk-open>${esc(t.title)}</button></div>${sub.length?`<div class="tk-s">${sub.join('')}</div>`:''}</div>`
-    +(st==='check'?'<span class="tk-pill check">Check</span>':st==='sent_back'?'<span class="tk-pill sb">Sent back</span>':'')
-    +`<span class="tk-due tk-due-col${od?' od':''}">${esc(due)}</span></div>`;
-}
-// Done tab: newest first, search, Reopen.
-function tkDoneListHtml(){
-  const q=_tk.q.trim().toLowerCase();
-  const list=q?_tk.done.filter(t=>(String(t.title||'')+' '+String(t.notes||'')).toLowerCase().includes(q)):_tk.done;
-  if(!list.length) return '';
-  return `<div class="tk-g open"><div class="tk-gb">${list.map(t=>{ const lv=TK_LV[t.level]||TK_LV.normal, c=t.can||{};
-    const meta=[t.cleared_at?tkDate(t.cleared_at):'',t.done_by||''].filter(Boolean).join(' · ');
-    return `<div class="tk-r is-done" data-tk="${esc(t.id)}"><span class="tk-cb on" aria-hidden="true"><i class="tk-box">${TK_CHECK}</i></span>`
-      +`<div class="tk-m"><div class="tk-t"><i class="tk-d" style="--d:${lv.d}"></i><button type="button" class="tk-tb" data-tk-open>${esc(t.title)}</button></div>${meta?`<div class="tk-s">${esc(meta)}</div>`:''}</div>`
-      +`${c.reopen?'<button type="button" class="tk-reopen" data-tk-reopen>Reopen</button>':''}</div>`; }).join('')}</div></div>`;
-}
-// Composer: title, level, optional due date; Notify Joey switches when Emergency is picked.
-function tkCmpHtml(){
-  const c=_tk.cmp, owner=tkOwner(), lvs=owner?TK_LVS:TK_LVS.filter(k=>k!=='emergency');
-  return `<div class="tk-cmp" data-tk-cmp>`
-    +`<input class="tk-in" data-tk-ct maxlength="300" placeholder="${owner?'What should Joey do?':'New task'}" value="${esc(c.title)}" aria-label="Task" enterkeyhint="done">`
-    +`<div class="tk-row2"><div class="tk-lv" role="radiogroup" aria-label="Level">${lvs.map(k=>`<button type="button" role="radio" aria-checked="${c.level===k}" class="${c.level===k?'on':''}" data-tk-cl="${k}" style="--d:${TK_LV[k].d}"><i></i>${TK_LV[k].label}</button>`).join('')}</div>`
-    +`<input type="date" class="tk-date" data-tk-cd value="${esc(c.due)}" aria-label="Due date"></div>`
-    +(owner&&c.level==='emergency'?tkNotifyNewHtml():'')
-    +`<div class="tk-row2"><button type="button" class="tk-btn" data-tk-add>Add</button><button type="button" class="tk-btn grey" data-tk-cancel>Cancel</button></div></div>`;
-}
-function tkSwHtml(attr,k,lab,on,av,off){
-  const why=av?'':tkChWhy(k), live=on&&av&&!off;
-  return `<button type="button" class="tk-sw${live?' on':''}" role="switch" aria-checked="${live}" ${attr}="${k}" ${av&&!off?'':'disabled'}><i></i>${lab}${why?' · '+esc(why):''}</button>`;
-}
-function tkNotifyNewHtml(){
-  const c=_tk.cmp, off=!(_tk.shift&&_tk.shift.on), ch=_tk.channels||{};
-  return `<div class="tk-nfy"><b>Notify Joey</b>${off?'<span class="tk-off">Joey is off</span>':''}`
-    +tkSwHtml('data-tk-csw','text','Text',c.text,!!(ch.text&&ch.text.available),off)
-    +tkSwHtml('data-tk-csw','email','Email',c.email,!!(ch.email&&ch.email.available),off)+'</div>';
-}
-function tkPaintCmp(){ const el=document.querySelector('#tkRoot [data-tk-cmp]'); if(el&&_tk.cmp) el.outerHTML=tkCmpHtml(); }
-function tkFocusCmp(){ setTimeout(()=>{ const i=document.querySelector('#tkRoot [data-tk-ct]'); if(i) i.focus(); },0); }
-async function tkCreate(){
-  const c=_tk.cmp; if(!c) return;
-  const title=String(c.title||'').trim(); if(!title){ tkFocusCmp(); return; }
-  if(_tk.inflight.has('add')) return; _tk.inflight.add('add');
-  const btn=document.querySelector('#tkRoot [data-tk-add]'); if(btn) btn.disabled=true;
-  const body={ op:'create', id:c.id, title, level:c.level };
-  if(c.due) body.due_on=c.due;
-  const owner=tkOwner(), on=!!(_tk.shift&&_tk.shift.on), ch=_tk.channels||{};
-  if(owner&&c.level==='emergency'&&on) body.notify={ text:!!(c.text&&ch.text&&ch.text.available), email:!!(c.email&&ch.email&&ch.email.available) };
-  try{
-    const r=await api('assistant_tasks',{ method:'POST', body });
-    if(r&&r.task) tkPut(r.task);
-    _tk.cmp=tkPhone()?null:tkCmpNew();
-    tkRecount(); paintTasks(); if(_tk.cmp) tkFocusCmp();
-    const m=tkNotifyMsg(r&&r.notify);
-    if(m) toast(m); else if(owner&&c.level==='emergency'&&!on) toast('Joey is off. Not sent.');
-  }catch(e){ toast(e.message); if(btn) btn.disabled=false; }
-  finally{ _tk.inflight.delete('add'); }
-}
-function tkMarkSel(){ document.querySelectorAll('#tkRoot .tk-r').forEach(r=>r.classList.toggle('sel',r.dataset.tk===_tk.drawer)); }
-function tkWire(root){
-  if(!root) return;
-  root.addEventListener('click',e=>{
-    const tg=e.target;
-    if(tg.closest('[data-tk-new]')){ _tk.tab='open'; if(!_tk.cmp) _tk.cmp=tkCmpNew(); paintTasks(); tkFocusCmp(); return; }
-    const tab=tg.closest('[data-tk-tab]'); if(tab){ _tk.tab=tab.dataset.tkTab; paintTasks(); return; }
-    const fold=tg.closest('[data-tk-fold]');
-    if(fold){ const g=fold.closest('.tk-g'); if(!g||g.classList.contains('lock')) return; const on=g.classList.toggle('open'); fold.setAttribute('aria-expanded',String(on)); tkFoldSet(g.dataset.g,on); return; }
-    const cl=tg.closest('[data-tk-cl]'); if(cl&&_tk.cmp){ _tk.cmp.level=cl.dataset.tkCl; if(_tk.cmp.level==='emergency'){ _tk.cmp.text=true; _tk.cmp.email=false; } tkPaintCmp(); if(!tkPhone()) tkFocusCmp(); return; }
-    const sw=tg.closest('[data-tk-csw]'); if(sw&&_tk.cmp){ const k=sw.dataset.tkCsw; _tk.cmp[k]=!_tk.cmp[k]; tkPaintCmp(); return; }
-    if(tg.closest('[data-tk-add]')){ tkCreate(); return; }
-    if(tg.closest('[data-tk-cancel]')){ _tk.cmp=null; paintTasks(); return; }
-    const row=tg.closest('[data-tk]'); if(!row) return;
-    if(tg.closest('[data-tk-reopen]')){ tkReopen(row.dataset.tk); return; }
-    if(tg.closest('[data-tk-grip]')) return;
-    if(tg.closest('[data-tk-cb]')){ tkTick(row.dataset.tk); return; }
-    tkOpen(row.dataset.tk);   // a tap opens the task; it never ticks
+// Owner drags tasks (owner 2026-10-06): grab the ⠿ handle, drop anywhere on the
+// board. Same column = new order; another column = new color too.
+function tkDragInit(view){
+  if(role!=='owner') return;
+  view.querySelectorAll('.tk-board [data-tk-grip]').forEach(h=>{
+    h.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); });
+    h.addEventListener('pointerdown',e=>{
+      e.preventDefault(); e.stopPropagation();
+      const row=h.closest('[data-tk]'); if(!row) return;
+      const r=row.getBoundingClientRect();
+      const ghost=row.cloneNode(true); ghost.removeAttribute('open');
+      Object.assign(ghost.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',zIndex:9999,pointerEvents:'none',opacity:'.9',boxShadow:'0 8px 24px rgba(0,0,0,.18)',background:'#fff'});
+      document.body.appendChild(ghost);
+      const ph=document.createElement('div'); ph.className='tk-ph'; ph.style.cssText='height:'+r.height+'px;border:2px dashed #94a3b8;border-radius:10px;margin:4px 0;';
+      row.after(ph); row.style.display='none';
+      const dy=e.clientY-r.top;
+      const move=ev=>{
+        ghost.style.top=(ev.clientY-dy)+'px'; ghost.style.left=(r.left+ev.clientX-e.clientX)+'px';
+        const el=document.elementFromPoint(ev.clientX,ev.clientY); const col=el&&el.closest('.tk-board .plv-col'); if(!col) return;
+        const body=col.querySelector('.plv-col-b');
+        const rows=[...body.querySelectorAll(':scope > [data-tk]')].filter(x=>x!==row);
+        const before=rows.find(x=>{ const b=x.getBoundingClientRect(); return ev.clientY<b.top+b.height/2; });
+        if(before) body.insertBefore(ph,before); else body.appendChild(ph);
+      };
+      const up=async()=>{
+        document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up);
+        ghost.remove(); ph.replaceWith(row); row.style.display='';
+        const id=row.dataset.tk, col=row.closest('.plv-col'), newColor=col&&col.id.replace('tkcol-','');
+        const t=_tk.tasks.find(x=>x.id===id);
+        const ids=[...col.querySelectorAll('.plv-col-b > [data-tk]')].map(x=>x.dataset.tk);
+        try{
+          if(t&&newColor&&newColor!==t.color&&TASK_ORDER.includes(newColor)){
+            const r2=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:newColor } });
+            if(newColor==='red'&&!(r2&&r2.already)) toast(r2&&r2.texted?'Texted Joey':'Saved. The text to Joey did not send.');
+          }
+          await api('assistant_tasks',{ method:'POST', body:{ op:'order', ids } });
+        }catch(err){ toast(err.message); }
+        await renderTasks();
+      };
+      document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up);
+    });
   });
-  root.addEventListener('input',e=>{
-    const tg=e.target;
-    if(tg.matches('[data-tk-ct]')&&_tk.cmp){ _tk.cmp.title=tg.value; return; }
-    if(tg.matches('[data-tk-cd]')&&_tk.cmp){ _tk.cmp.due=tg.value||''; return; }
-    if(tg.matches('[data-tk-q]')){ _tk.q=tg.value; const h=root.querySelector('#tkDoneList'); if(h) h.innerHTML=tkDoneListHtml(); tkMarkSel(); }
-  });
-  root.addEventListener('change',e=>{ if(e.target.matches('[data-tk-cd]')&&_tk.cmp) _tk.cmp.due=e.target.value||''; });
-  root.addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.matches('[data-tk-ct]')){ e.preventDefault(); tkCreate(); } });
-  tkDragInit(root);
 }
-// Owner drags by the handle (mouse or touch). Same group = new order; another
-// group = new level too. Never notifies; a move to Emergency only offers.
-function tkDragInit(root){
-  if(!tkOwner()||tkRO()) return;
-  root.querySelectorAll('[data-tk-grip]').forEach(h=>h.addEventListener('pointerdown',e=>{
-    if(e.button>0) return;
-    e.preventDefault(); e.stopPropagation();
-    const row=h.closest('[data-tk]'), from=row&&row.parentElement; if(!row||!from) return;
-    const prevIds=[...from.querySelectorAll(':scope > [data-tk]')].map(x=>x.dataset.tk).join(',');
-    const r=row.getBoundingClientRect(), dy=e.clientY-r.top, dx=e.clientX-r.left;
-    const ghost=row.cloneNode(true); ghost.classList.add('tk-ghost');
-    Object.assign(ghost.style,{ position:'fixed', left:r.left+'px', top:r.top+'px', width:r.width+'px', zIndex:9999, pointerEvents:'none' });
-    document.body.appendChild(ghost);
-    const ph=document.createElement('div'); ph.className='tk-ph'; ph.style.height=r.height+'px';
-    row.after(ph); row.style.display='none';
-    const move=ev=>{
-      ghost.style.top=(ev.clientY-dy)+'px'; ghost.style.left=(ev.clientX-dx)+'px';
-      if(ev.clientY<70) window.scrollBy(0,-14); else if(ev.clientY>innerHeight-70) window.scrollBy(0,14);
-      const el=document.elementFromPoint(ev.clientX,ev.clientY); if(!el) return;
-      let body=el.closest('#tkRoot .tk-gb');
-      if(!body){ const g=el.closest('#tkRoot .tk-g'); body=g&&g.querySelector('.tk-gb'); }
-      if(!body||!body.dataset.lv) return;   // never into Needs you
-      const rows=[...body.querySelectorAll(':scope > [data-tk]')].filter(x=>x!==row);
-      const before=rows.find(x=>{ const b=x.getBoundingClientRect(); return ev.clientY<b.top+b.height/2; });
-      if(before) body.insertBefore(ph,before); else body.appendChild(ph);
-      root.querySelectorAll('.tk-g').forEach(g=>g.classList.toggle('tk-drop',g.contains(ph)));
-    };
-    const up=async()=>{
-      document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up);
-      ghost.remove(); root.querySelectorAll('.tk-g.tk-drop').forEach(g=>g.classList.remove('tk-drop'));
-      const body=ph.parentElement; ph.replaceWith(row); row.style.display='';
-      const id=row.dataset.tk, t=tkFind(id), lv=body&&body.dataset?body.dataset.lv:'';
-      if(!t||!lv){ paintTasks(); return; }
-      const ids=[...body.querySelectorAll(':scope > [data-tk]')].map(x=>x.dataset.tk);
-      const moved=lv!==t.level;
-      if(!moved&&ids.join(',')===prevIds) return;
-      ids.forEach((x,i)=>{ const k=tkFind(x); if(k) k.sort_order=i; });
-      if(moved){ t.level=lv; t.color=TK_LV[lv].c; }
-      _tk.tasks.sort(tkByOrder); tkRecount(); paintTasks();
-      try{ const res=await api('assistant_tasks',{ method:'POST', body:moved?{ op:'order', ids, id, level:lv }:{ op:'order', ids } });
-        if(res&&res.offer_notify) tkOffer(id);
-        if(moved) tkRefresh();
-      }catch(err){ toast(err.message); tkRefresh(); }
-    };
-    document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up);
-  }));
-}
-// Pipeline only now: phone sections the user opened (owner 2026-10-07); one tap on a header opens/closes.
+// Phone sections the user opened (owner 2026-10-07); one tap on a header opens/closes.
 const plMobOpen=new Set();
 document.addEventListener('click',e=>{ const hd=e.target.closest&&e.target.closest('.plv-board .plv-col-h'); if(!hd||e.target.closest('button,a,input')) return;
   if(!matchMedia('(max-width:700px)').matches) return; const col=hd.closest('.plv-col'); if(!col||col.classList.contains('m-lock')) return;
   const on=col.classList.toggle('m-open'); if(on) plMobOpen.add(col.id); else plMobOpen.delete(col.id); });
-
-// ── Drawer (desktop: right side ~440px; phone: full-screen sheet, Back closes it) ──
-function tkDrawerEl(){
-  let dr=document.getElementById('tkDrawer');
-  if(!dr){ dr=document.createElement('div'); dr.id='tkDrawer'; dr.className='tk-dr hidden'; dr.setAttribute('role','dialog'); document.body.appendChild(dr); tkWireDrawer(dr); }
-  return dr;
-}
-function tkOpen(id){
-  if(!TK_UUID_RE.test(String(id||''))) return;
-  const same=_tk.drawer===id;
-  _tk.drawer=id;
-  if(!same){ _tk.ev=null; _tk.reply=''; _tk.dn={ text:true, email:false }; _tk.jobOpen=false; _tk.jobRes=[]; }
-  const dr=tkDrawerEl(); dr.classList.remove('hidden'); document.body.classList.add('tk-dr-on');
-  if(tkPhone()&&!_tk.pushed){ try{ history.pushState({ tkDrawer:1 },''); _tk.pushed=true; }catch(_){} }
-  tkPaintDrawer(true); tkMarkSel();
-  if(!same&&!tkPhone()) setTimeout(()=>{ const x=dr.querySelector('[data-tk-close]'); if(x) x.focus({ preventScroll:true }); },0);
-  tkDrawerLoad(id,true);
-}
-function tkClose(opt){
-  opt=opt||{};
-  const dr=document.getElementById('tkDrawer');
-  if(dr){ dr.classList.add('hidden'); dr.innerHTML=''; }
-  const was=_tk.drawer; _tk.drawer=null; _tk.ev=null; _tk.drId=null;
-  document.body.classList.remove('tk-dr-on');
-  if(_tk.pushed){ _tk.pushed=false; if(!opt.fromPop&&!opt.noHistory){ _tk.skipPop=true; try{ history.back(); }catch(_){ _tk.skipPop=false; } } }
-  tkMarkSel();
-  if(was&&!opt.noHistory&&!tkPhone()){ const b=document.querySelector(`#tkRoot [data-tk="${CSS.escape(was)}"] .tk-tb`); if(b) b.focus({ preventScroll:true }); }
-}
-// Opening stamps Seen (never under View As). A refresh re-stamps only for new replies.
-async function tkDrawerLoad(id,stamp){
-  let d;
-  try{ d=await api('assistant_tasks',{ params:{ v:'2', id } }); }
-  catch(e){
-    if(_tk.drawer!==id) return;
-    if(e.status===404){ toast('Task not found'); tkDrop(id); tkClose(); tkRecount(); if(onScreen('tasks')) paintTasks(); }
-    else if(_tk.ev==null){ _tk.ev=[]; tkPaintDrawer(); }
-    return;
-  }
-  if(_tk.drawer!==id) return;
-  if(d.shift) _tk.shift=d.shift;
-  if(d.task&&d.task.deleted_at){ toast('Task was deleted'); tkDrop(id); tkClose(); tkRecount(); if(onScreen('tasks')) paintTasks(); return; }
-  if(d.task) tkPut(d.task);
-  _tk.ev=d.events||[];
-  const t=tkFind(id);
-  if(t&&!tkRO()&&(stamp||t.unread>0)){
-    api('assistant_tasks',{ method:'POST', body:{ op:'seen', id } }).catch(()=>{});
-    t.unread=0; if(tkOwner()) t.needs_you=t.status==='check';
-    tkRecount();
-  }
-  if(onScreen('tasks')&&!tkTyping(document.getElementById('tkRoot'))) paintTasks();
-  tkPaintDrawer();
-}
-function tkNotifyTaskHtml(t){
-  if(!tkOwner()||tkRO()||t.level!=='emergency'||!(t.status==='open'||t.status==='sent_back')) return '';
-  const off=!(_tk.shift&&_tk.shift.on), ch=_tk.channels||{};
-  const line=k=>{
-    const s=t[k]||{}, lab=k==='text'?'Text':'Email', av=!!(ch[k]&&ch[k].available), dis=off||!av?'disabled':'';
-    if(s.state==='sending') return `<div class="tk-nl"><b>${lab}</b><span class="tk-mute">Sending…</span></div>`;
-    if(s.state==='failed') return `<div class="tk-nl"><b>${lab}</b><span class="tk-warn">Failed: ${esc(tkReason(s.error))}</span><button type="button" class="tk-link" data-tk-again="${k}" ${dis}>Retry</button></div>`;
-    if(s.state&&s.state!=='never'){
-      const dl=s.state==='delivered'?' · <span class="tk-ok">Delivered</span>':s.state==='undelivered'?' · <span class="tk-warn">Undelivered</span>':'';
-      return `<div class="tk-nl"><b>${lab}</b><span>Sent ${esc(tkWhen(s.at))}${dl}</span><button type="button" class="tk-link" data-tk-again="${k}" ${dis}>${k==='text'?'Text again':'Email again'}</button></div>`;
-    }
-    return `<div class="tk-nl">${tkSwHtml('data-tk-dsw',k,lab,_tk.dn[k],av,off)}</div>`;
+function paintTasks(){
+  const view=document.getElementById('view'); if(!onScreen('tasks')) return;
+  const rank={red:0,yellow:1,green:2,white:3,joey:4};
+  const so=t=>t.sort_order==null?1e9:t.sort_order;
+  const open=_tk.tasks.filter(t=>!t.done_at).sort((a,b)=>rank[a.color]-rank[b.color]||so(a)-so(b)||(a.created_at<b.created_at?-1:1));
+  const done=_tk.tasks.filter(t=>t.done_at&&t.cleared_at).sort((a,b)=>a.done_at<b.done_at?1:-1);
+  // Done by Joey stays on the board, crossed out, until Andrew taps it (owner 2026-10-07).
+  // Board like the Pipeline (owner 2026-10-03): one column per color; the bar on top jumps to a column.
+  const cols=[...TASK_ORDER,...(open.some(t=>t.color==='joey')?['joey']:[])];
+  const W=iso=>new Date(iso).toLocaleString('en-US',{timeZone:'America/Denver',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  const card=t=>{ const c=TASK_COL[t.color]||TASK_COL.green, d=!!t.done_at;
+    // List row; tap to open the details (owner 2026-10-02).
+    return `<details class="tk-row${d?' done':''}" data-tk="${esc(t.id)}" ${_tk.open.has(t.id)?'open':''}>
+      <summary class="tk-sum">${role==='owner'&&!d?'<span data-tk-grip title="Drag" style="cursor:grab;touch-action:none;padding:0 6px 0 0;color:#94a3b8;font-size:18px;line-height:1;user-select:none;">⠿</span>':''}<input type="checkbox" data-tk-done ${d?'checked':''}><span class="tk-dot" style="background:${d?'#cbd5e1':c.bar};"></span><span class="tk-title" style="${d?'':`color:${c.ink};`}">${esc(t.title)}</span>${t.booking_id?'<span class="tk-ico">🔗</span>':''}${t.notes?'<span class="tk-ico">📝</span>':''}<span class="tk-car">▸</span></summary>
+      <div class="tk-body">
+        ${role==='owner'?`<input class="tk-edit" data-tk-title maxlength="300" value="${esc(t.title)}">`:''}
+        ${role==='owner'&&!d?`<div class="tk-colors sm">${TASK_ORDER.map(k=>`<button type="button" data-tk-recolor="${k}" class="${t.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`:''}
+        <div class="tk-meta">${d?`Done · ${esc(W(t.done_at))}${t.done_by?' · '+esc(t.done_by):''}`:`${esc(c.label)} · from ${esc(t.created_by||'')} · ${esc(W(t.created_at))}`}</div>
+        ${t.booking_id?`<button type="button" class="tk-job" data-tk-job="${esc(t.booking_id)}" data-slug="${esc(t.job_slug||'')}">🔗 ${esc(t.job_label||'Open job')}</button>`:''}
+        ${[...new Set(String(t.notes||'').match(/https?:\/\/[^\s<>"]+/g)||[])].map(u=>`<a class="tk-link" href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/,''))} ↗</a>`).join('')}
+        <textarea class="tk-notes" data-tk-notes rows="${Math.min(14,Math.max(1,String(t.notes||'').split(String.fromCharCode(10)).length))}" placeholder="Notes…">${esc(t.notes||'')}</textarea>
+        ${notePhotosHtml(t.photo_urls)}
+        ${(t.photo_urls||[]).length<NOTE_MAX_PHOTOS?'<button type="button" class="tk-job" data-tk-photo>📷 Add photo</button><input type="file" accept="image/*" multiple data-tk-file style="display:none;">':''}
+      ${role==='owner'?'<button type="button" class="tk-x" data-tk-del>Delete task</button>':''}
+      </div>
+    </details>`; };
+  view.innerHTML=`<div class="wrap" style="max-width:none;">
+    <h2 style="margin:0 0 12px;">Task</h2>
+    <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
+    ${isJoeyHome()?'<details class="tk-add-wrap" style="margin:12px 0;max-width:760px;"><summary style="cursor:pointer;padding:12px;border:1px solid var(--line);border-radius:10px;font-weight:700;">Add my own task</summary>':''}
+    <div class="tk-add" style="max-width:760px;">
+      <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
+      ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
+      <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
+      <textarea id="tkNotes" rows="2" placeholder="Notes (optional)"></textarea>
+      <div id="tkPhotoHost"></div>
+      <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
+    </div>
+    ${isJoeyHome()?'</details>':''}
+    <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k), struck=_tk.tasks.filter(t=>t.done_at&&!t.cleared_at&&t.color===k);
+      // Phone: red with tasks is always open (owner 2026-10-07).
+      const mc=k==='red'&&list.length?' m-open m-lock':(plMobOpen.has('tkcol-'+k)?' m-open':'');
+      return `<div class="plv-col${_tk.filter===k?' on':''}${mc}" id="tkcol-${k}" style="--st:${TASK_COL[k].bar};"><div class="plv-col-h${k==='yellow'&&list.length?' tk-pulse':''}"><b>${esc(TASK_COL[k].label)} (${list.length})</b></div><div class="plv-col-b">${list.map(card).join('')}${struck.map(card).join('')}</div></div>`; }).join('')}</div>
+    ${done.length?`<details class="tk-done-wrap"><summary class="side-section" style="padding:16px 0 6px;cursor:pointer;">Done (${done.length}) ▸</summary>${done.map(card).join('')}</details>`:''}
+  </div>`;
+  tasksBadge();
+  tkDragInit(view);
+  const tkPicker=notePhotoPicker(view.querySelector('#tkPhotoHost'), view.querySelector('#tkNotes'));
+  view.querySelectorAll('[data-tk-filter]').forEach(b=>b.onclick=()=>{ const k=b.dataset.tkFilter; _tk.filter=_tk.filter===k?null:k;
+    view.querySelectorAll('[data-tk-filter]').forEach(x=>x.classList.toggle('on',x.dataset.tkFilter===_tk.filter));
+    view.querySelectorAll('.tk-board .plv-col').forEach(c=>c.classList.toggle('on',c.id==='tkcol-'+_tk.filter));
+    const col=_tk.filter&&document.getElementById('tkcol-'+_tk.filter); if(col) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); });
+  view.querySelectorAll('[data-tk-color]').forEach(b=>b.onclick=()=>{ _tk.color=b.dataset.tkColor; view.querySelectorAll('[data-tk-color]').forEach(x=>x.classList.toggle('on',x===b)); });
+  const jobIn=view.querySelector('#tkJob'), res=view.querySelector('#tkJobRes'); let tmr=null;
+  jobIn.oninput=()=>{ _tk.job=null; clearTimeout(tmr); const q=jobIn.value.trim(); if(q.length<2){ res.innerHTML=''; return; }
+    tmr=setTimeout(async()=>{ try{ const d=await api('assistant_tasks',{ params:{ q } });
+      res.innerHTML=(d.jobs||[]).map((j,i)=>`<button type="button" data-i="${i}">${esc(j.label)}</button>`).join('');
+      res.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{ _tk.job=d.jobs[+b.dataset.i]; jobIn.value=_tk.job.label; res.innerHTML=''; jobIn.blur(); });
+    }catch(_){} },250); };
+  res.onmousedown=e=>e.preventDefault();   // pressing a result keeps focus here, so the blur timer can't eat a slow click (owner 2026-10-03)
+  jobIn.onblur=()=>setTimeout(()=>{ res.innerHTML=''; },200);   // never cover the notes box
+  view.querySelector('#tkAdd').onclick=async()=>{
+    const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
+    try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, photos:tkPicker.urls(), booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
+      if(role==='owner'&&_tk.color==='red') toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.');
+      _tk.job=null; await renderTasks(); }catch(e){ toast(e.message); }
   };
-  const never=['text','email'].filter(k=>tkNever(t,k));
-  const can=!off&&never.some(k=>_tk.dn[k]&&ch[k]&&ch[k].available);
-  return `<div class="tk-f"><div class="tk-fl">Notify Joey</div><div class="tk-fv tk-nfy2">${off?'<div class="tk-off">Joey is off</div>':''}${line('text')}${line('email')}`
-    +(never.length?`<button type="button" class="tk-btn red" data-tk-notify ${can?'':'disabled'}>Notify Joey</button>`:'')+'</div></div>';
-}
-function tkEvHtml(e){
-  const when=tkWhen(e.created_at);
-  if(e.kind==='comment'){ const me=!!(_tk.me&&e.by===_tk.me.name);
-    return `<div class="tk-c${me?' me':''}"><div class="tk-cm"><b>${esc(e.by||'')}</b><span>${esc(when)}</span></div><div class="tk-ct">${tkLinkify(e.body)}</div></div>`; }
-  const L={ texted:'Texted Joey', text_failed:'Text failed', emailed:'Emailed Joey', email_failed:'Email failed', sent_back:'Sent back', ok:"OK'd", reopened:'Reopened' }[e.kind]||e.kind;
-  const bits=[L+(e.body?': '+e.body:'')]; if(e.kind==='reopened'&&e.by) bits.push(e.by); bits.push(when);
-  return `<div class="tk-sys${String(e.kind).endsWith('failed')?' warn':''}">${esc(bits.join(' · '))}</div>`;
-}
-function tkPaintDrawer(force){
-  const dr=document.getElementById('tkDrawer'), id=_tk.drawer; if(!dr||!id) return;
-  if(!force&&tkTyping(dr)) return;   // never wipe what someone is typing
-  const xb='<button type="button" class="tk-x" data-tk-close aria-label="Close">×</button>';
-  const t=tkFind(id);
-  if(!t){ dr.innerHTML=`<div class="tk-dr-h">${xb}</div><div class="tk-dr-b"><div class="tk-mute">Loading…</div></div>`; _tk.drId=null; return; }
-  const sb=dr.querySelector('.tk-dr-b'), top=sb&&_tk.drId===id?sb.scrollTop:0; _tk.drId=id;
-  dr.setAttribute('aria-label',t.title||'Task');
-  const owner=tkOwner(), c=t.can||{}, lv=TK_LV[t.level]||TK_LV.normal, st=t.status;
-  const f=(lab,html)=>`<div class="tk-f"><div class="tk-fl">${lab}</div><div class="tk-fv">${html}</div></div>`;
-  const pill=st==='check'?'<span class="tk-pill check">Check</span>':st==='sent_back'?'<span class="tk-pill sb">Sent back</span>':st==='done'?'<span class="tk-pill dn">Done</span>':'';
-  const head=`<div class="tk-dr-h">${xb}${pill}${c.delete?`<button type="button" class="tk-ic" data-tk-del aria-label="Delete task" title="Delete">${TK_TRASH}</button>`:''}</div>`;
-  const title=c.edit
-    ?`<textarea class="tk-dr-title" data-tk-title maxlength="300" rows="${Math.min(5,Math.max(1,Math.ceil(String(t.title||'').length/32)))}" aria-label="Title">${esc(t.title)}</textarea>`
-    :`<h3 class="tk-dr-title ro">${esc(t.title)}</h3>`;
-  const meta=[]; if(t.mine) meta.push(owner?"Joey's":'Mine'); if(owner&&t.seen_joey_at) meta.push('Seen '+tkWhen(t.seen_joey_at));
-  const lvHtml=c.level
-    ?`<div class="tk-lv">${(c.red?TK_LVS:TK_LVS.filter(k=>k!=='emergency')).map(k=>`<button type="button" class="${t.level===k?'on':''}" data-tk-lv="${k}" aria-pressed="${t.level===k}" style="--d:${TK_LV[k].d}"><i></i>${TK_LV[k].label}</button>`).join('')}</div>`
-    :`<span class="tk-lvro"><i class="tk-d" style="--d:${lv.d}"></i>${lv.label}</span>`;
-  const dl=tkDue(t), od=t.due_state==='overdue';
-  const dueHtml=c.edit
-    ?`<div class="tk-row2"><input type="date" class="tk-date" data-tk-due value="${esc(t.due_on||'')}" aria-label="Due date">${dl?`<span class="${od?'tk-warn':'tk-mute'}">${esc(dl)}</span>`:''}${t.due_on?'<button type="button" class="tk-link" data-tk-dueclr>Clear</button>':''}</div>`
-    :(t.due_on?`<span class="tk-ro${od?' tk-warn':''}">${esc(dl||tkDay(t.due_on))}</span>`:'');
-  let jobHtml='';
-  if(t.booking_id) jobHtml=`<button type="button" class="tk-chip" data-tk-job>🔗 ${esc(t.job_label||'Open job')}</button>${c.edit?'<button type="button" class="tk-link" data-tk-unjob>Unlink</button>':''}`;
-  else if(c.edit&&_tk.jobOpen) jobHtml=`<div class="tk-jobs"><input class="tk-in" data-tk-jobq placeholder="Customer name or phone" autocomplete="off" aria-label="Find a job"><div class="tk-res"></div></div>`;
-  const notes=String(t.notes||'');
-  const notesHtml=c.edit
-    ?`<textarea class="tk-in tk-notes" data-tk-notes rows="${Math.min(14,Math.max(3,notes.split(String.fromCharCode(10)).length))}" placeholder="Notes" aria-label="Notes">${esc(notes)}</textarea>${tkLinks(notes)}`
-    :(notes?`<div class="tk-nt">${tkLinkify(notes)}</div>`:'');
-  const photos=notePhotosHtml(t.photo_urls);
-  const tools=c.edit?[!t.booking_id&&!_tk.jobOpen?'<button type="button" class="tk-link" data-tk-linkjob>🔗 Link job</button>':'',
-    (t.photo_urls||[]).length<NOTE_MAX_PHOTOS?'<button type="button" class="tk-link" data-tk-photo>📷 Add photo</button><input type="file" accept="image/*" multiple data-tk-file hidden>':''].join(''):'';
-  const cl=Array.isArray(t.checklist)?t.checklist:[];
-  const clDone=cl.filter(i=>i&&i.done).length;
-  const clHtml=(cl.length||c.edit)
-    ?`<div class="tk-sec"><span>Checklist</span>${cl.length?`<span class="tk-mute">${clDone} of ${cl.length}</span>`:''}</div><div class="tk-cl">`
-      +cl.map(i=>`<div class="tk-ci${i.done?' dn':''}"><label><input type="checkbox" data-tk-clt="${esc(i.id)}" ${i.done?'checked':''} ${c.check_items?'':'disabled'}><span>${esc(i.text)}</span></label>${c.edit?`<button type="button" data-tk-clrm="${esc(i.id)}" aria-label="Remove item">×</button>`:''}</div>`).join('')
-      +(c.edit&&cl.length<50?'<input class="tk-in tk-cladd" data-tk-cladd maxlength="300" placeholder="Add item" aria-label="Add checklist item" enterkeyhint="done">':'')+'</div>'
-    :'';
-  const evs=_tk.ev;
-  const rep=c.comment?`<div class="tk-rep"><textarea class="tk-in" data-tk-reply rows="2" placeholder="Reply" aria-label="Reply">${esc(_tk.reply)}</textarea><button type="button" class="tk-btn" data-tk-send>Send</button></div>`:'';
-  const actHtml=(evs==null||evs.length||rep)?`<div class="tk-sec"><span>Activity</span></div><div class="tk-ev">${evs==null?'<div class="tk-mute">Loading…</div>':evs.map(tkEvHtml).join('')}</div>${rep}`:'';
-  const fb=[];
-  if(st==='check'){
-    if(c.ok){ fb.push('<button type="button" class="tk-btn" data-tk-act="ok">OK</button>'); if(c.send_back) fb.push('<button type="button" class="tk-btn grey" data-tk-act="send_back">Send back</button>'); }
-    else if(c.untick) fb.push('<button type="button" class="tk-btn grey" data-tk-act="untick">Not done</button>');
-  } else if(st==='done'){ if(c.reopen) fb.push('<button type="button" class="tk-btn grey" data-tk-act="reopen">Reopen</button>'); }
-  else if(c.tick) fb.push(`<button type="button" class="tk-btn" data-tk-act="tick">${owner?'Mark complete':'Done'}</button>`);
-  dr.innerHTML=`${head}<div class="tk-dr-b">${title}${meta.length?`<div class="tk-meta">${esc(meta.join(' · '))}</div>`:''}`
-    +f('Level',lvHtml)+(dueHtml?f('Due',dueHtml):'')+tkNotifyTaskHtml(t)+(jobHtml?f('Job',jobHtml):'')
-    +(notesHtml?`<div class="tk-sec"><span>Notes</span></div>${notesHtml}`:'')+photos+(tools?`<div class="tk-tools">${tools}</div>`:'')
-    +clHtml+actHtml+`</div>${fb.length?`<div class="tk-dr-f">${fb.join('')}</div>`:''}`;
-  const nb=dr.querySelector('.tk-dr-b'); if(nb) nb.scrollTop=top;
-}
-function tkWireDrawer(dr){
-  dr.addEventListener('click',e=>{
-    const id=_tk.drawer, tg=e.target; if(!id) return;
-    if(tg.closest('[data-tk-close]')){ tkClose(); return; }
-    const t=tkFind(id); if(!t) return;
-    const lv=tg.closest('[data-tk-lv]'); if(lv){ if(t.level!==lv.dataset.tkLv) tkEdit(id,{ level:lv.dataset.tkLv }); return; }
-    const sw=tg.closest('[data-tk-dsw]'); if(sw){ const k=sw.dataset.tkDsw; _tk.dn[k]=!_tk.dn[k]; tkPaintDrawer(true); return; }
-    if(tg.closest('[data-tk-notify]')){ tkNotify(id,{ text:_tk.dn.text&&tkNever(t,'text'), email:_tk.dn.email&&tkNever(t,'email') }); return; }
-    const ag=tg.closest('[data-tk-again]'); if(ag){ const k=ag.dataset.tkAgain; tkNotify(id,{ text:k==='text', email:k==='email' }); return; }
-    if(tg.closest('[data-tk-del]')){ tkDelete(id); return; }
-    if(tg.closest('[data-tk-send]')){ tkComment(id); return; }
-    const act=tg.closest('[data-tk-act]');
-    if(act){ const a=act.dataset.tkAct; if(a==='send_back') tkSendBack(id); else if(a==='reopen') tkReopen(id); else tkTick(id); return; }
-    if(tg.closest('[data-tk-dueclr]')){ tkEdit(id,{ due_on:null }); return; }
-    const rm=tg.closest('[data-tk-clrm]'); if(rm){ tkCheck(id,{ act:'remove', item_id:rm.dataset.tkClrm }); return; }
-    if(tg.closest('[data-tk-job]')){ openPayrollJob(t.booking_id,t.job_slug||(current&&current.slug)); return; }
-    if(tg.closest('[data-tk-unjob]')){ tkEdit(id,{ booking_id:null }); return; }
-    if(tg.closest('[data-tk-linkjob]')){ _tk.jobOpen=true; _tk.jobRes=[]; tkPaintDrawer(true); const q=dr.querySelector('[data-tk-jobq]'); if(q) q.focus(); return; }
-    const jp=tg.closest('[data-tk-jobpick]'); if(jp){ const j=_tk.jobRes[+jp.dataset.tkJobpick]; if(j){ _tk.jobOpen=false; tkEdit(id,{ booking_id:j.id, job_slug:j.slug, job_label:j.label }); } return; }
-    if(tg.closest('[data-tk-photo]')){ const fi=dr.querySelector('[data-tk-file]'); if(fi) fi.click(); return; }
+  view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
+    el.addEventListener('toggle',()=>{ if(el.open) _tk.open.add(id); else _tk.open.delete(id); });
+    // Andrew taps a crossed-out task: it leaves the board (owner 2026-10-07).
+    if(role==='owner'&&el.closest('.tk-board')&&el.classList.contains('done')) el.querySelector('.tk-sum').addEventListener('click',async e=>{ if(e.target.closest('[data-tk-done]')) return; e.preventDefault();
+      try{ await api('assistant_tasks',{ method:'POST', body:{ op:'clear', id } }); await renderTasks(); }catch(err){ toast(err.message); } });
+    el.querySelector('[data-tk-done]').addEventListener('click',e=>e.stopPropagation());
+    el.querySelector('[data-tk-done]').onchange=async e=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'done', id, done:e.target.checked } }); await renderTasks(); }catch(err){ toast(err.message); } };
+    const n=el.querySelector('[data-tk-notes]'); n.onchange=async()=>{ try{ await api('assistant_tasks',{ method:'POST', body:{ op:'notes', id, notes:n.value } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.notes=n.value; toast('Note saved'); }catch(err){ toast(err.message); } };
+    // Andrew edits the title or color any time (owner 2026-10-03).
+    const ti=el.querySelector('[data-tk-title]'); if(ti) ti.onchange=async()=>{ const v=ti.value.trim(); if(!v){ toast('Write the task first.'); return; }
+      try{ await api('assistant_tasks',{ method:'POST', body:{ op:'title', id, title:v } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.title=v; const s=el.querySelector('.tk-sum .tk-title'); if(s) s.textContent=v; toast('Saved'); }catch(err){ toast(err.message); } };
+    el.querySelectorAll('[data-tk-recolor]').forEach(b=>b.onclick=async()=>{ const k=b.dataset.tkRecolor;
+      const cur=_tk.tasks.find(x=>x.id===id); if(cur&&cur.color===k) return;   // already this color: nothing to save, no text
+      try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:k } }); if(k==='red'&&!(r&&r.already)) toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.'); _tk.open.add(id); await renderTasks(); }catch(err){ toast(err.message); } });
+    const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
+    // Pictures on a task (owner 2026-10-02): upload, then save the full list.
+    const pb=el.querySelector('[data-tk-photo]'), pf=el.querySelector('[data-tk-file]');
+    if(pb&&pf){ pb.onclick=()=>pf.click(); pf.onchange=async()=>{ const t=_tk.tasks.find(x=>x.id===id)||{}; const urls=[...(t.photo_urls||[])];
+      const files=[...pf.files].slice(0,NOTE_MAX_PHOTOS-urls.length); pf.value=''; pb.textContent='Uploading…'; pb.disabled=true;
+      try{ for(const f of files){ const dataUrl=await compressImage(f,1400,0.8); const r=await api('notes_photo',{ method:'POST', body:{ image:dataUrl } }); urls.push(r.url); }
+        await api('assistant_tasks',{ method:'POST', body:{ op:'photos', id, photos:urls } }); _tk.open.add(id); await renderTasks();
+      }catch(err){ toast(err.message||'Could not add the photo'); pb.textContent='📷 Add photo'; pb.disabled=false; } }; }
+    const x=el.querySelector('[data-tk-del]'); if(x) x.onclick=async()=>{ if(!confirm('Delete this task?')) return; try{ await api('assistant_tasks',{ method:'POST', body:{ op:'delete', id } }); await renderTasks(); }catch(err){ toast(err.message); } };
   });
-  dr.addEventListener('mousedown',e=>{ if(e.target.closest('.tk-res')) e.preventDefault(); });   // keep focus while picking a job
-  dr.addEventListener('change',e=>{
-    const id=_tk.drawer, t=id&&tkFind(id), tg=e.target; if(!t) return;
-    if(tg.matches('[data-tk-title]')){ const v=tg.value.trim(); if(!v){ tg.value=t.title; return; } if(v!==t.title) tkEdit(id,{ title:v }); return; }
-    if(tg.matches('[data-tk-notes]')){ if(tg.value!==String(t.notes||'')) tkEdit(id,{ notes:tg.value }); return; }
-    if(tg.matches('[data-tk-due]')){ const v=tg.value||''; if(v&&Number(v.slice(0,4))<2000) return;   // half-typed year
-      if(v!==(t.due_on||'')) tkEdit(id,{ due_on:v||null }).then(()=>{ if(_tk.drawer===id) tkPaintDrawer(true); }); return; }
-    if(tg.matches('[data-tk-clt]')){ tkCheck(id,{ act:'toggle', item_id:tg.dataset.tkClt, done:tg.checked }); return; }
-    if(tg.matches('[data-tk-file]')){ const fs=[...tg.files]; tg.value=''; tkAddPhotos(id,fs); }
-  });
-  dr.addEventListener('input',e=>{ const tg=e.target; if(tg.matches('[data-tk-reply]')) _tk.reply=tg.value; else if(tg.matches('[data-tk-jobq]')) tkJobSearch(tg.value); });
-  dr.addEventListener('keydown',e=>{
-    if(e.key!=='Enter') return;
-    if(e.target.matches('[data-tk-cladd]')){ e.preventDefault(); const v=e.target.value.trim(); if(v&&_tk.drawer) tkCheck(_tk.drawer,{ act:'add', text:v },true); return; }
-    if(e.target.matches('[data-tk-title]')){ e.preventDefault(); e.target.blur(); }
-  });
-}
-// Esc closes the drawer (a job / photo on top closes first on its own).
-document.addEventListener('keydown',e=>{
-  if(e.key!=='Escape') return;
-  if(document.querySelector('.modal:not(.hidden),#lightbox:not(.hidden)')) return;
-  if(_tk.drawer){ e.preventDefault(); tkClose(); return; }
-  if(_tk.cmp&&onScreen('tasks')&&e.target.closest&&e.target.closest('[data-tk-cmp]')){ _tk.cmp=null; paintTasks(); }
-});
-// Phone Back closes the sheet, never the CRM. A job / photo opened on top closes first.
-window.addEventListener('popstate',()=>{
-  if(_tk.skipPop){ _tk.skipPop=false; return; }
-  if(!_tk.pushed||!_tk.drawer) return;
-  const top=[...document.querySelectorAll('.modal:not(.hidden),#lightbox:not(.hidden)')];
-  if(top.length){ top.forEach(m=>m.classList.add('hidden')); try{ history.pushState({ tkDrawer:1 },''); }catch(_){ _tk.pushed=false; } return; }
-  _tk.pushed=false; tkClose({ fromPop:true });
-});
-// The sticky drawer button hides while the phone keyboard is up.
-if(window.visualViewport) visualViewport.addEventListener('resize',()=>{ const dr=document.getElementById('tkDrawer'); if(dr) dr.classList.toggle('kb',tkPhone()&&visualViewport.height<window.innerHeight*0.75); });
-// ?task=<id> (the SMS / email link) opens that task after sign-in.
-function tkUrlTask(){
-  try{ const u=new URL(location.href), id=u.searchParams.get('task'); if(!id) return null;
-    u.searchParams.delete('task'); history.replaceState(history.state,'',u.pathname+u.search+u.hash);
-    return TK_UUID_RE.test(id)?id:null; }catch(_){ return null; }
 }
 function startMyDayNudge(){
   return; // habits removed (owner 2026-09-27)
@@ -20780,7 +20207,7 @@ function joeyCardsHtml(){
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
   const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div><div class="jy-shift">${joeyShiftHtml()}</div></div>`;
-  const u=_tk.counts?(Number(_tk.counts.emergency_open)||0):(Number(j.urgent_tasks)||0);   // open Emergency only (owner 2026-10-07)
+  const u=Number(j.urgent_tasks)||0;
   const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
   const low=Number(greetingData.lowStockTechs)||0;
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
@@ -20789,7 +20216,7 @@ function joeyCardsHtml(){
     card('Covering today',covHtml)+
     card('Pipeline',dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
-    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div style="text-align:center;"><span class="gstat-l" style="display:block;">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>${stockNotice}</div><div style="text-align:center;"><span class="gstat-l" style="display:block;">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
+    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div style="text-align:center;"><span class="gstat-l" style="display:block;">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div style="text-align:center;"><span class="gstat-l" style="display:block;">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
   `</div>`;
 }
 function greetStatsHtml(){
@@ -20886,7 +20313,6 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.hidden) return;
   if(!token||!current) return;   // signed out: nothing to refresh, and the pollers below read `current`
   if(Date.now()-lastSessionRefresh>5*60*1000) refreshSessionCache();
-  tkRefresh();   // Tasks badge (owner 2026-10-07)
   try{
     if(section==='schedule' && calMode==='jobs') pollScheduleIfChanged();
     else if(onScreen('analytics')||onScreen('handyman')){ if(typeof loadAnalytics==='function' && !anaLoading) loadAnalytics(); }
