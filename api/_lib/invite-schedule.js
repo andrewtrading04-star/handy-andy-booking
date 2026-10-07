@@ -29,36 +29,23 @@ export async function runScheduledInvites(db, { dryRun = false } = {}) {
     (r.ok ? out.sent : out.failed).push(r.ok ? inv.invitee_name : `${inv.invitee_name}: ${smsFailReason(r)}`);
   }
 
-  // Any texted invite: scheduled OR texted right away from Add tech (that path
-  // sets sent_at, never send_at). Live links only (owner 2026-10-07).
   const { data: stale, error: sErr } = await db.from('tech_invites')
     .select('id, code, invitee_name, invitee_phone, service_areas ( name ), businesses ( name )')
-    .eq('status', 'pending').is('nudged_at', null)
-    .lte('sent_at', new Date(now.getTime() - DAY_MS).toISOString())
-    .gt('expires_at', now.toISOString());
+    .eq('status', 'pending').is('nudged_at', null).not('send_at', 'is', null)
+    .lte('sent_at', new Date(now.getTime() - DAY_MS).toISOString());
   if (sErr) throw sErr;
-  out.nudge_failed = [];
   for (const inv of stale || []) {
     if (dryRun) { out.nudged.push(inv.invitee_name); continue; }
-    // Claim first so two cron runs can't add the task twice.
-    const { data: got, error: cErr } = await db.from('tech_invites').update({ nudged_at: now.toISOString() })
-      .eq('id', inv.id).is('nudged_at', null).select('id');
-    if (cErr || !(got && got.length)) continue;
     const where = [inv.businesses?.name, inv.service_areas?.name].filter(Boolean).join(' · ');
     const d = digits10(inv.invitee_phone);
     const ph = d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : String(inv.invitee_phone || '').trim();
-    const { error: tErr } = await db.from('assistant_tasks').insert({
+    await db.from('assistant_tasks').insert({
       title: `Call ${inv.invitee_name || 'the new tech'}${ph ? ` (${ph})` : ''}: did he see our texts?`,
       color: 'yellow',
       notes: `Invite texted 24h ago, not signed up yet${where ? ` (${where})` : ''}. Link: ${inviteLink(inv.code)}`,
       created_by: 'System',
     });
-    if (tErr) {
-      // Task not saved: free the claim so the next run tries again.
-      await db.from('tech_invites').update({ nudged_at: null }).eq('id', inv.id);
-      out.nudge_failed.push(`${inv.invitee_name || 'tech'}: ${tErr.message}`);
-      continue;
-    }
+    await db.from('tech_invites').update({ nudged_at: now.toISOString() }).eq('id', inv.id);
     out.nudged.push(inv.invitee_name);
   }
   return out;
