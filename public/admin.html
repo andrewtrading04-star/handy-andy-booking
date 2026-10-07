@@ -10527,6 +10527,34 @@ function openTechInviteModal(){
 // andy i only want kregg, zach, steve, and juan"). They stay reachable behind
 // the Show-inactive toggle so a real deactivated tech can still be reactivated.
 let showInactiveTechs=false;
+function pendingInviteRowHtml(x){
+  const i=x._inv, open=techOpen.has(x.id), red='#dc2626';
+  const opened=i.open_count?`Opened ${i.open_count}x${i.opened_at?` (last ${shortDateBiz(i.opened_at)})`:''}`:'Never opened';
+  return `<div class="job" data-pinv="${esc(i.id)}" style="border-left:4px solid ${red};">
+    <div class="row tech-head" style="cursor:pointer;"><div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:36px;height:36px;border-radius:18px;background:#fee2e2;flex:none;"></div>
+      <div><div class="name"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${red};margin-right:6px;"></span>${esc(x.name)} <span style="color:${red};font-size:12px;font-weight:800;">Not signed up</span></div>
+        <div class="meta">${esc(i.phone?tinvPhone(i.phone):'no phone')}${i.metro?` · ${esc(i.metro)}`:''}</div>
+        <div class="tdet" style="display:${open?'':'none'}"><div class="meta">${i.sent_at?`Texted ${shortDateBiz(i.sent_at)}`:`Link made ${shortDateBiz(i.created_at)}`} · ${opened} · Expires ${shortDateBiz(i.expires_at)}</div></div></div>
+    </div></div>
+    <div class="tdet actions" style="display:${open?'':'none'}">
+      <button class="btn ghost sm" type="button" data-pinvact="copy">Copy link</button>
+      ${i.phone?'<button class="btn ghost sm" type="button" data-pinvact="resend">Resend text</button>':''}
+      <button class="btn ghost sm" type="button" data-pinvact="cancel">Cancel</button>
+    </div></div>`;
+}
+async function pendingInviteAct(x,act,btn){
+  const i=x._inv;
+  if(act==='copy'){ tinvCopy(i.link,'Sign-up link copied'); return; }
+  if(act==='cancel'&&!confirm(`Cancel the invite for ${x.name}? The link stops working.`)) return;
+  if(act==='resend'&&!confirm(`Text the sign-up link to ${tinvPhone(i.phone)} again?`)) return;
+  btn.disabled=true;
+  try{
+    if(act==='cancel'){ await api('tech_invite_revoke',{ method:'POST', body:{ business:x._biz, id:i.id }}); toast('Invite canceled'); }
+    else{ const d=await api('tech_invite_send',{ method:'POST', body:{ business:x._biz, id:i.id }}); toast(d.sms&&!d.sms.ok?`Text did not send: ${d.sms.reason||'unknown'}`:'Invite texted ✓'); }
+    renderTechnicians();
+  }catch(e){ toast(e.message||'Could not update the invite'); btn.disabled=false; }
+}
 async function renderTechnicians(){
   const view=document.getElementById('view');
   view.innerHTML='<div class="wrap" id="techWrap"><div class="empty">Loading…</div></div>';
@@ -10537,18 +10565,21 @@ async function renderTechnicians(){
     // Applicants (the /apply screening test) only ever land in Handy Andy,
     // so the card shows there alone; same never-take-the-roster-down rule.
     const wantApplicants=role==='owner' && current.slug==='handy-andy';
-    const [d,inv,app]=await Promise.all([
+    const [d,inv,app,pinv]=await Promise.all([
       role==='owner' && businesses.length>1
         ? Promise.all(businesses.map(b=>api('technicians',{ params:{ business:b.slug }}).then(r=>(r.technicians||[]).map(t=>({ ...t, _biz:b.slug, _bizName:b.name||b.slug }))).catch(()=>[]))).then(l=>({ technicians:[].concat(...l), _all:true }))
         : api('technicians',{ params:{ business:current.slug }}),
       wantInvites ? api('tech_invites',{ params:{ business:current.slug }}).catch(e=>({ error:e.message })) : Promise.resolve(null),
       wantApplicants ? api('applicants').catch(e=>({ error:e.message })) : Promise.resolve(null),
+      // Pending invites as red rows in each company's lineup (owner, 2026-10-07).
+      role==='owner' ? Promise.all(businesses.filter(b=>TECH_INVITE_SLUGS.includes(b.slug)&&(businesses.length>1||b.slug===current.slug)).map(b=>api('tech_invites',{ params:{ business:b.slug }}).then(r=>(r.invites||[]).filter(i=>i.state==='open').map(i=>({ _inv:i, id:'inv-'+i.id, name:i.name||tinvPhone(i.phone)||'Invite', active:true, _biz:b.slug, _bizName:b.name||b.slug }))).catch(()=>[]))).then(l=>[].concat(...l)) : Promise.resolve([]),
     ]);
     techInviteData=inv;
     techRoster=d.technicians||[];
     const activeTechs=techRoster.filter(t=>t.active);
     const inactiveTechs=techRoster.filter(t=>!t.active);
-    const shown=showInactiveTechs?[...activeTechs,...inactiveTechs]:activeTechs;
+    const shown=[...(showInactiveTechs?[...activeTechs,...inactiveTechs]:activeTechs),...(pinv||[])];
+    const pinvMap=new Map((pinv||[]).map(x=>[x._inv.id,x]));
     const allBiz=!!d._all;
     if(allBiz){ const ord=t=>businesses.findIndex(b=>b.slug===t._biz); shown.sort((x,y)=>ord(x)-ord(y)||(y.active-x.active)||(x.name||'').localeCompare(y.name||'')); }
     let _lastBiz=null;
@@ -10556,7 +10587,7 @@ async function renderTechnicians(){
     const inactiveToggle=inactiveTechs.length
       ? `<button type="button" id="toggleInactiveTechs" class="btn ghost sm" style="width:auto;margin-top:6px;">${showInactiveTechs?'Hide':'Show'} ${inactiveTechs.length} inactive tech${inactiveTechs.length===1?'':'s'} (former techs and imported history)</button>`
       : '';
-    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + applicantsBlockHtml(app) + (shown.map(t=>`${bizHead(t)}
+    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + applicantsBlockHtml(app) + (shown.map(t=>t._inv?bizHead(t)+pendingInviteRowHtml(t):`${bizHead(t)}
       <div class="job" data-id="${t.id}" data-biz="${esc(t._biz||current.slug)}">
         <div class="row tech-head" style="cursor:pointer;">
           <div style="display:flex;align-items:center;gap:10px;">
@@ -10622,6 +10653,11 @@ async function renderTechnicians(){
     const tgl=document.getElementById('toggleInactiveTechs');
     if(tgl) tgl.addEventListener('click',()=>{ showInactiveTechs=!showInactiveTechs; renderTechnicians(); });
     wireTechInviteBlock();
+    document.querySelectorAll('#techWrap .job[data-pinv]').forEach(card=>{
+      const x=pinvMap.get(card.dataset.pinv); if(!x) return;
+      card.querySelector('.tech-head').addEventListener('click',()=>{ const id='inv-'+x._inv.id; const open=!techOpen.has(id); open?techOpen.add(id):techOpen.delete(id); card.querySelectorAll('.tdet').forEach(e=>e.style.display=open?'':'none'); });
+      card.querySelectorAll('[data-pinvact]').forEach(b=>b.addEventListener('click',()=>pendingInviteAct(x,b.dataset.pinvact,b)));
+    });
 
     document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
       const id=card.dataset.id, biz=card.dataset.biz;
