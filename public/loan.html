@@ -108,6 +108,7 @@ function payoff(bal,pay){
 }
 
 const pick=a=>a[Math.floor(Math.random()*a.length)];
+const LEVELS=[[0,'Broke 🥲'],[25,'Less Broke 😮‍💨'],[50,'Getting There 😎'],[75,'Kinda Rich 💅'],[100,'Debt-Free Queen 👑']];
 const HYPE=['Another one down. Credit card who? 💅','That’s money, baby 💸','Andrew’s wallet says thank you 🫡','Debt is shaking rn 😤','Look at you, financially responsible and shit','Chipping away like a legend 🪓','The bar moved. Did you see it move?? 👀'];
 const BIG=['OK BIG SPENDER 🤑','Who robbed a bank?? 🏦','Tips were GOOD this week huh 💃','Somebody’s been gigging 🎤'];
 function confetti(n=180,ms=3500){
@@ -158,6 +159,8 @@ function render(){
       <div class="track"><span class="runner" id="runner" style="left:0">🏃‍♀️</span><span class="flag">🏁</span><div class="bar"><div style="width:0" id="fill"></div></div></div>
       <div class="row sub"><span>${usd(g.paid)} paid · ${Math.round(pct)}%</span><span>${usd0(Number(L.principal)+g.interest)} total</span></div>
       <div class="hype">${done?'DEBT FREE, BABY 🎉':pct>=90?'Basically done. Smell that freedom 🌬️':pct>=75?'Final stretch, don’t you dare stop 🏁':pct>=50?'Past halfway. It’s all downhill from here 🛷':pct>=25?'A quarter gone and counting 💪':'Every journey starts with $200 🚶‍♀️'}${st>1?` · 🔥 ${st} on-time in a row`:''}</div>
+      ${done?'':(()=>{const p=payoff(g.balance,Number(L.monthly_payment)),end=addMonths(sc.nextDue,Math.max(0,p.n-1)),d=Math.round((end-t)/864e5);return `<div style="margin-top:10px;font-size:13px"><b style="font-size:20px">${d}</b> days until freedom 🗽 <span class="sub">(at ${usd0(L.monthly_payment)}/mo, pay extra and watch it drop)</span></div>`;})()}
+      <div style="margin-top:6px;font-size:13px">Level: <b>${LEVELS.filter(([n])=>pct>=n-0.001).pop()[1]}</b>${done?'':` <span class="sub">· next: ${LEVELS.find(([n])=>pct<n-0.001)[1]}</span>`}</div>
       <div class="badges">${[[1,'🐣 First payment'],[25,'🥉 25% gone'],[50,'🥈 Halfway'],[75,'🥇 75% gone'],[100,'👑 Debt free']].map(([n,l])=>`<span class="badge ${(n===1?S.payments.length>0:pct>=n-0.001)?'got':''}">${l}</span>`).join('')}${st>=6?'<span class="badge got">🔥 6-month streak</span>':''}</div>
       ${done?'':`<div class="row" style="margin-top:14px">
         <div class="stat"><span class="sub">Next payment due</span><b>${fmt(sc.nextDue)}</b></div>
@@ -179,8 +182,8 @@ function render(){
       <div class="grid">
         <div><label>Amount</label><input id="pa" type="number" inputmode="decimal" min="1" step="0.01" placeholder="200.00" value="${done?'':Math.max(0,sc.leftThisCycle).toFixed(2)}"></div>
         <div><label>Date paid</label><input id="pd" type="date" value="${iso(t)}"></div>
-        <div><label>How</label><select id="pm"><option>Zelle</option><option>Venmo</option><option>Cash App</option><option>Cash</option><option>Apple Pay</option><option>Other</option></select></div>
-        <div><label>Note (optional)</label><input id="pn" maxlength="300"></div>
+        <div><label>How</label><select id="pm"><option>Zelle</option><option>Venmo</option><option>Cash App</option><option>Cash</option><option>Apple Pay</option><option>Favor 🤝</option><option>Other</option></select></div>
+        <div><label>Talk your trash (optional)</label><input id="pn" maxlength="300" placeholder="e.g. TV pics, we’re even 😤"></div>
       </div>
       <div style="margin-top:12px"><button id="pbtn">Send it 💸</button></div><div class="err" id="perr"></div>
     </div>

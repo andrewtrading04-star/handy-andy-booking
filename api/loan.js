@@ -13,6 +13,21 @@
 // ============================================================================
 import { serviceClient } from './_lib/supabase.js';
 import { verifyToken, getBearer, applyCors } from './_lib/auth.js';
+import { emailConfig, sendEmail } from './_lib/email.js';
+
+// Heads-up email to Andrew when Catie logs a payment (email, not SMS, per the
+// 2026-09-23 "fewer texts" call in owner-notify.js). Best-effort.
+async function notifyOwner(db, loan, p) {
+  try {
+    const cfg = emailConfig(); if (!cfg.apiKey) return;
+    const { data } = await db.from('loan_payments').select('amount').eq('loan_id', loan.id).is('deleted_at', null);
+    const left = Math.max(0, Number(loan.principal) - (data || []).reduce((a, r) => a + Number(r.amount), 0));
+    const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const subject = left < 0.01 ? `🎉 ${loan.borrower_name} PAID IT OFF` : `💸 ${loan.borrower_name} just sent $${p.amount}`;
+    const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;line-height:1.6">${esc(loan.borrower_name)} logged <b>$${p.amount}</b> (${esc(p.method || 'payment')}, ${p.paid_on}).${p.note ? `<br>“${esc(p.note)}”` : ''}<br>${left < 0.01 ? 'Fully paid off. Fuck yea. 🎉' : `<b>$${left.toFixed(2)}</b> to go.`}</div>`;
+    await sendEmail({ to: process.env.OWNER_NOTIFY_EMAIL || 'contact@ihandyandy.com', subject, html, replyTo: cfg.from });
+  } catch (e) { console.warn('[loan] notify failed:', e.message); }
+}
 
 const money = (v) => Math.round(Number(v) * 100) / 100;
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
@@ -65,6 +80,7 @@ export default async function handler(req, res) {
         logged_by: isOwner && !key ? 'Andrew' : loan.borrower_name,
       }).select().single();
       if (error) throw error;
+      if (!(isOwner && !key)) await notifyOwner(db, loan, data);
       return res.json({ ok: true, payment: data });
     }
 
