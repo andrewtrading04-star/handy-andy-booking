@@ -162,6 +162,16 @@ export async function mirrorBooking(ctx = {}) {
           ? { source_page: ctx.source_page,
               ...(['referrer', 'last_page'].includes(ctx.source_page_basis) ? { source_page_basis: ctx.source_page_basis } : {}) }
           : {}),
+        // ad_click: Google Ads click IDs/UTMs for offline conversion upload.
+        // Whitelisted keys, token-shaped strings only; anything else dropped.
+        ...((() => {
+          const src = ctx.ad_click; if (!src || typeof src !== 'object' || Array.isArray(src)) return {};
+          const ac = {};
+          for (const k of ['gclid', 'gbraid', 'wbraid', 'gad_campaignid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term']) {
+            if (typeof src[k] === 'string' && /^[A-Za-z0-9._~-]{1,200}$/.test(src[k])) ac[k] = src[k];
+          }
+          return Object.keys(ac).length ? { ad_click: ac } : {};
+        })()),
         ...(typeof ctx.site_session_id === 'string' && /^session_\d{13}_[a-z0-9]{1,12}$/.test(ctx.site_session_id) ? { site_session_id: ctx.site_session_id } : {}),
       },
     };

@@ -250,7 +250,23 @@
     } catch (e) {}
     return 'direct';
   }
-  const TRAFFIC_SOURCE = trafficSource();
+  // Google ad click IDs saved by ihandyandy.com on landing (localStorage
+  // 'ha_click'); kept 90 days so bookings can be uploaded as offline conversions.
+  const AD_CLICK = (function () {
+    try {
+      const o = JSON.parse(localStorage.getItem('ha_click') || 'null');
+      if (!o || typeof o !== 'object' || typeof o.t !== 'number' || Date.now() - o.t > 90 * 864e5) return null;
+      const out = {}; let n = 0;
+      ['gclid', 'gbraid', 'wbraid', 'gad_campaignid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term'].forEach(function (k) {
+        if (typeof o[k] === 'string' && o[k] && o[k].length <= 200) { out[k] = o[k]; n++; }
+      });
+      return n ? out : null;
+    } catch (e) { return null; }
+  })();
+  const TRAFFIC_SOURCE = (function () {
+    const s = trafficSource();
+    return (s === 'direct' && AD_CLICK && (AD_CLICK.gclid || AD_CLICK.gbraid || AD_CLICK.wbraid)) ? 'google_ads' : s;
+  })();
   // Which market page sent this booking (e.g. /houston-tv-mounting vs
   // /houston-tv-mounting-greenwayplz), so it can be traced back instead of
   // guessing from whichever tech happened to do the job.
@@ -2718,6 +2734,7 @@
       idempotency_key:BOOKING_IDEM_KEY,
       email_summary:bookingSummary,
       landing_page:LANDING_PAGE, traffic_source:TRAFFIC_SOURCE,
+      ...(AD_CLICK&&{ad_click:AD_CLICK}),
       source_page:SOURCE.page, source_page_basis:SOURCE.basis, site_session_id:SITE_SESSION_ID,
       ...(NATIVE&&{business:BUSINESS}),
       // Denver 98"+ → require & auto-assign 2 technicians
