@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Loan Tracker</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#14161a;--mute:#6b7280;--line:#e5e7eb;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--amber:#d97706;--track:#e8ebf0;}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--panel:#181b21;--ink:#eef0f3;--mute:#9aa1ac;--line:#2a2f38;--accent:#60a5fa;--good:#4ade80;--bad:#f87171;--amber:#fbbf24;--track:#262b33;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px;}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:16px;margin:0 0 12px}
+.sub{color:var(--mute);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px}
+.big{font-size:34px;font-weight:800;letter-spacing:-.5px}
+.bar{height:18px;background:var(--track);border-radius:99px;overflow:hidden;margin:12px 0 6px}
+.bar>div{height:100%;background:linear-gradient(90deg,#22c55e,#16a34a);border-radius:99px;transition:width .6s}
+.row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.stat{flex:1;min-width:130px}.stat b{display:block;font-size:18px}
+.pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700}
+.ok{background:rgba(22,163,74,.15);color:var(--good)}.due{background:rgba(217,119,6,.15);color:var(--amber)}.late{background:rgba(220,38,38,.15);color:var(--bad)}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+label{font-size:12px;color:var(--mute);display:block;margin:10px 0 4px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media (max-width:520px){.grid{grid-template-columns:1fr}}
+button{padding:11px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:700;font:inherit;font-weight:700;cursor:pointer}
+button.ghost{background:none;border:1px solid var(--line);color:var(--ink)}
+input[type=range]{padding:0;accent-color:var(--accent);border:0;background:none}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mute);font-weight:600;font-size:12px}
+td.r,th.r{text-align:right}
+.x{background:none;color:var(--mute);padding:2px 6px;font-weight:400}
+.err{color:var(--bad);font-size:13px;margin-top:8px}
+pre{white-space:pre-wrap;font:inherit;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub">Loading…</div></div>
+<script>
+const params=new URLSearchParams(location.search);
+const KEY=params.get('k')||'';
+let TOKEN=''; if(!KEY){ try{ TOKEN=localStorage.getItem('ha_admin_token')||''; }catch(_){} }
+let S={loan:null,payments:[],owner:false}, slider=null, editing=false;
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const usd0=n=>'$'+Math.round(n||0).toLocaleString('en-US');
+const D=s=>{const [y,m,d]=String(s).slice(0,10).split('-').map(Number);return new Date(y,m-1,d);};
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const fmt=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const addMonths=(d,n)=>{const day=D(iso(d)).getDate();const x=new Date(d.getFullYear(),d.getMonth()+n,1);x.setDate(Math.min(day,new Date(x.getFullYear(),x.getMonth()+1,0).getDate()));return x;};
+const today=()=>{const t=new Date();return new Date(t.getFullYear(),t.getMonth(),t.getDate());};
+
+async function call(action,data){
+  const opt={method:data?'POST':'GET',headers:{'Content-Type':'application/json'}};
+  if(TOKEN) opt.headers.Authorization='Bearer '+TOKEN;
+  let url='/api/loan?action='+action+(KEY?'&k='+encodeURIComponent(KEY):'');
+  if(data) opt.body=JSON.stringify({...data,action,k:KEY||undefined});
+  const r=await fetch(url,opt); const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||'Something went wrong');
+  return j;
+}
+
+// Walk the payments in date order with daily simple interest (0% APR = plain balance).
+function ledger(){
+  const L=S.loan, rate=Number(L.apr||0)/100/365;
+  let bal=Number(L.principal), last=D(L.start_date), interest=0, paid=0;
+  for(const p of S.payments){
+    const d=D(p.paid_on), days=Math.max(0,(d-last)/864e5);
+    const i=bal*rate*days; bal+=i; interest+=i; last=d>last?d:last;
+    bal-=Number(p.amount); paid+=Number(p.amount);
+  }
+  const days=Math.max(0,(today()-last)/864e5), i=Math.max(0,bal)*rate*days;
+  bal+=i; interest+=i;
+  return {balance:Math.max(0,bal),paid,interest,overpaid:Math.max(0,-bal)};
+}
+
+// Mandatory monthly payment: each due date needs `monthly` paid in the window since the previous due date.
+function schedule(balance){
+  const L=S.loan, monthly=Number(L.monthly_payment), first=D(L.first_due_date), t=today();
+  let k=0; while(addMonths(first,k)<t) k++;
+  const nextDue=addMonths(first,k), dues=k;              // dues = due dates already passed
+  const totalPaid=S.payments.reduce((a,p)=>a+Number(p.amount),0);
+  const pastDue=Math.max(0,dues*monthly-totalPaid);
+  const prev=k>0?addMonths(first,k-1):D(L.start_date);
+  const paidThisCycle=S.payments.filter(p=>D(p.paid_on)>prev && D(p.paid_on)<=nextDue)
+    .reduce((a,p)=>a+Number(p.amount),0) - 0;
+  const leftThisCycle=Math.min(balance,Math.max(0,monthly-paidThisCycle+pastDue));
+  return {nextDue,pastDue,paidThisCycle,leftThisCycle,monthly};
+}
+
+// Months to pay off `bal` at `pay`/month (monthly interest), and total interest.
+function payoff(bal,pay){
+  const r=Number(S.loan.apr||0)/100/12; let n=0, int=0;
+  while(bal>0.005 && n<600){ const i=bal*r; int+=i; bal=bal+i-pay; n++; if(pay<=i) return {n:Infinity,int:Infinity}; }
+  return {n,int};
+}
+
+function render(){
+  const app=$('#app');
+  if(!S.loan){ app.innerHTML=S.owner?`<h1>Loan Tracker</h1><div class="sub">Enter the terms you and Catie agreed on.</div>${termsForm()}`:`<h1>Loan Tracker</h1><div class="card">Nothing set up yet.</div>`; wireTerms(); return; }
+  const L=S.loan, g=ledger(), sc=schedule(g.balance);
+  const pct=Math.min(100,g.paid/(g.paid+g.balance||1)*100);
+  const done=g.balance<0.01;
+  const t=today(), daysTo=Math.round((sc.nextDue-t)/864e5);
+  const status=done?'<span class="pill ok">Paid off 🎉</span>'
+    : sc.pastDue>0.009?`<span class="pill late">${usd(sc.pastDue)} past due</span>`
+    : sc.leftThisCycle<0.01?'<span class="pill ok">This month’s payment is in ✓</span>'
+    : `<span class="pill due">${usd(sc.leftThisCycle)} due ${daysTo===0?'today':daysTo===1?'tomorrow':'in '+daysTo+' days'}</span>`;
+  const minPay=Number(L.monthly_payment), maxPay=Math.max(minPay*5,Math.ceil(g.balance/50)*50/2||minPay);
+  if(slider==null||slider<minPay) slider=minPay;
+  app.innerHTML=`
+    <h1>${esc(L.borrower_name)}’s loan</h1>
+    <div class="sub">${usd0(L.principal)} lent ${fmt(D(L.start_date))} · ${usd0(minPay)}/month minimum${Number(L.apr)>0?' · '+Number(L.apr)+'% APR':' · no interest'}</div>
+
+    <div class="card">
+      <div class="row" style="align-items:flex-end"><div><div class="sub">Left to pay</div><div class="big">${usd(g.balance)}</div></div><div>${status}</div></div>
+      <div class="bar"><div style="width:0" id="fill"></div></div>
+      <div class="row sub"><span>${usd(g.paid)} paid · ${Math.round(pct)}%</span><span>${usd0(Number(L.principal)+g.interest)} total</span></div>
+      ${done?'':`<div class="row" style="margin-top:14px">
+        <div class="stat"><span class="sub">Next payment due</span><b>${fmt(sc.nextDue)}</b></div>
+        <div class="stat"><span class="sub">Amount due</span><b>${usd(sc.leftThisCycle)}</b></div>
+        <div class="stat"><span class="sub">Paid this cycle</span><b>${usd(sc.paidThisCycle)}</b></div></div>`}
+    </div>
+
+    ${done?'':`<div class="card">
+      <h2>Payoff estimator</h2>
+      <div class="sub">Slide to see how paying more each month moves the payoff date. ${usd0(minPay)} is the minimum.</div>
+      <div class="row" style="margin-top:14px;align-items:baseline"><div><span class="sub">If you pay</span> <b style="font-size:22px" id="sv"></b><span class="sub">/month</span></div><div id="sdate" style="text-align:right"></div></div>
+      <input type="range" id="sl" min="${minPay}" max="${maxPay}" step="25" value="${slider}">
+      <div class="row sub"><span>${usd0(minPay)}</span><span>${usd0(maxPay)}</span></div>
+      <div id="scmp" style="margin-top:10px"></div>
+    </div>`}
+
+    <div class="card">
+      <h2>Log a payment</h2>
+      <div class="grid">
+        <div><label>Amount</label><input id="pa" type="number" inputmode="decimal" min="1" step="0.01" placeholder="200.00" value="${done?'':Math.max(0,sc.leftThisCycle).toFixed(2)}"></div>
+        <div><label>Date paid</label><input id="pd" type="date" value="${iso(t)}"></div>
+        <div><label>How</label><select id="pm"><option>Zelle</option><option>Venmo</option><option>Cash App</option><option>Cash</option><option>Apple Pay</option><option>Other</option></select></div>
+        <div><label>Note (optional)</label><input id="pn" maxlength="300"></div>
+      </div>
+      <div style="margin-top:12px"><button id="pbtn">Log payment</button></div><div class="err" id="perr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Payment history</h2>
+      ${S.payments.length?`<table><thead><tr><th>Date</th><th>How</th><th>Logged by</th><th class="r">Amount</th>${S.owner?'<th></th>':''}</tr></thead><tbody>
+      ${S.payments.slice().reverse().map(p=>`<tr><td>${fmt(D(p.paid_on))}${p.note?`<div class="sub">${esc(p.note)}</div>`:''}</td><td>${esc(p.method||'')}</td><td>${esc(p.logged_by)}</td><td class="r"><b>${usd(p.amount)}</b></td>${S.owner?`<td class="r"><button class="x" data-del="${p.id}" title="Remove">✕</button></td>`:''}</tr>`).join('')}
+      </tbody></table>`:'<div class="sub">No payments yet.</div>'}
+    </div>
+
+    ${L.terms?`<div class="card"><h2>Terms</h2><pre>${esc(L.terms)}</pre></div>`:''}
+
+    ${S.owner?`<div class="card"><h2>Catie’s link</h2><div class="sub">Send her this private link. She can see everything above and log payments, nothing else in the CRM.</div>
+      <div style="display:flex;gap:8px;margin-top:10px"><input readonly id="shl" value="${location.origin}/loan.html?k=${esc(L.share_key)}"><button class="ghost" id="cp">Copy</button></div>
+      <div style="margin-top:14px"><button class="ghost" id="edit">${editing?'Close':'Edit terms'}</button></div>${editing?termsForm():''}</div>`:''}`;
+  requestAnimationFrame(()=>{const f=$('#fill'); if(f) f.style.width=pct+'%';});
+  if(!done) wireSlider(g.balance,sc);
+  $('#pbtn').onclick=logPayment;
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{ if(!confirm('Remove this payment?')) return; await call('delete_payment',{id:b.dataset.del}); load(); });
+  if(S.owner){ $('#cp').onclick=()=>{navigator.clipboard?.writeText($('#shl').value); $('#cp').textContent='Copied';}; $('#edit').onclick=()=>{editing=!editing;render();}; wireTerms(); }
+}
+
+function wireSlider(bal,sc){
+  const sl=$('#sl'); const base=payoff(bal,sc.monthly);
+  const upd=()=>{
+    slider=Number(sl.value); $('#sv').textContent=usd0(slider);
+    const p=payoff(bal,slider), date=addMonths(sc.nextDue,Math.max(0,p.n-1));
+    $('#sdate').innerHTML=`<span class="sub">Paid off by</span><br><b style="font-size:20px">${fmt(date)}</b>`;
+    const saved=base.n-p.n;
+    $('#scmp').innerHTML= saved>0
+      ? `<span class="pill ok">${saved} month${saved===1?'':'s'} sooner</span> <span class="sub">than paying ${usd0(sc.monthly)}/month (${fmt(addMonths(sc.nextDue,base.n-1))})${base.int-p.int>0.5?' · saves '+usd(base.int-p.int)+' interest':''}</span>`
+      : `<span class="sub">${p.n} payment${p.n===1?'':'s'} left at the minimum.</span>`;
+  };
+  sl.oninput=upd; upd();
+}
+
+async function logPayment(){
+  const amount=Number($('#pa').value); $('#perr').textContent='';
+  if(!(amount>0)){ $('#perr').textContent='Enter the amount.'; return; }
+  $('#pbtn').disabled=true;
+  try{ await call('log_payment',{amount,paid_on:$('#pd').value,method:$('#pm').value,note:$('#pn').value}); await load(); }
+  catch(e){ $('#perr').textContent=e.message; $('#pbtn').disabled=false; }
+}
+
+function termsForm(){
+  const L=S.loan||{borrower_name:'Catie',monthly_payment:200,apr:0,start_date:iso(today()),first_due_date:iso(addMonths(today(),1))};
+  return `<div class="card" style="margin-top:12px"><div class="grid">
+    <div><label>Borrower</label><input id="tb" value="${esc(L.borrower_name)}"></div>
+    <div><label>Loan amount</label><input id="tp" type="number" step="0.01" value="${esc(L.principal??'')}"></div>
+    <div><label>Minimum monthly payment</label><input id="tm" type="number" step="0.01" value="${esc(L.monthly_payment)}"></div>
+    <div><label>Interest (APR %, 0 for none)</label><input id="ta" type="number" step="0.01" value="${esc(L.apr)}"></div>
+    <div><label>Loan date</label><input id="ts" type="date" value="${esc(String(L.start_date).slice(0,10))}"></div>
+    <div><label>First payment due</label><input id="tf" type="date" value="${esc(String(L.first_due_date).slice(0,10))}"></div></div>
+    <label>Agreed terms (shown to both of you)</label><textarea id="tt" rows="5">${esc(L.terms||'')}</textarea>
+    <div style="margin-top:12px"><button id="tsave">Save terms</button></div><div class="err" id="terr"></div></div>`;
+}
+function wireTerms(){
+  const b=$('#tsave'); if(!b) return;
+  b.onclick=async()=>{ try{ await call('save_terms',{borrower_name:$('#tb').value,principal:$('#tp').value,monthly_payment:$('#tm').value,apr:$('#ta').value,start_date:$('#ts').value,first_due_date:$('#tf').value,terms:$('#tt').value}); editing=false; await load(); }catch(e){ $('#terr').textContent=e.message; } };
+}
+
+async function load(){
+  try{ S=await call('get'); render(); }
+  catch(e){ $('#app').innerHTML=`<h1>Loan Tracker</h1><div class="card">${esc(e.message)}</div>`; }
+}
+load();
+</script>
+</body>
+</html>
