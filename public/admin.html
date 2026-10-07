@@ -10258,6 +10258,7 @@ function techBioText(t){
 // Last-loaded Technicians roster, so the invite confirm can show the tech's
 // real name and phone without re-parsing them out of the card's DOM.
 let techRoster=[];
+const techOpen=new Set();
 // How far this tech is through the $100 review program. Silent until they
 // actually start, so an untouched roster is not littered with "0 of 5" chips;
 // once the bonus is earned it says so with the date, which is also the week
@@ -10283,7 +10284,7 @@ function reviewProgressChip(t){
 // text and the number it goes to, send, then re-render so the button becomes
 // the "Invite sent <date>" stamp. Re-sending later is allowed on purpose (the
 // "I lost the text" case); the confirm dialog makes that a deliberate act.
-async function sendReviewInvite(id, card, btn){
+async function sendReviewInvite(id, card, btn, biz){
   const t=techRoster.find(x=>x.id===id)||{};
   const name=t.name||'this technician';
   if(!t.phone){ toast(name+' has no phone number set'); return; }
@@ -10291,7 +10292,7 @@ async function sendReviewInvite(id, card, btn){
   if(!confirm(`Text this to ${name} at ${t.phone}?\n\n"${preview}"`)) return;
   btn.disabled=true; const prev=btn.textContent; btn.textContent='Sending…';
   try{
-    await api('review_invite_send',{ method:'POST', body:{ business:current.slug, technician_id:id }});
+    await api('review_invite_send',{ method:'POST', body:{ business:biz||current.slug, technician_id:id }});
     toast('Invite texted to '+name+' ✓');
     renderTechnicians();
   }catch(e){ toast(e.message||'Could not send'); btn.disabled=false; btn.textContent=prev; }
@@ -10537,7 +10538,9 @@ async function renderTechnicians(){
     // so the card shows there alone; same never-take-the-roster-down rule.
     const wantApplicants=role==='owner' && current.slug==='handy-andy';
     const [d,inv,app]=await Promise.all([
-      api('technicians',{ params:{ business:current.slug }}),
+      role==='owner' && businesses.length>1
+        ? Promise.all(businesses.map(b=>api('technicians',{ params:{ business:b.slug }}).then(r=>(r.technicians||[]).map(t=>({ ...t, _biz:b.slug, _bizName:b.name||b.slug }))).catch(()=>[]))).then(l=>({ technicians:[].concat(...l), _all:true }))
+        : api('technicians',{ params:{ business:current.slug }}),
       wantInvites ? api('tech_invites',{ params:{ business:current.slug }}).catch(e=>({ error:e.message })) : Promise.resolve(null),
       wantApplicants ? api('applicants').catch(e=>({ error:e.message })) : Promise.resolve(null),
     ]);
@@ -10546,18 +10549,26 @@ async function renderTechnicians(){
     const activeTechs=techRoster.filter(t=>t.active);
     const inactiveTechs=techRoster.filter(t=>!t.active);
     const shown=showInactiveTechs?[...activeTechs,...inactiveTechs]:activeTechs;
+    const allBiz=!!d._all;
+    if(allBiz){ const ord=t=>businesses.findIndex(b=>b.slug===t._biz); shown.sort((x,y)=>ord(x)-ord(y)||(y.active-x.active)||(x.name||'').localeCompare(y.name||'')); }
+    let _lastBiz=null;
+    const bizHead=t=>{ if(!allBiz||t._biz===_lastBiz) return ''; _lastBiz=t._biz; return `<h3 style="margin:18px 0 6px;font-size:14px;">${esc(t._bizName)}</h3>`; };
     const inactiveToggle=inactiveTechs.length
       ? `<button type="button" id="toggleInactiveTechs" class="btn ghost sm" style="width:auto;margin-top:6px;">${showInactiveTechs?'Hide':'Show'} ${inactiveTechs.length} inactive tech${inactiveTechs.length===1?'':'s'} (former techs and imported history)</button>`
       : '';
-    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + applicantsBlockHtml(app) + (shown.map(t=>`
-      <div class="job" data-id="${t.id}">
-        <div class="row">
+    document.getElementById('techWrap').innerHTML = techInviteBlockHtml(inv) + applicantsBlockHtml(app) + (shown.map(t=>`${bizHead(t)}
+      <div class="job" data-id="${t.id}" data-biz="${esc(t._biz||current.slug)}">
+        <div class="row tech-head" style="cursor:pointer;">
           <div style="display:flex;align-items:center;gap:10px;">
             ${t.photo_url?`<img src="${esc(t.photo_url)}" alt="" style="width:36px;height:36px;border-radius:18px;object-fit:cover;flex:none;">`:`<div style="width:36px;height:36px;border-radius:18px;background:var(--line2);flex:none;"></div>`}
             <div><div class="name"><span class="dot-s s-${t.status}"></span>${esc(t.name)}${t.average_rating ? ` <span class="rating-badge">⭐ ${t.average_rating}</span>` : ''}</div>
-              <div class="meta">${esc(t.phone||'no phone set')} · PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div>
-              ${t.active&&(t.area_name||t.weekly_slots!=null)?`<div class="meta" style="margin-top:2px;">${esc(t.area_name||'No metro set')}${t.area_unstaffed?' <span style="color:var(--amber)">(not taking online bookings yet)</span>':''}${t.weekly_slots==null?'':` · ${t.weekly_slots?esc(t.weekly_summary):'<span style="color:var(--amber)">no weekly times set, so no automatic jobs</span>'}`}</div>`:''}</div>
+              <div class="meta">${esc(t.phone||'no phone set')}${t.area_name?` · ${esc(t.area_name)}`:''}</div>
+              <div class="tdet" style="display:${techOpen.has(t.id)?'':'none'}"><div class="meta">PIN ${t.pin_set?'set ✓':'<span style="color:var(--amber)">not set</span>'} · ${t.active?'active':'inactive'}</div>
+              ${t.active&&(t.area_name||t.weekly_slots!=null)?`<div class="meta" style="margin-top:2px;">${esc(t.area_name||'No metro set')}${t.area_unstaffed?' <span style="color:var(--amber)">(not taking online bookings yet)</span>':''}${t.weekly_slots==null?'':` · ${t.weekly_slots?esc(t.weekly_summary):'<span style="color:var(--amber)">no weekly times set, so no automatic jobs</span>'}`}</div>`:''}</div></div>
           </div>
+        </div>
+        <div class="tdet" style="display:${techOpen.has(t.id)?'':'none'}">
+        <div class="row"><span></span>
           <select class="assign tstatus"><option value="available" ${t.status==='available'?'selected':''}>available</option>
             <option value="on_job" ${t.status==='on_job'?'selected':''}>on job</option>
             <option value="off" ${t.status==='off'?'selected':''}>off</option></select>
@@ -10606,31 +10617,34 @@ async function renderTechnicians(){
           </select>
           <span class="meta" style="font-size:12px;color:var(--mute);">when several techs are free for the same slot</span>
         </div>`:''}
+        </div>
       </div>`).join('') + inactiveToggle || '<div class="empty">No technicians.</div>');
     const tgl=document.getElementById('toggleInactiveTechs');
     if(tgl) tgl.addEventListener('click',()=>{ showInactiveTechs=!showInactiveTechs; renderTechnicians(); });
     wireTechInviteBlock();
 
     document.querySelectorAll('#techWrap .job[data-id]').forEach(card=>{
-      const id=card.dataset.id;
+      const id=card.dataset.id, biz=card.dataset.biz;
+      card.querySelector('.tech-head').addEventListener('click',e=>{ if(e.target.closest('button,select,input,a')) return; const open=!techOpen.has(id); open?techOpen.add(id):techOpen.delete(id); card.querySelectorAll('.tdet').forEach(x=>x.style.display=open?'':'none'); });
+      const saveTech=(p)=>saveTechBiz(p,biz);
       card.querySelector('.tstatus').addEventListener('change',e=>saveTech({ id, status:e.target.value }));
       const mj=card.querySelector('.maxjobs'); if(mj) mj.addEventListener('change',e=>saveTech({ id, max_jobs_per_day:e.target.value }));
       const bp=card.querySelector('.bkprio'); if(bp) bp.addEventListener('change',e=>saveTech({ id, booking_priority:e.target.value }));
       card.querySelectorAll('button[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
-        if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim()); }
+        if(btn.dataset.act==='availability'){ openAvailability(id, card.querySelector('.name').textContent.trim(), biz); }
         if(btn.dataset.act==='phone'){ const p=prompt('Phone number for login:'); if(p!=null) saveTech({ id, phone:p }); }
         if(btn.dataset.act==='pin'){ const p=prompt('New 4-digit PIN:'); if(p){ if(!/^\d{4}$/.test(p)) return toast('PIN must be 4 digits'); saveTech({ id, pin:p }); } }
         if(btn.dataset.act==='toggle'){ saveTech({ id, active: btn.textContent==='Activate' }); }
         if(btn.dataset.act==='photo'){ card.querySelector('.techPhotoFile').click(); }
         if(btn.dataset.act==='bioyears'){ const v=prompt('Years of experience (blank to clear):'); if(v!=null) saveTech({ id, bio_years:v }); }
         if(btn.dataset.act==='bioblurb'){ const v=prompt('Short bio line for the confirmation email (blank to clear):\n\ne.g. "Juan has been mounting TVs for over 7 years, so you\'re in good hands."'); if(v!=null) saveTech({ id, bio_blurb:v }); }
-        if(btn.dataset.act==='reviewinvite'){ sendReviewInvite(id, card, btn); }
+        if(btn.dataset.act==='reviewinvite'){ sendReviewInvite(id, card, btn, biz); }
       }));
       card.querySelector('.techPhotoFile').addEventListener('change', async e=>{
         const f=e.target.files[0]; e.target.value=''; if(!f) return;
         try{
           const dataUrl=await compressImage(f,500,0.85);
-          await api('technician_photo_upload',{ method:'POST', body:{ business:current.slug, id, image:dataUrl }});
+          await api('technician_photo_upload',{ method:'POST', body:{ business:biz, id, image:dataUrl }});
           toast('Photo saved ✓'); renderTechnicians();
         }catch(err){ toast(err.message||'Could not upload photo'); }
       });
@@ -20322,8 +20336,9 @@ document.addEventListener('visibilitychange', ()=>{
   }catch(_){/* refresh-on-return is best-effort */}
 });
 
-async function saveTech(payload){
-  try{ await api('technician_update',{ method:'POST', body:{ business:current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
+async function saveTech(payload){ return saveTechBiz(payload); }
+async function saveTechBiz(payload, biz){
+  try{ await api('technician_update',{ method:'POST', body:{ business:biz||current.slug, ...payload }}); toast('Saved'); availData=null; renderTechnicians(); }
   catch(err){ toast(err.message); }
 }
 
