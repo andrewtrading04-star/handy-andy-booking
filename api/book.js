@@ -15,8 +15,8 @@ import { sendCardSaveFailedAlert, sendUnassignedBookingAlert, maybeSendBigBracke
 import { notifyTechAssigned } from './_lib/tech-notify.js';
 import { sendEnRouteSms } from './_lib/en-route.js';
 import { sendBookingConfirmSms } from './_lib/booking-confirm-sms.js';
-import { textConsentFor, sendSMSResult } from './_lib/sms.js';
-import { officePhoneFor } from './_lib/tech-late.js';
+import { textConsentFor, sendSMSResult, toE164 } from './_lib/sms.js';
+import { officePhoneFor, onDutySecretaryPhones } from './_lib/tech-late.js';
 
 const BAD_ADDRESS = 'Please enter a valid street address (with a house number) — not an email or phone number.';
 const BAD_NAME = 'Please enter your name using letters only — no numbers.';
@@ -1781,6 +1781,12 @@ async function reportLate(req, res) {
     const msg = `${techFirstName} says they're running late to ${customerName}'s job (${whenTxt}).`;
     const r = await sendSMSResult(officePhone, msg);
     if (!r.ok) console.warn(`[report_late] office SMS failed for booking ${b.id}:`, r.error || r.skipped);
+    // Dom's: today's on-duty secretary (Alex or Joe) too (owner 2026-10-07).
+    for (const p of await onDutySecretaryPhones(db, slug)) {
+      if (p === toE164(officePhone)) continue;
+      const r2 = await sendSMSResult(p, msg);
+      if (!r2.ok) console.warn(`[report_late] on-duty secretary SMS failed for booking ${b.id}:`, r2.error || r2.skipped);
+    }
   } else {
     console.warn(`[report_late] no office number configured for business (${slug || b.id}), late report not relayed`);
   }

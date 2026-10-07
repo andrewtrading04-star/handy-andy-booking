@@ -143,6 +143,29 @@ export function officePhoneFor(slug) {
   return process.env[envVar] || STAFF_PHONE_FALLBACK[envVar] || null;
 }
 
+// Dom's: Alex or Joe, whoever is scheduled today (Denver), also gets the
+// office late texts (owner 2026-10-07). Phones from staff_schedules, else staff_users.
+export async function onDutySecretaryPhones(db, slug) {
+  if (slug !== 'doms') return [];
+  try {
+    const dow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' })).getDay();
+    const { data: rows } = await db.from('staff_schedules').select('name, phone').in('name', ['Alex', 'Joe']).eq('day_of_week', dow);
+    const names = [...new Set((rows || []).map(r => r.name))];
+    if (!names.length) return [];
+    const { data: users } = await db.from('staff_users').select('name, phone').in('name', names).eq('active', true);
+    const out = names.map(n => (rows.find(r => r.name === n && r.phone) || (users || []).find(u => u.name === n && u.phone) || {}).phone).filter(Boolean);
+    return [...new Set(out.map(p => toE164(p)).filter(Boolean))];
+  } catch (e) { console.warn('[tech-late] on-duty secretary lookup failed:', e.message); return []; }
+}
+async function textOnDuty(db, slug, officePhone, msg, tag) {
+  const office = toE164(officePhone || '');
+  for (const p of await onDutySecretaryPhones(db, slug)) {
+    if (p === office) continue;
+    const r = await sendSMSResult(p, msg);
+    if (!r.ok) console.warn(`[tech-late] ${tag} on-duty secretary SMS failed:`, r.error || r.skipped);
+  }
+}
+
 function firstName(name) {
   return (name || '').trim().split(/\s+/)[0] || 'Tech';
 }
@@ -387,6 +410,7 @@ export async function checkLateTechs(opts = {}) {
         const staffMsg = `Heads up: ${namesJoined} ${multi ? "haven't" : "hasn't"} tapped on-the-way for ${customerName}'s job (${whenTxt}), started ${stage3LateMinutes} min ago.`;
         const staffResult = await sendSMSResult(staffPhone, staffMsg);
         if (!staffResult.ok) console.warn(`[tech-late] stage3 office SMS failed for booking ${b.id}:`, staffResult.error || staffResult.skipped);
+        await textOnDuty(db, slug, staffPhone, staffMsg, 'stage3');
         // One-shot regardless of delivery outcome, matching the rest of this
         // codebase's notification-flag convention.
         stage3StaffSentThisPass = true;
@@ -407,6 +431,7 @@ export async function checkLateTechs(opts = {}) {
         const staffMsg = `ATTENTION: ${namesJoined} ${multi ? 'are' : 'is'} ${stage4LateMinutes} minutes late to ${customerName}'s job and still ${multi ? "haven't" : "hasn't"} responded. Please follow up.`;
         const staffResult = await sendSMSResult(staffPhone, staffMsg);
         if (!staffResult.ok) console.warn(`[tech-late] stage4 office SMS failed for booking ${b.id}:`, staffResult.error || staffResult.skipped);
+        await textOnDuty(db, slug, staffPhone, staffMsg, 'stage4');
         if (ccOwner) {
           const ownerResult = await sendSMSResult(ownerPhoneRaw, staffMsg);
           if (!ownerResult.ok) console.warn(`[tech-late] stage4 owner SMS failed for booking ${b.id}:`, ownerResult.error || ownerResult.skipped);
