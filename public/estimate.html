@@ -437,6 +437,7 @@ async function submit(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||'Something went wrong. Please try again.');
     logEvent({ event_type:'booking_confirmed', step_name:'contact', value:state.slots.length, customer_name:state.name.trim() });
+    try{ parent.postMessage({ type:'estimate-submitted', id:d.id||d.estimate_id||Date.now() }, '*'); }catch(e){}
     success();
   }catch(e){
     logEvent({ event_type:'booking_failed', step_name:'contact', error_message:e.message });
