@@ -675,7 +675,6 @@
   .tk-tabs{display:flex;gap:4px;border-bottom:1px solid #e5e7eb;margin-bottom:14px;background:var(--bg);position:sticky;top:0;z-index:6;}
   .tk-tabs button{border:none;background:none;font:inherit;font-size:14px;font-weight:700;color:#64748b;padding:10px 12px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
   .tk-tabs button.on{color:#0f172a;border-bottom-color:#0f172a;}
-  .tk-tabn{display:inline-block;min-width:16px;margin-left:6px;padding:0 5px;border-radius:999px;background:#2563eb;color:#fff;font-size:11px;line-height:16px;text-align:center;box-sizing:border-box;}
   .tk-g{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:12px;}
   .tk-g.tk-drop{border-color:#93c5fd;box-shadow:0 0 0 3px #dbeafe;}
   .tk-gh{display:flex;align-items:center;gap:8px;width:100%;border:none;background:#fff;font:inherit;padding:11px 14px;cursor:pointer;text-align:left;color:#0f172a;border-radius:12px 12px 0 0;}
@@ -749,7 +748,7 @@
   .tk-dr-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #eef0f3;}
   .tk-x{width:34px;height:34px;border-radius:9px;border:none;background:#f1f5f9;color:#334155;font-size:20px;line-height:1;cursor:pointer;flex:none;}
   .tk-ic{margin-left:auto;width:34px;height:34px;border-radius:9px;border:none;background:none;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
-  .tk-ic:hover{background:#f1f5f9;color:#334155;}
+  .tk-ic:hover{background:#fef2f2;color:#b91c1c;}
   .tk-dr-b{flex:1;overflow-y:auto;padding:12px 16px 24px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .tk-dr-title{display:block;width:calc(100% + 8px);box-sizing:border-box;border:1px solid transparent;border-radius:8px;font:inherit;font-size:19px;font-weight:800;line-height:1.3;color:#0f172a;padding:5px 8px;margin:0 0 4px -8px;resize:none;background:transparent;overflow-wrap:anywhere;}
   textarea.tk-dr-title:hover,textarea.tk-dr-title:focus{border-color:#e5e7eb;background:#fff;outline:none;}
@@ -3356,7 +3355,7 @@ function dismissAllOverlays(){
   step(()=>{ if(window._tinvModal){ window._tinvModal.remove(); window._tinvModal=null; } });   // technician invite sheet
   step(()=>{ document.querySelectorAll('.addr-ac,.charge-ov').forEach(el=>el.remove()); });
   step(()=>closeSidebar());
-  step(()=>tkClose({ quiet:true }));   // unwinds the phone sheet's Back entry too
+  step(()=>tkClose({ noHistory:true }));
 }
 function logout(opts){
   const reason=(opts&&opts.reason)||'manual';   // the #logout click handler passes the Event -> 'manual'
@@ -3490,19 +3489,6 @@ async function switchToViewAs(slug){
     lsSet('ha_admin_config',JSON.stringify(appConfig||{})); lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
     enterApp();
   }catch(e){ toast(e.message||'Could not switch view'); }
-}
-// A View As token minted before Tasks went read only has no view_as claim, so
-// it would act as the real Joey. Swap it for a fresh View As token (owner 2026-10-07).
-async function healOldViewAs(d){
-  const ot=lsGet('ha_owner_token');
-  if(!d||d.view_as!==false||!ot||role==='owner') return false;
-  const cur=token;
-  try{
-    const v=await api('view_as',{ method:'POST', body:{ business: currentPersonKey() }, authToken: ot });
-    if(token!==cur||!v||!v.token||!v.view_as) return false;
-    token=v.token; lsSet('ha_admin_token',token);
-    return true;
-  }catch(_){ return false; }
 }
 function backToAdmin(){
   const ot = lsGet('ha_owner_token');
@@ -11232,7 +11218,7 @@ async function tkLoad(){
   }).finally(()=>{ st.loading=null; });
   return st.loading;
 }
-function tkReset(){ try{ tkClose({ quiet:true }); }catch(_){} _tk=tkFresh(); tasksBadge(); }
+function tkReset(){ try{ tkClose({ noHistory:true }); }catch(_){} _tk=tkFresh(); tasksBadge(); }
 async function renderTasks(){
   const view=document.getElementById('view');
   try{ await tkLoad(); }catch(e){ if(onScreen('tasks')) view.innerHTML=`<div class="wrap"><div class="empty">${esc(e.message)}</div></div>`; return; }
@@ -11248,13 +11234,11 @@ async function tkRefresh(){
   if(_tk.drawer) tkDrawerLoad(_tk.drawer,false);
 }
 function tkRecount(){
-  const T=_tk.tasks, D=_tk.done, owner=tkOwner(), oi=t=>t.status==='open'||t.status==='sent_back';
-  // Replies on Done tasks count too (same as the server).
-  const dun=D.filter(t=>t.unread>0).length;
-  const needs=owner?T.filter(t=>t.needs_you).length+D.filter(t=>t.needs_you).length:0;
-  const jb=owner?0:T.filter(t=>((t.level==='emergency'||t.level==='asap')&&oi(t))||t.unread>0).length+dun;
+  const T=_tk.tasks, owner=tkOwner(), oi=t=>t.status==='open'||t.status==='sent_back';
+  const needs=owner?T.filter(t=>t.needs_you).length:0;
+  const jb=owner?0:T.filter(t=>((t.level==='emergency'||t.level==='asap')&&oi(t))||t.unread>0).length;
   _tk.counts={ badge:owner?needs:jb, needs_you:needs, emergency_open:T.filter(t=>t.level==='emergency'&&oi(t)).length, asap_open:T.filter(t=>t.level==='asap'&&oi(t)).length,
-    check:T.filter(t=>t.status==='check').length, unread:T.filter(t=>t.unread>0).length+dun };
+    check:T.filter(t=>t.status==='check').length, unread:T.filter(t=>t.unread>0).length };
   tasksBadge(); tkJoeyCard();
 }
 // Owner: Needs you count. Joey: open Emergency + ASAP + unread replies; red pulse while an Emergency is open.
@@ -11393,8 +11377,7 @@ function paintTasks(){
   const ro=tkRO();
   if(ro) _tk.cmp=null;
   const head=`<div class="tk-head"><h2>Tasks</h2>${ro?'':'<button type="button" class="tk-new" data-tk-new aria-label="New task"><span aria-hidden="true">+</span><b>New task</b></button>'}</div>`;
-  const dun=_tk.done.filter(t=>t.unread>0).length;   // unread replies on Done tasks
-  const tabs=`<div class="tk-tabs" role="tablist">${['open','done'].map(k=>`<button type="button" role="tab" aria-selected="${_tk.tab===k}" class="${_tk.tab===k?'on':''}" data-tk-tab="${k}">${k==='open'?'Open':'Done'}${k==='done'&&dun?`<span class="tk-tabn">${dun}</span>`:''}</button>`).join('')}</div>`;
+  const tabs=`<div class="tk-tabs" role="tablist">${['open','done'].map(k=>`<button type="button" role="tab" aria-selected="${_tk.tab===k}" class="${_tk.tab===k?'on':''}" data-tk-tab="${k}">${k==='open'?'Open':'Done'}</button>`).join('')}</div>`;
   const body=_tk.tab==='done'
     ?`<div class="tk-search"><input class="tk-in" type="search" data-tk-q placeholder="Search" value="${esc(_tk.q)}" aria-label="Search done tasks"></div><div id="tkDoneList">${tkDoneListHtml()}</div>`
     :(_tk.cmp?tkCmpHtml():'')+tkGroupsHtml();
@@ -11405,7 +11388,6 @@ function paintTasks(){
 function tkGroupsHtml(){
   const owner=tkOwner(), G={ needs:[], emergency:[], asap:[], normal:[], someday:[] };
   for(const t of _tk.tasks){ if(owner&&t.needs_you) G.needs.push(t); else (G[t.level]||G.normal).push(t); }
-  if(owner) for(const t of _tk.done) if(t.needs_you) G.needs.push(t);   // Joey replied on a Done task
   return (owner?['needs',...TK_LVS]:TK_LVS).map(k=>{
     let list=G[k]; if(!list.length) return '';
     // Crossed-out (Check) tasks sit at the bottom of their group.
@@ -11420,8 +11402,8 @@ function tkGroupsHtml(){
 }
 function tkRowHtml(t,g){
   const owner=tkOwner(), lv=TK_LV[t.level]||TK_LV.normal, st=t.status, c=t.can||{};
-  const on=st==='check'||st==='done', act=st==='check'?(c.ok||c.untick):st==='done'?false:c.tick;
-  const lab=st==='check'?(c.ok?'OK':'Not done'):st==='done'?'Done':(owner?'Mark complete':'Done');
+  const on=st==='check', act=st==='check'?(c.ok||c.untick):c.tick;
+  const lab=st==='check'?(c.ok?'OK':'Not done'):(owner?'Mark complete':'Done');
   const due=tkDue(t), od=t.due_state==='overdue';
   const sub=[];
   if(t.replies) sub.push(`<span class="${t.unread?'un':''}">💬 ${t.replies}</span>`);
@@ -11434,10 +11416,10 @@ function tkRowHtml(t,g){
     else if(ts==='failed') sub.push('<span class="warn">Text failed</span>');
     else if(t.email&&t.email.state==='sent') sub.push('<span>Emailed</span>'); }
   const grip=owner&&!tkRO()?(c.order&&g!=='needs'?'<span class="tk-grip" data-tk-grip aria-hidden="true" title="Drag">⠿</span>':'<span class="tk-grip" aria-hidden="true"></span>'):'';
-  return `<div class="tk-r${st==='done'?' is-done':on?' is-check':''}" data-tk="${esc(t.id)}">${grip}`
+  return `<div class="tk-r${on?' is-check':''}" data-tk="${esc(t.id)}">${grip}`
     +`<button type="button" class="tk-cb${on?' on':''}" data-tk-cb ${act?'':'disabled'} aria-label="${lab}" aria-pressed="${on}"><i class="tk-box">${TK_CHECK}</i></button>`
     +`<div class="tk-m"><div class="tk-t"><i class="tk-d" style="--d:${lv.d}"></i><button type="button" class="tk-tb" data-tk-open>${esc(t.title)}</button></div>${sub.length?`<div class="tk-s">${sub.join('')}</div>`:''}</div>`
-    +(st==='check'?'<span class="tk-pill check">Check</span>':st==='sent_back'?'<span class="tk-pill sb">Sent back</span>':st==='done'?'<span class="tk-pill dn">Done</span>':'')
+    +(st==='check'?'<span class="tk-pill check">Check</span>':st==='sent_back'?'<span class="tk-pill sb">Sent back</span>':'')
     +`<span class="tk-due tk-due-col${od?' od':''}">${esc(due)}</span></div>`;
 }
 // Done tab: newest first, search, Reopen.
@@ -11447,9 +11429,8 @@ function tkDoneListHtml(){
   if(!list.length) return '';
   return `<div class="tk-g open"><div class="tk-gb">${list.map(t=>{ const lv=TK_LV[t.level]||TK_LV.normal, c=t.can||{};
     const meta=[t.cleared_at?tkDate(t.cleared_at):'',t.done_by||''].filter(Boolean).join(' · ');
-    const sub=(meta?`<span>${esc(meta)}</span>`:'')+(t.replies?`<span class="${t.unread?'un':''}">💬 ${t.replies}</span>`:'');
     return `<div class="tk-r is-done" data-tk="${esc(t.id)}"><span class="tk-cb on" aria-hidden="true"><i class="tk-box">${TK_CHECK}</i></span>`
-      +`<div class="tk-m"><div class="tk-t"><i class="tk-d" style="--d:${lv.d}"></i><button type="button" class="tk-tb" data-tk-open>${esc(t.title)}</button></div>${sub?`<div class="tk-s">${sub}</div>`:''}</div>`
+      +`<div class="tk-m"><div class="tk-t"><i class="tk-d" style="--d:${lv.d}"></i><button type="button" class="tk-tb" data-tk-open>${esc(t.title)}</button></div>${meta?`<div class="tk-s">${esc(meta)}</div>`:''}</div>`
       +`${c.reopen?'<button type="button" class="tk-reopen" data-tk-reopen>Reopen</button>':''}</div>`; }).join('')}</div></div>`;
 }
 // Composer: title, level, optional due date; Notify Joey switches when Emergency is picked.
@@ -11473,13 +11454,6 @@ function tkNotifyNewHtml(){
     +tkSwHtml('data-tk-csw','email','Email',c.email,!!(ch.email&&ch.email.available),off)+'</div>';
 }
 function tkPaintCmp(){ const el=document.querySelector('#tkRoot [data-tk-cmp]'); if(el&&_tk.cmp) el.outerHTML=tkCmpHtml(); }
-// Emergency picked: re-read Joey's shift so the switches match the server.
-function tkCmpShift(){
-  if(!tkOwner()) return;
-  const was=!!(_tk.shift&&_tk.shift.on);
-  tkLoad().then(()=>{ if(!_tk.cmp||_tk.cmp.level!=='emergency'||!!(_tk.shift&&_tk.shift.on)===was) return;
-    const f=tkTyping(document.querySelector('#tkRoot [data-tk-cmp]')); tkPaintCmp(); if(f) tkFocusCmp(); }).catch(()=>{});
-}
 function tkFocusCmp(){ setTimeout(()=>{ const i=document.querySelector('#tkRoot [data-tk-ct]'); if(i) i.focus(); },0); }
 async function tkCreate(){
   const c=_tk.cmp; if(!c) return;
@@ -11488,19 +11462,15 @@ async function tkCreate(){
   const btn=document.querySelector('#tkRoot [data-tk-add]'); if(btn) btn.disabled=true;
   const body={ op:'create', id:c.id, title, level:c.level };
   if(c.due) body.due_on=c.due;
-  const owner=tkOwner(), ch=_tk.channels||{};
-  // The server decides on/off shift (a cached shift can be minutes old); off shift it saves the task and sends nothing.
-  if(owner&&c.level==='emergency') body.notify={ text:!!(c.text&&ch.text&&ch.text.available), email:!!(c.email&&ch.email&&ch.email.available) };
+  const owner=tkOwner(), on=!!(_tk.shift&&_tk.shift.on), ch=_tk.channels||{};
+  if(owner&&c.level==='emergency'&&on) body.notify={ text:!!(c.text&&ch.text&&ch.text.available), email:!!(c.email&&ch.email&&ch.email.available) };
   try{
     const r=await api('assistant_tasks',{ method:'POST', body });
     if(r&&r.task) tkPut(r.task);
-    const n=r&&r.notify;
-    if(n&&n.shift) _tk.shift=n.shift;
-    else if(n&&!n.skipped&&!(_tk.shift&&_tk.shift.on)) tkRefresh();
     _tk.cmp=tkPhone()?null:tkCmpNew();
     tkRecount(); paintTasks(); if(_tk.cmp) tkFocusCmp();
-    const m=tkNotifyMsg(n);
-    if(m) toast(m);
+    const m=tkNotifyMsg(r&&r.notify);
+    if(m) toast(m); else if(owner&&c.level==='emergency'&&!on) toast('Joey is off. Not sent.');
   }catch(e){ toast(e.message); if(btn) btn.disabled=false; }
   finally{ _tk.inflight.delete('add'); }
 }
@@ -11513,7 +11483,7 @@ function tkWire(root){
     const tab=tg.closest('[data-tk-tab]'); if(tab){ _tk.tab=tab.dataset.tkTab; paintTasks(); return; }
     const fold=tg.closest('[data-tk-fold]');
     if(fold){ const g=fold.closest('.tk-g'); if(!g||g.classList.contains('lock')) return; const on=g.classList.toggle('open'); fold.setAttribute('aria-expanded',String(on)); tkFoldSet(g.dataset.g,on); return; }
-    const cl=tg.closest('[data-tk-cl]'); if(cl&&_tk.cmp){ _tk.cmp.level=cl.dataset.tkCl; if(_tk.cmp.level==='emergency'){ _tk.cmp.text=true; _tk.cmp.email=false; tkCmpShift(); } tkPaintCmp(); if(!tkPhone()) tkFocusCmp(); return; }
+    const cl=tg.closest('[data-tk-cl]'); if(cl&&_tk.cmp){ _tk.cmp.level=cl.dataset.tkCl; if(_tk.cmp.level==='emergency'){ _tk.cmp.text=true; _tk.cmp.email=false; } tkPaintCmp(); if(!tkPhone()) tkFocusCmp(); return; }
     const sw=tg.closest('[data-tk-csw]'); if(sw&&_tk.cmp){ const k=sw.dataset.tkCsw; _tk.cmp[k]=!_tk.cmp[k]; tkPaintCmp(); return; }
     if(tg.closest('[data-tk-add]')){ tkCreate(); return; }
     if(tg.closest('[data-tk-cancel]')){ _tk.cmp=null; paintTasks(); return; }
@@ -11611,7 +11581,7 @@ function tkClose(opt){
   document.body.classList.remove('tk-dr-on');
   if(_tk.pushed){ _tk.pushed=false; if(!opt.fromPop&&!opt.noHistory){ _tk.skipPop=true; try{ history.back(); }catch(_){ _tk.skipPop=false; } } }
   tkMarkSel();
-  if(was&&!opt.noHistory&&!opt.quiet&&!tkPhone()){ const b=document.querySelector(`#tkRoot [data-tk="${CSS.escape(was)}"] .tk-tb`); if(b) b.focus({ preventScroll:true }); }
+  if(was&&!opt.noHistory&&!tkPhone()){ const b=document.querySelector(`#tkRoot [data-tk="${CSS.escape(was)}"] .tk-tb`); if(b) b.focus({ preventScroll:true }); }
 }
 // Opening stamps Seen (never under View As). A refresh re-stamps only for new replies.
 async function tkDrawerLoad(id,stamp){
@@ -11725,9 +11695,7 @@ function tkWireDrawer(dr){
     const t=tkFind(id); if(!t) return;
     const lv=tg.closest('[data-tk-lv]'); if(lv){ if(t.level!==lv.dataset.tkLv) tkEdit(id,{ level:lv.dataset.tkLv }); return; }
     const sw=tg.closest('[data-tk-dsw]'); if(sw){ const k=sw.dataset.tkDsw; _tk.dn[k]=!_tk.dn[k]; tkPaintDrawer(true); return; }
-    // Only channels shown ON: a switch greyed out (not set up / off) never sends.
-    if(tg.closest('[data-tk-notify]')){ const ch=_tk.channels||{}, av=k=>!!(ch[k]&&ch[k].available);
-      tkNotify(id,{ text:_tk.dn.text&&tkNever(t,'text')&&av('text'), email:_tk.dn.email&&tkNever(t,'email')&&av('email') }); return; }
+    if(tg.closest('[data-tk-notify]')){ tkNotify(id,{ text:_tk.dn.text&&tkNever(t,'text'), email:_tk.dn.email&&tkNever(t,'email') }); return; }
     const ag=tg.closest('[data-tk-again]'); if(ag){ const k=ag.dataset.tkAgain; tkNotify(id,{ text:k==='text', email:k==='email' }); return; }
     if(tg.closest('[data-tk-del]')){ tkDelete(id); return; }
     if(tg.closest('[data-tk-send]')){ tkComment(id); return; }
@@ -20812,7 +20780,7 @@ function joeyCardsHtml(){
   const big=v=>`<span class="gstat-v">${v}</span>`;
   const cov=j.covering||{};
   const covHtml=`<div class="jy-coverage"><div>${esc(bizShort('handy-andy'))}: <b>${esc(cov['handy-andy']||'')}</b></div><div>${esc(bizShort('doms'))}: <b>${esc(cov.doms||'')}</b></div><div class="jy-shift">${joeyShiftHtml()}</div></div>`;
-  const u=_tk.counts?(Number(_tk.counts.emergency_open)||0):(Number(j.urgent_tasks)||0);   // open Emergency (owner 2026-10-07); + low-stock techs as before (10-04)
+  const u=_tk.counts?(Number(_tk.counts.emergency_open)||0):(Number(j.urgent_tasks)||0);   // open Emergency only (owner 2026-10-07)
   const secs=(j.secretaries||[]).map(bookingRateBarHtml).join('');
   const low=Number(greetingData.lowStockTechs)||0;
   const stockNotice=low?`<button type="button" class="jy-stock" onclick="navTo('brackets')">⚠ ${low} tech${low===1?'':'s'} low on stock <span aria-hidden="true">›</span></button>`:'';
@@ -20821,7 +20789,7 @@ function joeyCardsHtml(){
     card('Covering today',covHtml)+
     card('Pipeline',dashPipelineHtml())+
     card('Booking rate · 7 days',secs)+
-    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div style="text-align:center;"><span class="gstat-l" style="display:block;">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u+low}</span>${stockNotice}</div><div style="text-align:center;"><span class="gstat-l" style="display:block;">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
+    `<div class="gstat" style="display:grid;grid-template-columns:1fr;gap:10px;"><div style="text-align:center;"><span class="gstat-l" style="display:block;">Urgent tasks</span><span class="gstat-v"${u?' style="color:#dc2626;"':''}>${u}</span>${stockNotice}</div><div style="text-align:center;"><span class="gstat-l" style="display:block;">Jobs today</span><span class="gstat-v">${Number(j.jobs_today)||0}</span></div></div>`+
   `</div>`;
 }
 function greetStatsHtml(){
@@ -26476,7 +26444,6 @@ async function tryAutoLogin(){
     lsSet('ha_admin_scope',scope);
     lsSet('ha_admin_config',JSON.stringify(appConfig||{}));
     lsSet('ha_admin_biz',JSON.stringify(businesses||[]));
-    await healOldViewAs(d);
     enterApp();
   }catch(e){ if(e && e.status===401 && token) logout({reason:'expired'}); /* else: no session — show the login screen */ }
 }
@@ -26529,7 +26496,6 @@ async function refreshSessionCache(){
     // keeps a dashboard that is open all day from hard-expiring 12h after the
     // password was typed.
     if(d && typeof d.token==='string' && d.token && d.token!==token){ token=d.token; lsSet('ha_admin_token',token); }
-    if(await healOldViewAs(d)) tkRefresh();
     if(d && Array.isArray(d.businesses) && d.businesses.length){
       // Did the set of brands this login may use change (access granted or
       // removed server-side)? The switcher was drawn from the cached list at
