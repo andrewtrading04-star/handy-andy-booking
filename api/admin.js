@@ -8050,8 +8050,11 @@ async function reviewInviteSend(req, res, db, auth, body) {
 // Handy Andy's roster by metro (PARTNER_SLUG, _lib/availability.js), so a tech
 // created under one would become that brand's host pool and never see Handy
 // Andy's own jobs.
+// Joey (Dom's secretary) may list pending invites and re-text one (owner
+// 2026-10-07); creating, copying the link and canceling stay owner-only.
+function isJoeyLogin(auth) { return !!auth && auth.role === 'secretary' && auth.name === 'Joey'; }
 async function techInvites(req, res, db, auth) {
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can manage technician invites' });
+  if (auth.role !== 'owner' && !isJoeyLogin(auth)) return res.status(403).json({ error: 'Only the owner can manage technician invites' });
   let biz; try { biz = await resolveBusiness(db, auth, req.query.business); } catch (e) { return bail(res, e); }
   const { data: areas, error: aErr } = await db.from('service_areas')
     .select('id, name, unstaffed, active').eq('business_id', biz.id).order('name');
@@ -8126,6 +8129,13 @@ async function techInvites(req, res, db, auth) {
       technician: t ? { id: t.id, name: t.name, active: t.active } : null,
     };
   });
+  if (auth.role !== 'owner') {
+    // Joey: open invites only, no link, no metro roster.
+    return res.status(200).json({ invites: invites.filter(i => i.state === 'open').map(i => ({
+      id: i.id, state: i.state, name: i.name, phone: i.phone, metro: i.metro, created_at: i.created_at,
+      sent_at: i.sent_at, expires_at: i.expires_at, opened_at: i.opened_at, open_count: i.open_count, link: null,
+    })) });
+  }
   return res.status(200).json({ invites, metros });
 }
 
@@ -8229,7 +8239,8 @@ async function techInviteCreate(req, res, db, auth, body) {
 // still have starts working again too.
 async function techInviteSend(req, res, db, auth, body) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (auth.role !== 'owner') return res.status(403).json({ error: 'Only the owner can send technician invites' });
+  const joey = auth.role !== 'owner';
+  if (joey && !isJoeyLogin(auth)) return res.status(403).json({ error: 'Only the owner can send technician invites' });
   let biz; try { biz = await resolveBusiness(db, auth, body.business); } catch (e) { return bail(res, e); }
   if (!body.id) return res.status(400).json({ error: 'id required' });
   const { data: inv, error } = await db.from('tech_invites')
@@ -8238,6 +8249,7 @@ async function techInviteSend(req, res, db, auth, body) {
   if (error) throw error;
   if (!inv) return res.status(404).json({ error: 'Invite not found' });
   if (inv.status !== 'pending') return res.status(409).json({ error: inv.status === 'joined' ? 'They already signed up.' : 'This invite was canceled.' });
+  if (joey && !inv.invitee_phone) return res.status(400).json({ error: 'No phone on this invite.' });
   const { data: area } = await db.from('service_areas').select('name, timezone, active').eq('id', inv.service_area_id).maybeSingle();
   // claim_tech_invite refuses a switched-off metro, so don't revive or re-text
   // a link that can never be used.
@@ -8253,9 +8265,10 @@ async function techInviteSend(req, res, db, auth, body) {
   if (!upd.invitee_phone) return res.status(200).json({ ok: true, sms: null, expires_at: upd.expires_at, link: inviteLink(upd.code) });
   // A cap so a stuck button or a mis-tap loop can't spam a stranger.
   if ((upd.send_count || 0) >= 5) {
-    return res.status(200).json({ ok: false, sms: { ok: false, reason: 'already texted 5 times' }, expires_at: upd.expires_at, link: inviteLink(upd.code) });
+    return res.status(200).json({ ok: false, sms: { ok: false, reason: 'already texted 5 times' }, expires_at: upd.expires_at, link: joey ? null : inviteLink(upd.code) });
   }
   const sms = await textTechInvite(db, biz, area || { name: 'your area', timezone: null }, upd);
+  if (joey) return res.status(200).json({ ok: sms.ok, sms, expires_at: upd.expires_at });
   return res.status(200).json({ ok: sms.ok, sms, expires_at: upd.expires_at, link: inviteLink(upd.code) });
 }
 
@@ -18349,14 +18362,27 @@ async function joeyMetrics(req, res, db, auth) {
   return res.status(200).json({ covering: { 'handy-andy': ha, doms }, jobs_today: jobs, urgent_tasks: tasks.count || 0, secretaries: list });
 }
 const TASK_COLORS = ['red', 'yellow', 'green', 'white'];
-// A red task means drop everything: text Joey right away. Never blocks the save.
-async function textJoeyRedTask(db, title) {
+// Owner's add form has "Text Joey" / "Email Joey" boxes, both off by default
+// (owner 2026-10-07). Nothing is sent unless a box is ticked. Never blocks the save.
+async function joeyContact(db) {
+  try { const { data } = await db.from('staff_users').select('*').eq('name', 'Joey').eq('active', true).maybeSingle(); return data || {}; }
+  catch { return {}; }
+}
+async function textJoeyTask(db, j, title) {
   try {
-    const { data: j } = await db.from('staff_users').select('phone').eq('name', 'Joey').eq('active', true).maybeSingle();
-    if (!j || !j.phone) return false;
-    const r = await sendSMSResult(j.phone, `URGENT task from Andrew: ${String(title).slice(0, 200)}. Drop everything. Open the CRM > Task.`);
+    const phone = j.phone || process.env.DOMS_SECRETARY_PHONE || JOEY_MOBILE;
+    const r = await sendSMSResult(phone, `Task from Andrew: ${String(title).slice(0, 120)}`);
     return !!(r && r.ok);
-  } catch (e) { console.warn('[tasks] red text failed:', e.message); return false; }
+  } catch (e) { console.warn('[tasks] text failed:', e.message); return false; }
+}
+async function emailJoeyTask(db, j, title, notes) {
+  try {
+    const to = j.email || process.env.DOMS_SECRETARY_EMAIL || 'jyrsbries@gmail.com';
+    const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const html = `<p><b>${esc(title)}</b></p>${notes ? `<p style="white-space:pre-wrap">${esc(notes)}</p>` : ''}`;
+    const r = await sendEmail({ slug: 'doms', to, subject: `Task from Andrew: ${String(title).slice(0, 150)}`, html });
+    return !!(r && r.sent);
+  } catch (e) { console.warn('[tasks] email failed:', e.message); return false; }
 }
 async function assistantTasks(req, res, db, auth, body) {
   if (!taskAccess(auth)) return res.status(403).json({ error: 'Not available for this login' });
@@ -18398,8 +18424,10 @@ async function assistantTasks(req, res, db, auth, body) {
     }
     const { data, error } = await db.from('assistant_tasks').insert(row).select('*').maybeSingle();
     if (error) throw error;
-    const texted = color === 'red' ? await textJoeyRedTask(db, title) : false;
-    return res.status(200).json({ ok: true, task: data, texted });
+    const owner = auth.role === 'owner', wantText = owner && body.text_joey === true, wantEmail = owner && body.email_joey === true;
+    const j = (wantText || wantEmail) ? await joeyContact(db) : {};
+    const [texted, emailed] = await Promise.all([wantText ? textJoeyTask(db, j, title) : false, wantEmail ? emailJoeyTask(db, j, title, row.notes) : false]);
+    return res.status(200).json({ ok: true, task: data, texted, emailed });
   }
   // Owner drags tasks into any order (owner 2026-10-06): ids in the new order.
   if (op === 'order') {
@@ -18430,7 +18458,6 @@ async function assistantTasks(req, res, db, auth, body) {
     return res.status(200).json({ ok: true });
   }
   // Andrew edits a task's title or color any time (owner 2026-10-03).
-  // Turning a task red texts Joey, same as creating a red one.
   if (op === 'title' || op === 'color') {
     if (auth.role !== 'owner') return res.status(403).json({ error: 'Only Andrew can change this.' });
     let patch, texted = false;
@@ -18451,7 +18478,6 @@ async function assistantTasks(req, res, db, auth, body) {
       const { error } = await db.from('assistant_tasks').update(patch).eq('id', id);
       if (error) throw error;
     }
-    if (op === 'color' && body.color === 'red' && prev.color !== 'red') texted = await textJoeyRedTask(db, prev.title);
     return res.status(200).json({ ok: true, texted, already });
   }
   if (op === 'photos') {

@@ -10538,9 +10538,9 @@ function pendingInviteRowHtml(x){
         <div class="tdet" style="display:${open?'':'none'}"><div class="meta">${i.sent_at?`Texted ${shortDateBiz(i.sent_at)}`:`Link made ${shortDateBiz(i.created_at)}`} · ${opened} · Expires ${shortDateBiz(i.expires_at)}</div></div></div>
     </div></div>
     <div class="tdet actions" style="display:${open?'':'none'}">
-      <button class="btn ghost sm" type="button" data-pinvact="copy">Copy link</button>
+      ${role==='owner'?'<button class="btn ghost sm" type="button" data-pinvact="copy">Copy link</button>':''}
       ${i.phone?'<button class="btn ghost sm" type="button" data-pinvact="resend">Resend text</button>':''}
-      <button class="btn ghost sm" type="button" data-pinvact="cancel">Cancel</button>
+      ${role==='owner'?'<button class="btn ghost sm" type="button" data-pinvact="cancel">Cancel</button>':''}
     </div></div>`;
 }
 async function pendingInviteAct(x,act,btn){
@@ -10572,7 +10572,9 @@ async function renderTechnicians(){
       wantInvites ? api('tech_invites',{ params:{ business:current.slug }}).catch(e=>({ error:e.message })) : Promise.resolve(null),
       wantApplicants ? api('applicants').catch(e=>({ error:e.message })) : Promise.resolve(null),
       // Pending invites as red rows in each company's lineup (owner, 2026-10-07).
-      role==='owner' ? Promise.all(businesses.filter(b=>TECH_INVITE_SLUGS.includes(b.slug)&&(businesses.length>1||b.slug===current.slug)).map(b=>api('tech_invites',{ params:{ business:b.slug }}).then(r=>(r.invites||[]).filter(i=>i.state==='open').map(i=>({ _inv:i, id:'inv-'+i.id, name:i.name||tinvPhone(i.phone)||'Invite', active:true, _biz:b.slug, _bizName:b.name||b.slug }))).catch(()=>[]))).then(l=>[].concat(...l)) : Promise.resolve([]),
+      role==='owner' ? Promise.all(businesses.filter(b=>TECH_INVITE_SLUGS.includes(b.slug)&&(businesses.length>1||b.slug===current.slug)).map(b=>api('tech_invites',{ params:{ business:b.slug }}).then(r=>(r.invites||[]).filter(i=>i.state==='open').map(i=>({ _inv:i, id:'inv-'+i.id, name:i.name||tinvPhone(i.phone)||'Invite', active:true, _biz:b.slug, _bizName:b.name||b.slug }))).catch(()=>[]))).then(l=>[].concat(...l))
+        // Joey: Dom's pending invites, Resend text only (owner 2026-10-07).
+        : _joeyAll() ? api('tech_invites',{ params:{ business:'doms' }}).then(r=>(r.invites||[]).filter(i=>i.state==='open').map(i=>({ _inv:i, id:'inv-'+i.id, name:i.name||tinvPhone(i.phone)||'Invite', active:true, _biz:'doms', _bizName:"Dom's" }))).catch(()=>[]) : Promise.resolve([]),
     ]);
     techInviteData=inv;
     techRoster=d.technicians||[];
@@ -11119,7 +11121,6 @@ function tkDragInit(view){
         try{
           if(t&&newColor&&newColor!==t.color&&TASK_ORDER.includes(newColor)){
             const r2=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:newColor } });
-            if(newColor==='red'&&!(r2&&r2.already)) toast(r2&&r2.texted?'Texted Joey':'Saved. The text to Joey did not send.');
           }
           await api('assistant_tasks',{ method:'POST', body:{ op:'order', ids } });
         }catch(err){ toast(err.message); }
@@ -11171,6 +11172,7 @@ function paintTasks(){
       <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
       <textarea id="tkNotes" rows="2" placeholder="Notes (optional)"></textarea>
       <div id="tkPhotoHost"></div>
+      ${role==='owner'?'<div style="display:flex;gap:16px;"><label><input type="checkbox" id="tkTextJoey"> Text Joey</label><label><input type="checkbox" id="tkEmailJoey"> Email Joey</label></div>':''}
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
     ${role==='owner'?`<div style="flex:0 1 300px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;"><b>Joey</b><div class="jy-shift">${joeyShiftHtml()}</div></div></div>`:''}
@@ -11199,8 +11201,9 @@ function paintTasks(){
   jobIn.onblur=()=>setTimeout(()=>{ res.innerHTML=''; },200);   // never cover the notes box
   view.querySelector('#tkAdd').onclick=async()=>{
     const title=view.querySelector('#tkTitle').value.trim(); if(!title){ toast('Write the task first.'); return; }
-    try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, notes:view.querySelector('#tkNotes').value, photos:tkPicker.urls(), booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
-      if(role==='owner'&&_tk.color==='red') toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.');
+    const tj=view.querySelector('#tkTextJoey'), ej=view.querySelector('#tkEmailJoey'), wantT=!!(tj&&tj.checked), wantE=!!(ej&&ej.checked);
+    try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'add', title, color:_tk.color, text_joey:wantT, email_joey:wantE, notes:view.querySelector('#tkNotes').value, photos:tkPicker.urls(), booking_id:_tk.job&&_tk.job.id, job_slug:_tk.job&&_tk.job.slug, job_label:_tk.job&&_tk.job.label } });
+      if(role==='owner'&&(wantT||wantE)){ const m=[]; if(wantT) m.push(r&&r.texted?'Texted Joey':'Text to Joey did not send'); if(wantE) m.push(r&&r.emailed?'Emailed Joey':'Email to Joey did not send'); toast(m.join(' · ')); }
       _tk.job=null; await renderTasks(); }catch(e){ toast(e.message); }
   };
   view.querySelectorAll('[data-tk]').forEach(el=>{ const id=el.dataset.tk;
@@ -11216,7 +11219,7 @@ function paintTasks(){
       try{ await api('assistant_tasks',{ method:'POST', body:{ op:'title', id, title:v } }); const t=_tk.tasks.find(x=>x.id===id); if(t) t.title=v; const s=el.querySelector('.tk-sum .tk-title'); if(s) s.textContent=v; toast('Saved'); }catch(err){ toast(err.message); } };
     el.querySelectorAll('[data-tk-recolor]').forEach(b=>b.onclick=async()=>{ const k=b.dataset.tkRecolor;
       const cur=_tk.tasks.find(x=>x.id===id); if(cur&&cur.color===k) return;   // already this color: nothing to save, no text
-      try{ const r=await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:k } }); if(k==='red'&&!(r&&r.already)) toast(r&&r.texted?'Texted Joey':'Saved. The text to Joey did not send.'); _tk.open.add(id); await renderTasks(); }catch(err){ toast(err.message); } });
+      try{ await api('assistant_tasks',{ method:'POST', body:{ op:'color', id, color:k } }); _tk.open.add(id); await renderTasks(); }catch(err){ toast(err.message); } });
     const j=el.querySelector('[data-tk-job]'); if(j) j.onclick=()=>openPayrollJob(j.dataset.tkJob, j.dataset.slug||(current&&current.slug));
     // Pictures on a task (owner 2026-10-02): upload, then save the full list.
     const pb=el.querySelector('[data-tk-photo]'), pf=el.querySelector('[data-tk-file]');
