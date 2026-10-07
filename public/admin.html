@@ -11112,10 +11112,10 @@ function paintTasks(){
     </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
-    ${role==='owner'?`<div style="max-width:420px;margin:-4px 0 14px;"><b>Joey</b><div class="jy-shift">${joeyShiftHtml()}</div></div>`:''}
     <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
     ${isJoeyHome()?'<details class="tk-add-wrap" style="margin:12px 0;max-width:760px;"><summary style="cursor:pointer;padding:12px;border:1px solid var(--line);border-radius:10px;font-weight:700;">Add my own task</summary>':''}
-    <div class="tk-add" style="max-width:760px;">
+    ${role==='owner'?'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;">':''}
+    <div class="tk-add" style="max-width:760px;flex:1 1 420px;">
       <input id="tkTitle" maxlength="300" placeholder="${role==='owner'?'What should Joey do?':'Add my own task'}">
       ${role!=='owner'?'':`<div class="tk-colors">${TASK_ORDER.map(k=>`<button type="button" data-tk-color="${k}" class="${_tk.color===k?'on':''}" style="--c:${TASK_COL[k].bar};--ci:${TASK_COL[k].ink};">${TASK_COL[k].label}</button>`).join('')}</div>`}
       <div style="position:relative;"><input id="tkJob" placeholder="🔗 Link a job (customer name or phone)" value="${_tk.job?esc(_tk.job.label):''}" autocomplete="off"><div id="tkJobRes" class="tk-res"></div></div>
@@ -11123,6 +11123,7 @@ function paintTasks(){
       <div id="tkPhotoHost"></div>
       <div style="text-align:right;"><button type="button" class="btn sm" id="tkAdd">${role==='owner'?'Give task':'Add task'}</button></div>
     </div>
+    ${role==='owner'?`<div style="flex:0 1 300px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;"><b>Joey</b><div class="jy-shift">${joeyShiftHtml()}</div></div></div>`:''}
     ${isJoeyHome()?'</details>':''}
     <div class="plv-board tk-board">${cols.map(k=>{ const list=open.filter(t=>t.color===k), struck=_tk.tasks.filter(t=>t.done_at&&!t.cleared_at&&t.color===k);
       // Phone: red with tasks is always open (owner 2026-10-07).
