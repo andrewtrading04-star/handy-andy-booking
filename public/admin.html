@@ -11112,6 +11112,7 @@ function paintTasks(){
     </details>`; };
   view.innerHTML=`<div class="wrap" style="max-width:none;">
     <h2 style="margin:0 0 12px;">Task</h2>
+    ${role==='owner'?`<div style="max-width:420px;margin:-4px 0 14px;"><b>Joey</b><div class="jy-shift">${joeyShiftHtml()}</div></div>`:''}
     <div class="plv-chev tk-chev">${cols.map(k=>`<button type="button" class="plv-chev-i${_tk.filter===k?' on':''}" data-tk-filter="${k}" style="--st:${TASK_COL[k].bar};"><b>${esc(TASK_COL[k].label)}</b>${k==='white'?'':`<span class="plv-chev-v">${open.filter(t=>t.color===k).length}</span>`}</button>`).join('')}</div>
     ${isJoeyHome()?'<details class="tk-add-wrap" style="margin:12px 0;max-width:760px;"><summary style="cursor:pointer;padding:12px;border:1px solid var(--line);border-radius:10px;font-weight:700;">Add my own task</summary>':''}
     <div class="tk-add" style="max-width:760px;">
