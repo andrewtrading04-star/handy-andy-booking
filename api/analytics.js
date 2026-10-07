@@ -222,22 +222,6 @@ async function handleTwilioStatus(req, res) {
           .eq('id', t.message_id);
         if (errCode === '30034') await rescueUnregisteredAutoText(db, t.message_id);
       }
-    } else if (t && t.kind === 'task_sms' && t.task_id) {
-      // Notify Joey text on an Emergency task (owner 2026-10-07): Delivered /
-      // Undelivered, matched by text_sid so an older text can't overwrite.
-      const status = (params.MessageStatus || '').toLowerCase();
-      const sid = (params.MessageSid || '').toString();
-      const db = serviceClient();
-      if (sid && status === 'delivered') {
-        await db.from('assistant_tasks').update({ text_status: 'delivered' }).eq('id', t.task_id).eq('text_sid', sid);
-      } else if (sid && (status === 'failed' || status === 'undelivered')) {
-        const errCode = (params.ErrorCode || '').toString();
-        const { data: hit } = await db.from('assistant_tasks').update({ text_status: 'undelivered' })
-          .eq('id', t.task_id).eq('text_sid', sid).neq('text_status', 'undelivered').select('id');
-        if (hit && hit.length) {
-          await db.from('assistant_task_events').insert({ task_id: t.task_id, kind: 'text_failed', body: errCode ? `Undelivered (Twilio ${errCode})` : 'Undelivered', by: 'Twilio' });
-        }
-      }
     }
   } catch (e) {
     console.error('[sms_status] error:', e.message);

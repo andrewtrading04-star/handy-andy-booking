@@ -27,7 +27,6 @@ import { toE164, sendSMS, sendSMSResult, smsConfigured, smsBrandName, smsOptOutS
 import { emailConfig, sendEmail, bookingConfirmationEmail, brandFor, reviewEmail, estimateEmail, outOfScopeEmail, receiptEmail, EMAIL_BRANDS } from './_lib/email.js';
 import { sendCouponFollowup } from './_lib/estimate-followup.js';
 import { myDay } from './_lib/my-day.js';
-import { assistantTasksHandler } from './_lib/assistant-tasks.js';
 import { askHandler } from './_lib/ask.js';
 import { startTranscript, finishTranscript } from './_lib/transcribe.js';
 import { callSummary } from './_lib/call-summary.js';
@@ -917,8 +916,7 @@ async function viewAs(req, res, db, auth) {
   for (const b of (businesses || [])) b.stripe_pk = bookingStripePk(b.slug);
 
   const name = staffName || displayNameFor(viewSlug);
-  // view_as: Tasks treats this session as read only (owner 2026-10-07).
-  const token = signToken({ kind: 'admin', role: 'secretary', scope: viewSlug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}), view_as: 1, sess: 1 });
+  const token = signToken({ kind: 'admin', role: 'secretary', scope: viewSlug, name, ...(viewAsExtra.length ? { allowed: viewAsExtra } : {}), sess: 1 });
   const config = {
     email: demoMode() || !!process.env.RESEND_API_KEY,
     sms: smsConfigured(),
@@ -926,7 +924,7 @@ async function viewAs(req, res, db, auth) {
     maps_key: process.env.GOOGLE_MAPS_API_KEY || null,
     maps_autocomplete: process.env.MAPS_AUTOCOMPLETE === '1' && !!process.env.GOOGLE_MAPS_API_KEY,
   };
-  return res.status(200).json({ token, role: 'secretary', scope: viewSlug, name, view_as: true, config, businesses: businesses || [] });
+  return res.status(200).json({ token, role: 'secretary', scope: viewSlug, name, config, businesses: businesses || [] });
 }
 
 // Validate the current session token and return user data. Called by tryAutoLogin()
@@ -968,7 +966,7 @@ async function sessionStatus(req, res) {
   };
   return res.status(200).json({
     token: fresh || raw, refreshed: !!fresh, expires_at: claims.exp, session_started_at: claims.sat || claims.iat || null,
-    role: auth.role, scope: auth.scope, name: auth.name, view_as: !!auth.view_as, config, businesses: businesses || []
+    role: auth.role, scope: auth.scope, name: auth.name, config, businesses: businesses || []
   });
 }
 
@@ -18278,8 +18276,13 @@ async function messagesBlock(req, res, db, auth, body) {
   return res.status(200).json({ ok: true, phone: customer });
 }
 
-// ── Tasks: Andrew -> Joey, or Joey's own (owner 2026-10-07) ────────────────
-// Task logic lives in _lib/assistant-tasks.js. Joey's home cards stay here.
+// ── Task list: Andrew gives Joey (his assistant) tasks (owner 2026-10-02) ────
+// Red = urgent, yellow = today, green = when you can. A task keeps its color
+// until done; done tasks show crossed out. Joey can add her own. Optional
+// linked job opens the job ticket. Only the owner and Joey see this.
+function taskAccess(auth) {
+  return auth && (auth.role === 'owner' || (auth.role === 'secretary' && auth.name === 'Joey'));
+}
 // Each secretary's 7-day booking rate (owner dashboard + Joey's home card).
 async function secretaryWeekConversion(db, tz) {
       const last7Start = localDayStartUTC(tz, -6);
@@ -18345,8 +18348,126 @@ async function joeyMetrics(req, res, db, auth) {
   for (const n of ['Heather', 'Alex', 'Joe']) if (!list.some(p => p.person === n)) list.push({ person: n, calls: 0, booked: 0, conversion: 0 });
   return res.status(200).json({ covering: { 'handy-andy': ha, doms }, jobs_today: jobs, urgent_tasks: tasks.count || 0, secretaries: list });
 }
-// Tasks router (owner 2026-10-07): permissions, notify and old-tab ops live in _lib/assistant-tasks.js.
+const TASK_COLORS = ['red', 'yellow', 'green', 'white'];
+// A red task means drop everything: text Joey right away. Never blocks the save.
+async function textJoeyRedTask(db, title) {
+  try {
+    const { data: j } = await db.from('staff_users').select('phone').eq('name', 'Joey').eq('active', true).maybeSingle();
+    if (!j || !j.phone) return false;
+    const r = await sendSMSResult(j.phone, `URGENT task from Andrew: ${String(title).slice(0, 200)}. Drop everything. Open the CRM > Task.`);
+    return !!(r && r.ok);
+  } catch (e) { console.warn('[tasks] red text failed:', e.message); return false; }
+}
 async function assistantTasks(req, res, db, auth, body) {
-  return assistantTasksHandler(req, res, db, auth, body, { fallbackPhone: secretaryPhoneFor('doms') });
+  if (!taskAccess(auth)) return res.status(403).json({ error: 'Not available for this login' });
+  const who = auth.name || (auth.role === 'owner' ? 'Andrew' : 'Joey');
+  if (req.method === 'GET') {
+    if (req.query.q != null) {
+      // Job search for linking: customer name or phone, newest first.
+      const q = String(req.query.q || '').trim();
+      if (q.length < 2) return res.status(200).json({ jobs: [] });
+      const digits = q.replace(/\D/g, '');
+      let cq = db.from('customers').select('id').limit(40);
+      cq = digits.length >= 4 ? cq.ilike('phone', `%${digits.slice(-10)}%`) : cq.ilike('name', `%${q.replace(/[%,()]/g, '')}%`);
+      const { data: cs } = await cq;
+      const ids = (cs || []).map(c => c.id);
+      if (!ids.length) return res.status(200).json({ jobs: [] });
+      const { data: bks } = await db.from('bookings').select('id, scheduled_at, price, customer:customers(name), business:businesses(slug, name)')
+        .in('customer_id', ids).order('scheduled_at', { ascending: false }).limit(10);
+      const jobs = (bks || []).map(b => ({ id: b.id, slug: b.business?.slug || null,
+        label: `${b.customer?.name || 'Customer'} · ${b.scheduled_at ? new Date(b.scheduled_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }) : ''}${b.price ? ' · $' + Math.round(Number(b.price)) : ''} · ${b.business?.name || ''}` }));
+      return res.status(200).json({ jobs });
+    }
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    const { data, error } = await db.from('assistant_tasks').select('*').is('deleted_at', null)
+      .or(`done_at.is.null,done_at.gte.${since}`).order('created_at', { ascending: true }).limit(300);
+    if (error) throw error;
+    return res.status(200).json({ tasks: data || [] });
+  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const op = String(body.op || '');
+  if (op === 'add') {
+    const title = String(body.title || '').trim().slice(0, 300);
+    // Joey's own tasks go in their own list, no color pick (owner 2026-10-02).
+    const color = auth.role !== 'owner' ? 'joey' : TASK_COLORS.includes(body.color) ? body.color : null;
+    if (!title) return res.status(400).json({ error: 'Write the task first.' });
+    if (!color) return res.status(400).json({ error: 'Pick a color.' });
+    const row = { title, color, notes: String(body.notes || '').trim().slice(0, 4000) || null, created_by: who, photo_urls: cleanNotePhotos(body.photos) };
+    if (body.booking_id && /^[0-9a-f-]{36}$/i.test(String(body.booking_id))) {
+      row.booking_id = body.booking_id; row.job_slug = String(body.job_slug || '').slice(0, 60) || null; row.job_label = String(body.job_label || '').slice(0, 200) || null;
+    }
+    const { data, error } = await db.from('assistant_tasks').insert(row).select('*').maybeSingle();
+    if (error) throw error;
+    const texted = color === 'red' ? await textJoeyRedTask(db, title) : false;
+    return res.status(200).json({ ok: true, task: data, texted });
+  }
+  // Owner drags tasks into any order (owner 2026-10-06): ids in the new order.
+  if (op === 'order') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+    const ids = (Array.isArray(body.ids) ? body.ids : []).filter(x => /^[0-9a-f-]{36}$/i.test(String(x))).slice(0, 300);
+    await Promise.all(ids.map((tid, i) => db.from('assistant_tasks').update({ sort_order: i }).eq('id', tid)));
+    return res.status(200).json({ ok: true });
+  }
+  const id = String(body.id || '');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
+  if (op === 'done') {
+    const done = !!body.done;
+    // Joey's check leaves it crossed out on the board; Andrew's own check clears it (owner 2026-10-07).
+    const { error } = await db.from('assistant_tasks').update(done ? { done_at: new Date().toISOString(), done_by: who, cleared_at: auth.role === 'owner' ? new Date().toISOString() : null } : { done_at: null, done_by: null, cleared_at: null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  // Andrew taps a crossed-out task: off the board, into Done (owner 2026-10-07).
+  if (op === 'clear') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Owner only' });
+    const { error } = await db.from('assistant_tasks').update({ cleared_at: new Date().toISOString() }).eq('id', id).not('done_at', 'is', null);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  if (op === 'notes') {
+    const { error } = await db.from('assistant_tasks').update({ notes: String(body.notes || '').slice(0, 4000) || null }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  // Andrew edits a task's title or color any time (owner 2026-10-03).
+  // Turning a task red texts Joey, same as creating a red one.
+  if (op === 'title' || op === 'color') {
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Only Andrew can change this.' });
+    let patch, texted = false;
+    if (op === 'title') {
+      const title = String(body.title || '').trim().slice(0, 300);
+      if (!title) return res.status(400).json({ error: 'Write the task first.' });
+      patch = { title };
+    } else {
+      if (!TASK_COLORS.includes(body.color)) return res.status(400).json({ error: 'Pick a color.' });
+      patch = { color: body.color };
+    }
+    const { data: prev } = await db.from('assistant_tasks').select('title, color').eq('id', id).maybeSingle();
+    if (!prev) return res.status(404).json({ error: 'Not found' });
+    // Same color again (re-tapping the one it already has): nothing to save
+    // or text, and the client must not warn that Joey's text failed (owner 2026-10-03).
+    const already = op === 'color' && prev.color === body.color;
+    if (!already) {
+      const { error } = await db.from('assistant_tasks').update(patch).eq('id', id);
+      if (error) throw error;
+    }
+    if (op === 'color' && body.color === 'red' && prev.color !== 'red') texted = await textJoeyRedTask(db, prev.title);
+    return res.status(200).json({ ok: true, texted, already });
+  }
+  if (op === 'photos') {
+    // Pictures on a task (owner 2026-10-02): the full list, already uploaded via notes_photo.
+    const { error } = await db.from('assistant_tasks').update({ photo_urls: cleanNotePhotos(body.photos) }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  if (op === 'delete') {
+    const { data: t } = await db.from('assistant_tasks').select('created_by').eq('id', id).maybeSingle();
+    if (!t) return res.status(404).json({ error: 'Not found' });
+    if (auth.role !== 'owner') return res.status(403).json({ error: 'Only Andrew can delete tasks.' });
+    const { error } = await db.from('assistant_tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(400).json({ error: 'Unknown op' });
 }
 
