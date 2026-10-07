@@ -2598,6 +2598,7 @@ async function launchMarketRows(db) {
       id: m.id, slug: m.slug, name: m.name, parentSlug: m.parent_business_slug,
       city: (m.settings && m.settings.city) || m.name,
       url: m.url, active: m.active, created_at: m.created_at, site, checklist, notes,
+      skip: (m.settings && m.settings.launch_skip) || [],
     };
   }));
 }

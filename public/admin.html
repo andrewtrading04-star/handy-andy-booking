@@ -9402,6 +9402,8 @@ async function renderLaunch(){
   const items=data.items||[];
   const businesses=data.businesses||[];
   const marketItems=data.marketItems||[];
+  // Per-market items the owner ruled out (settings.launch_skip), e.g. no GBP for Arlington.
+  const mItems=m=>marketItems.filter(i=>!(m.skip||[]).includes(i.key));
   const markets=data.markets||[];
 
   // Businesses and markets are scored by their own rules (launchScoreOf vs
@@ -9413,7 +9415,7 @@ async function renderLaunch(){
   // below re-reads it to recolour the card, its wire, the hub ring and the tiles.
   const entries=[
     ...businesses.filter(b=>b.slug!=='handy-andy').map(b=>({ sev:launchIsLive(b, items) ? launchSeverity(launchHealthRows(b.slug, b.site, b.stripe)) : 2, traffic:b.slug, sel:`[data-launch-card="${b.id}"]`, score:()=>launchScoreOf(b, items), city:launchCityOf(b.slug), html:launchCardHtml(b, items) })),
-    ...markets.map(m=>({ sev:launchMarketIsLive(m, marketItems) ? launchSeverity(launchHealthRows('m:'+m.slug, m.site, null)) : 2, traffic:'m:'+m.slug, sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, marketItems), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, marketItems) })),
+    ...markets.map(m=>({ sev:launchMarketIsLive(m, mItems(m)) ? launchSeverity(launchHealthRows('m:'+m.slug, m.site, null)) : 2, traffic:'m:'+m.slug, sel:`[data-launch-market-card="${m.id}"]`, score:()=>launchMarketScoreOf(m, mItems(m)), city:launchMarketCityOf(m), html:launchMarketCardHtml(m, mItems(m)) })),
   ];
   const statusOf=s=>s.blocked ? 'blocked' : (s.passed===s.total ? 'live' : 'progress');
 
@@ -9556,7 +9558,7 @@ async function renderLaunch(){
       view.querySelectorAll('.launch-open').forEach(b=>b.setAttribute('aria-expanded','false'));
       card.querySelector('.launch-open').setAttribute('aria-expanded',String(!open));
       if(!open){
-        detail.innerHTML=launchMarketIsLive(m, marketItems) ? `<div style="margin-top:10px;padding-top:4px;border-top:1px solid var(--line);">${launchNotesHtml('market', m.id, m.notes)}</div>` : launchMarketDetailHtml(m, marketItems);
+        detail.innerHTML=launchMarketIsLive(m, mItems(m)) ? `<div style="margin-top:10px;padding-top:4px;border-top:1px solid var(--line);">${launchNotesHtml('market', m.id, m.notes)}</div>` : launchMarketDetailHtml(m, mItems(m));
         detail.style.display='block';
         detail.querySelectorAll('[data-launch-key]').forEach(cb=>{
           cb.addEventListener('click', ev=>ev.stopPropagation());
@@ -9566,11 +9568,11 @@ async function renderLaunch(){
             try{
               await api('launch_market_checklist_set',{method:'POST',body:{market_id,key,value}});
               m.checklist[key]=value;
-              if(launchMarketIsLive(m, marketItems)){ view.querySelectorAll('.launch-open').forEach(x=>x.setAttribute('aria-expanded','false')); _launchFresh=_launchLastData; renderLaunch(); return; }
+              if(launchMarketIsLive(m, mItems(m))){ view.querySelectorAll('.launch-open').forEach(x=>x.setAttribute('aria-expanded','false')); _launchFresh=_launchLastData; renderLaunch(); return; }
               if(value) cb.closest('label').remove();
-              card.querySelector('.launch-open').textContent=`Missing (${launchMarketScoreOf(m, marketItems).total-launchMarketScoreOf(m, marketItems).passed})`;
-              card.querySelector('.launch-next').textContent=launchMarketNextAction(m, marketItems);
-              const s=launchMarketScoreOf(m, marketItems);
+              card.querySelector('.launch-open').textContent=`Missing (${launchMarketScoreOf(m, mItems(m)).total-launchMarketScoreOf(m, mItems(m)).passed})`;
+              card.querySelector('.launch-next').textContent=launchMarketNextAction(m, mItems(m));
+              const s=launchMarketScoreOf(m, mItems(m));
               card.querySelector('.launch-ring').innerHTML=launchRingHtml(s.passed, s.total, s.blocked);
               sync();
             }
